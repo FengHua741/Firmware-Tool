@@ -1,0 +1,22 @@
+{
+  "id": "fly-pro-x10",
+  "type": "mainboard",
+  "name": "FLY-Pro X10",
+  "processor": "STM32H723",
+  "bootloader_offset": "128KiB bootloader",
+  "communication": [
+    "USB",
+    "USB桥接CAN"
+  ],
+  "default_comm": "USB",
+  "flash_methods": [
+    "DFU",
+    "KAT",
+    "TF"
+  ],
+  "default_flash": "KAT",
+  "clock": "25 MHz crystal",
+  "startup_pin": null,
+  "mcu": "STMicroelectronics STM32",
+  "flash_start": "0x8020000"
+}
