@@ -292,6 +292,36 @@ def get_all_ids():
         except:
             pass
         
+        # RP2040 BOOT设备检测
+        result['rp_boot'] = []
+        try:
+            # 方法1: 通过lsblk检测RP2040 BOOT块设备
+            lsblk_output = subprocess.run(
+                'lsblk -o NAME,MODEL 2>/dev/null | grep -i "RP2"',
+                shell=True, capture_output=True, text=True
+            )
+            if lsblk_output.stdout.strip():
+                for line in lsblk_output.stdout.strip().split('\n'):
+                    if line.strip():
+                        result['rp_boot'].append({
+                            'raw': 'rp2040_boot',
+                            'formatted': f'RP2040 BOOT设备 ({line.strip()})'
+                        })
+            
+            # 方法2: 通过lsusb检测Raspberry Pi RP2 Boot设备 (2e8a:0003)
+            if not result['rp_boot']:
+                lsusb_output = subprocess.run(
+                    'lsusb | grep -i "2e8a:" 2>/dev/null || echo ""',
+                    shell=True, capture_output=True, text=True
+                )
+                if lsusb_output.stdout.strip() and '2e8a:' in lsusb_output.stdout:
+                    result['rp_boot'].append({
+                        'raw': 'rp2040_boot',
+                        'formatted': 'RP2040 BOOT设备 (USB 2e8a)'
+                    })
+        except:
+            pass
+        
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -663,12 +693,21 @@ def flash_firmware():
         dfu_address = data.get('dfu_address', '0x08000000')
         firmware_path = data.get('firmware_path', '')
         
-        # 确定固件路径
+        # 确定固件路径（根据烧录模式选择合适的文件）
         if not firmware_path:
-            firmware_path = os.path.join(klipper_path, 'out', 'klipper.bin')
+            firmware_uf2 = os.path.join(klipper_path, 'out', 'klipper.uf2')
+            firmware_bin = os.path.join(klipper_path, 'out', 'klipper.bin')
+            
+            # UF2模式优先使用.uf2文件
+            if flash_mode == 'UF2' and os.path.exists(firmware_uf2):
+                firmware_path = firmware_uf2
+            elif os.path.exists(firmware_uf2):
+                firmware_path = firmware_uf2
+            else:
+                firmware_path = firmware_bin
         
         if not os.path.exists(firmware_path):
-            return jsonify({'error': '固件文件不存在'}), 400
+            return jsonify({'error': f'固件文件不存在: {firmware_path}'}), 400
         
         # TF卡模式 - 返回下载链接
         if flash_mode == 'TF':
@@ -730,7 +769,19 @@ def flash_firmware():
             returncode = result.returncode
             
         elif flash_mode == 'UF2':
-            cmd = f'sudo ~/klipper/lib/rp2040_flash/rp2040_flash {firmware_path}'
+            # UF2烧录（RP2040/RP2350）- 使用rp2040_flash工具
+            rp2040_flash_tool = os.path.join(klipper_path, 'lib/rp2040_flash/rp2040_flash')
+            
+            if not os.path.exists(rp2040_flash_tool):
+                return jsonify({'error': 'rp2040_flash工具不存在，请检查Klipper安装'}), 500
+            
+            # 先卸载RP2040 BOOT设备（避免设备占用）
+            import time
+            subprocess.run('sudo umount /dev/sda1 2>/dev/null || true', shell=True, capture_output=True, timeout=10)
+            subprocess.run('sudo umount /dev/sda 2>/dev/null || true', shell=True, capture_output=True, timeout=10)
+            time.sleep(0.5)
+            
+            cmd = f'sudo {rp2040_flash_tool} {firmware_path}'
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
             output = result.stdout + result.stderr
             returncode = result.returncode
@@ -758,19 +809,37 @@ def flash_bl_firmware():
         flash_mode = data.get('flash_mode', 'DFU')
         
         if not bl_firmware_path or not os.path.exists(bl_firmware_path):
-            return jsonify({'error': 'BL固件文件不存在'}), 400
+            return jsonify({'error': f'BL固件文件不存在: {bl_firmware_path}'}), 400
         
         # BL固件默认从0x08000000开始（无偏移）
         dfu_address = '0x08000000'
         
         if flash_mode == 'DFU':
             cmd = f'sudo dfu-util -a 0 -d 0483:df11 --dfuse-address {dfu_address} -D {bl_firmware_path}'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            
+        elif flash_mode == 'UF2':
+            # UF2烧录（RP2040/RP2350）- 使用rp2040_flash工具
+            klipper_path = os.path.expanduser(config.get('klipper_path', '~/klipper'))
+            rp2040_flash_tool = os.path.join(klipper_path, 'lib/rp2040_flash/rp2040_flash')
+            
+            if not os.path.exists(rp2040_flash_tool):
+                return jsonify({'error': 'rp2040_flash工具不存在，请检查Klipper安装'}), 500
+            
+            # 先卸载RP2040 BOOT设备
+            import time
+            subprocess.run('sudo umount /dev/sda1 2>/dev/null || true', shell=True, capture_output=True, timeout=10)
+            subprocess.run('sudo umount /dev/sda 2>/dev/null || true', shell=True, capture_output=True, timeout=10)
+            time.sleep(0.5)
+            
+            cmd = f'sudo {rp2040_flash_tool} {bl_firmware_path}'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            
         elif flash_mode == 'KAT':
             cmd = f'python3 ~/katapult/scripts/flashtool.py -d {device}'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
         else:
             return jsonify({'error': f'不支持的BL烧录方式: {flash_mode}'}), 400
-        
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
         
         if result.returncode == 0:
             return jsonify({'success': True, 'message': 'BL固件烧录成功', 'output': result.stdout})

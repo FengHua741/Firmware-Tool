@@ -59,32 +59,18 @@ def normalize_config(config):
         if cn_key in config:
             normalized[en_key] = config[cn_key]
     
-    # 处理通讯方式映射回Klipper格式
-    if 'communication' in normalized:
-        comm_map = {
-            'USB': 'USB (on PA11/PA12)',
-            'USB转CAN': 'USB to CAN bus bridge (USB on PA11/PA12)',
-            'CANBUS': 'CAN bus (on PB8/PB9)',
-            '串口': 'Serial (on USART1 PA10/PA9)'
-        }
-        normalized['communication'] = [comm_map.get(c, c) for c in normalized['communication']]
-    
-    # 处理烧录方法映射
-    if 'flash_methods' in normalized:
-        method_map = {
-            'TF卡': 'TF'
-        }
-        normalized['flash_methods'] = [method_map.get(m, m) for m in normalized['flash_methods']]
-    
-    # 处理处理器名称，并生成mcu字段
+    # 先处理处理器名称，并生成mcu字段
+    is_rp2040 = False
     if 'processor' in normalized:
         processor = normalized['processor']
         if processor == 'Raspberry Pi RP2040':
             normalized['processor'] = 'RP2040'
             normalized['mcu'] = 'Raspberry Pi RP2040/RP235x'
+            is_rp2040 = True
         elif processor == 'Raspberry Pi RP2350':
             normalized['processor'] = 'RP2350'
             normalized['mcu'] = 'Raspberry Pi RP2040/RP235x'
+            is_rp2040 = True
         elif processor.startswith('STM32'):
             normalized['mcu'] = 'STMicroelectronics STM32'
         elif processor.startswith('GD32'):
@@ -99,14 +85,33 @@ def normalize_config(config):
             normalized['mcu'] = 'Nations N32'
         elif processor.startswith('MM32'):
             normalized['mcu'] = 'MindMotion MM32'
-        elif processor.startswith('SAMD'):
-            normalized['mcu'] = 'Microchip SAMD21/SAMC21/SAME5x'
-        elif processor.startswith('LPC'):
-            normalized['mcu'] = 'NXP LPC176x'
-        elif processor.startswith('RP2040'):
-            normalized['mcu'] = 'Raspberry Pi RP2040/RP235x'
-        elif processor.startswith('RP2350'):
-            normalized['mcu'] = 'Raspberry Pi RP2040/RP235x'
+    
+    # 根据处理器类型处理通讯方式映射回Klipper格式
+    if 'communication' in normalized:
+        if is_rp2040:
+            # RP2040/RP2350 使用不带引脚的格式
+            comm_map = {
+                'USB': 'USBSERIAL',
+                'CANBUS': 'CAN bus',
+                'USB转CAN': 'USB to CAN bus bridge',
+                '串口': 'UART'
+            }
+        else:
+            # STM32等使用带引脚的格式
+            comm_map = {
+                'USB': 'USB (on PA11/PA12)',
+                'USB转CAN': 'USB to CAN bus bridge (USB on PA11/PA12)',
+                'CANBUS': 'CAN bus (on PB8/PB9)',
+                '串口': 'Serial (on USART1 PA10/PA9)'
+            }
+        normalized['communication'] = [comm_map.get(c, c) for c in normalized['communication']]
+    
+    # 处理烧录方法映射
+    if 'flash_methods' in normalized:
+        method_map = {
+            'TF卡': 'TF'
+        }
+        normalized['flash_methods'] = [method_map.get(m, m) for m in normalized['flash_methods']]
     
     return normalized
 
@@ -177,16 +182,20 @@ def get_board_list(manufacturer=None, board_type=None):
 
 
 def get_bl_firmwares(manufacturer):
-    """获取指定厂家的BL固件列表"""
+    """获取指定厂家的BL固件列表（递归扫描所有子目录）"""
     bl_dir = os.path.join(CONFIGS_DIR, manufacturer, 'BL')
     firmwares = []
     
     if os.path.exists(bl_dir):
-        for filename in os.listdir(bl_dir):
-            if filename.endswith('.bin') or filename.endswith('.uf2'):
-                firmwares.append({
-                    'name': filename,
-                    'path': os.path.join(bl_dir, filename)
-                })
+        # 使用os.walk递归扫描所有子目录
+        for root, dirs, files in os.walk(bl_dir):
+            for filename in files:
+                if filename.lower().endswith('.bin') or filename.lower().endswith('.uf2'):
+                    firmwares.append({
+                        'name': filename,
+                        'path': os.path.join(root, filename)
+                    })
     
+    # 按文件名排序
+    firmwares.sort(key=lambda x: x['name'].lower())
     return firmwares

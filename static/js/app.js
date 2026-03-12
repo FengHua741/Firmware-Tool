@@ -308,22 +308,15 @@ function onBoardModelChange() {
 
 async function loadBoardConfig(manufacturer, boardType, boardId) {
     try {
-        console.log('loadBoardConfig called:', manufacturer, boardType, boardId);
         const response = await fetch('/api/firmware/boards');
         const data = await response.json();
-        console.log('API response:', data);
         
         if (data.boards && data.boards[manufacturer] && data.boards[manufacturer][boardType]) {
             const config = data.boards[manufacturer][boardType][boardId];
-            console.log('Found config:', config);
             if (config) {
                 selectedBoard = config;
                 applyBoardConfig(config);
-            } else {
-                console.error('Config not found for boardId:', boardId);
             }
-        } else {
-            console.error('Invalid path:', data.boards?.[manufacturer]?.[boardType]);
         }
     } catch (error) {
         console.error('加载主板配置失败:', error);
@@ -331,52 +324,33 @@ async function loadBoardConfig(manufacturer, boardType, boardId) {
 }
 
 function applyBoardConfig(config) {
-    console.log('applyBoardConfig called with:', config);
     // 应用配置到表单
     if (config.mcu) {
-        console.log('Setting mcuArch to:', config.mcu);
         document.getElementById('mcuArch').value = config.mcu;
         onMcuArchChange();
-    } else {
-        console.warn('config.mcu is missing');
     }
     
     if (config.processor) {
-        console.log('Setting processorModel to:', config.processor);
         document.getElementById('processorModel').value = config.processor;
-        // 触发处理器改变事件，加载该处理器的Klipper规则
         onProcessorChange();
-    } else {
-        console.warn('config.processor is missing');
     }
     
     if (config.bootloader_offset) {
-        console.log('Setting bootloaderOffset to:', config.bootloader_offset);
         document.getElementById('bootloaderOffset').value = config.bootloader_offset;
-    } else {
-        console.warn('config.bootloader_offset is missing');
+        onBootloaderOffsetChange();
     }
     
     // 更新通信方式下拉框为产品支持的所有选项
     if (config.communication && Array.isArray(config.communication)) {
-        console.log('Setting communication options:', config.communication);
         updateCommunicationOptionsFromProduct(config.communication, config.default_comm);
-    } else {
-        console.warn('config.communication is missing or not array:', config.communication);
     }
     
     if (config.startup_pin) {
-        console.log('Setting startupPin to:', config.startup_pin);
         document.getElementById('startupPin').value = config.startup_pin;
     }
     
     // 保存 can_gpio 配置到全局变量，供 onCommunicationChange 使用
-    if (config.can_gpio) {
-        console.log('Board has can_gpio config:', config.can_gpio);
-        window.boardCanGpio = config.can_gpio;
-    } else {
-        window.boardCanGpio = null;
-    }
+    window.boardCanGpio = config.can_gpio || null;
 }
 
 // 根据产品配置更新通信方式选项
@@ -489,6 +463,29 @@ function updateBootloaderOptions(processor) {
             `<option value="${bl.name}">${bl.name}</option>`
         ).join('');
     }
+    
+    // 触发bootloader偏移改变事件，更新烧录方式
+    onBootloaderOffsetChange();
+}
+
+// Bootloader偏移改变时自动切换烧录方式
+function onBootloaderOffsetChange() {
+    const processor = document.getElementById('processorModel').value;
+    const bootloaderOffset = document.getElementById('bootloaderOffset').value;
+    const flashModeSelect = document.getElementById('flashMode');
+    
+    // RP2040/RP2350 根据 bootloader 偏移自动选择烧录方式
+    if (processor === 'RP2040' || processor === 'RP2350') {
+        if (bootloaderOffset === 'No bootloader' || bootloaderOffset.includes('No ')) {
+            // 无bootloader -> UF2烧录
+            flashModeSelect.value = 'UF2';
+        } else if (bootloaderOffset.includes('16KiB') || bootloaderOffset.includes('16K')) {
+            // 16KiB bootloader -> Katapult (USB)
+            flashModeSelect.value = 'KAT';
+        }
+        // 触发烧录模式改变事件
+        onFlashModeChange();
+    }
 }
 
 // 更新通信接口选项
@@ -549,7 +546,6 @@ function onCommunicationChange() {
         if (window.boardCanGpio) {
             document.getElementById('rp2040CanRxGpio').value = window.boardCanGpio.rx;
             document.getElementById('rp2040CanTxGpio').value = window.boardCanGpio.tx;
-            console.log('Auto-filled CAN GPIO from board config:', window.boardCanGpio);
         } else {
             // 使用默认值
             document.getElementById('rp2040CanRxGpio').value = 4;
@@ -681,13 +677,20 @@ async function detectDevicesForFlash() {
         const flashMode = document.getElementById('flashMode').value;
         
         let devices = [];
+        let modeText = '设备';
         
         if (flashMode === 'CAN') {
             devices = data.can || [];
+            modeText = 'CAN设备';
         } else if (flashMode === 'DFU') {
             devices = data.dfu || [];
+            modeText = 'DFU设备';
+        } else if (flashMode === 'UF2') {
+            devices = data.rp_boot || [];
+            modeText = 'RP2040 BOOT设备';
         } else {
             devices = data.usb || [];
+            modeText = 'USB设备';
         }
         
         if (devices.length > 0) {
@@ -701,7 +704,7 @@ async function detectDevicesForFlash() {
                 `;
             }).join('');
         } else {
-            container.innerHTML = '<p class="empty">未找到设备</p>';
+            container.innerHTML = `<p class="empty">未找到${modeText}</p>`;
         }
     } catch (error) {
         console.error('检测设备失败:', error);
@@ -830,17 +833,35 @@ async function detectBLDevices() {
         const data = await response.json();
         
         const container = document.getElementById('blDeviceList');
-        const devices = data.usb || [];
+        const flashMode = document.getElementById('blFlashMode').value;
+        
+        let devices = [];
+        let modeText = '设备';
+        
+        // 根据烧录模式检测对应类型的设备
+        if (flashMode === 'UF2') {
+            devices = data.rp_boot || [];
+            modeText = 'RP2040 BOOT设备';
+        } else if (flashMode === 'DFU') {
+            devices = data.dfu || [];
+            modeText = 'DFU设备';
+        } else {
+            devices = data.usb || [];
+            modeText = 'USB设备';
+        }
         
         if (devices.length > 0) {
-            container.innerHTML = devices.map(device => `
-                <div class="device-item">
-                    <span>${device.formatted}</span>
-                    <button class="btn btn-sm btn-primary" onclick="selectBLDevice('${device.raw}')">选择</button>
-                </div>
-            `).join('');
+            container.innerHTML = devices.map(device => {
+                const displayText = device.formatted || device.raw || device;
+                return `
+                    <div class="device-item">
+                        <span>${displayText}</span>
+                        <button class="btn btn-sm btn-primary" onclick="selectBLDevice('${device.raw || device}')">选择</button>
+                    </div>
+                `;
+            }).join('');
         } else {
-            container.innerHTML = '<p class="empty">未找到设备</p>';
+            container.innerHTML = `<p class="empty">未找到${modeText}</p>`;
         }
     } catch (error) {
         console.error('检测设备失败:', error);
@@ -866,7 +887,8 @@ async function flashBLFirmware() {
         return;
     }
     
-    if (!device) {
+    // UF2模式不需要设备ID
+    if (!device && flashMode !== 'UF2') {
         showError('请选择或输入设备ID');
         return;
     }
@@ -877,12 +899,12 @@ async function flashBLFirmware() {
     statusDiv.innerHTML = '<span class="status-info">正在烧录BL固件...</span>';
     
     try {
-        const response = await fetch('/api/firmware/flash-bl', {
+        const response = await fetch('/api/firmware/bl/flash', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                bl_firmware: firmwarePath,
-                mode: flashMode,
+                bl_firmware_path: firmwarePath,
+                flash_mode: flashMode,
                 device: device
             })
         });
@@ -891,6 +913,7 @@ async function flashBLFirmware() {
         
         if (data.success) {
             statusDiv.innerHTML = '<span class="status-success">✅ BL固件烧录成功</span>';
+            showSuccess('BL固件烧录成功！');
         } else {
             statusDiv.innerHTML = `<span class="status-error">❌ 烧录失败: ${data.error}</span>`;
         }
