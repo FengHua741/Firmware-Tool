@@ -684,13 +684,21 @@ async function detectDevicesForFlash() {
             modeText = 'CAN设备';
         } else if (flashMode === 'DFU') {
             devices = data.dfu || [];
-            modeText = 'DFU设备';
+            modeText = 'DFU 设备';
         } else if (flashMode === 'UF2') {
             devices = data.rp_boot || [];
-            modeText = 'RP2040 BOOT设备';
+            modeText = 'RP2040 BOOT 设备';
+        } else if (flashMode === 'KAT') {
+            // KAT 模式优先显示 Katapult USB 设备
+            devices = data.kat_usb || [];
+            modeText = 'Katapult USB 设备';
+            if (devices.length === 0) {
+                container.innerHTML = '<p class="empty">未找到 Katapult USB 设备。请先双击 RST 按钮或按住 BOOT 再按 RST 进入烧录模式。</p>';
+                return;
+            }
         } else {
             devices = data.usb || [];
-            modeText = 'USB设备';
+            modeText = 'USB 设备';
         }
         
         if (devices.length > 0) {
@@ -746,7 +754,7 @@ async function flashFirmware() {
     const dfuAddress = document.getElementById('dfuAddress').value;
     
     if (!device && flashMode !== 'TF') {
-        showError('请选择或输入设备ID');
+        showError('请选择或输入设备 ID');
         return;
     }
     

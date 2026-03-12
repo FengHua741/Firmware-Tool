@@ -226,7 +226,7 @@ def get_all_ids():
     try:
         result = {'usb': [], 'can': [], 'camera': []}
         
-        # USB设备 - 格式: serial: <id>
+        # USB 设备 - 格式：serial: <id>
         try:
             output = subprocess.run(
                 'ls /dev/serial/by-id/* 2>/dev/null || echo ""',
@@ -239,6 +239,11 @@ def get_all_ids():
                         # 格式化为 serial: <id>
                         formatted = f"serial: {device_id}"
                         result['usb'].append({'raw': device_id, 'formatted': formatted})
+                        # 如果是 Katapult 设备，同时添加到 kat_usb 列表
+                        if 'katapult' in device_id.lower():
+                            if 'kat_usb' not in result:
+                                result['kat_usb'] = []
+                            result['kat_usb'].append({'raw': device_id, 'formatted': f'Katapult (USB): {device_id}'})
         except:
             pass
         
@@ -778,8 +783,8 @@ def flash_firmware():
             flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
             can_uuid = device.replace('can0:', '') if 'can0:' in device else device
                     
-            # 使用 flash_can.py -u <uuid> 烧录
-            cmd = f'python3 {flash_can_script} -u {can_uuid}'
+            # 使用 flash_can.py -i can0 -u <uuid> -f <firmware>
+            cmd = f'python3 {flash_can_script} -i can0 -u {can_uuid} -f {firmware_path}'
                     
             import logging
             logging.info(f'CAN 烧录命令：{cmd}')
