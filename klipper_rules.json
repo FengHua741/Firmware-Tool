@@ -6,6 +6,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA9/PA10)",
+      "USB to CAN bus bridge (USB on PA9/PA10)",
       "Serial (on USART1 PA10/PA9)"
     ],
     "flash_methods": ["DFU"]
@@ -19,6 +20,7 @@
     "communication_interfaces": [
       "USB (on PA9/PA10)",
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)"
     ],
     "flash_methods": ["DFU"]
@@ -32,6 +34,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
       "Serial (on USART2 PA3/PA2)"
     ],
@@ -90,6 +93,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
       "Serial (on USART2 PA3/PA2)",
       "CAN bus (on PB8/PB9)"
@@ -165,6 +169,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
       "CAN bus (on PB8/PB9)"
     ],
@@ -178,6 +183,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
       "CAN bus (on PB8/PB9)"
     ],
@@ -191,6 +197,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
       "CAN bus (on PB8/PB9)"
     ],
@@ -204,6 +211,7 @@
     ],
     "communication_interfaces": [
       "Serial (on USART1 PA10/PA9)",
+      "USB to CAN bus bridge",
       "CAN bus (on PB8/PB9)"
     ],
     "flash_methods": ["DFU"]
@@ -216,6 +224,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
       "CAN bus (on PB8/PB9)"
     ],
@@ -229,6 +238,7 @@
     ],
     "communication_interfaces": [
       "Serial (on USART1 PA10/PA9)",
+      "USB to CAN bus bridge",
       "CAN bus (on PB8/PB9)"
     ],
     "flash_methods": ["DFU"]
@@ -255,6 +265,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
       "Serial (on USART2 PA3/PA2)",
       "CAN bus (on PB8/PB9)"
@@ -269,6 +280,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
       "Serial (on USART2 PA3/PA2)",
       "Serial (on USART3 PC11/PC10)",
