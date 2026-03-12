@@ -689,11 +689,14 @@ async function detectDevicesForFlash() {
             devices = data.rp_boot || [];
             modeText = 'RP2040 BOOT 设备';
         } else if (flashMode === 'KAT') {
-            // KAT 模式显示所有 USB 串口设备（包括 Klipper 和 Katapult）
-            devices = data.usb || [];
-            modeText = 'USB 串口设备';
+            // KAT 模式显示所有可用设备（USB 串口 + CAN ID）
+            const usbDevices = data.usb || [];
+            const canDevices = data.can || [];
+            devices = [...usbDevices, ...canDevices];
+            modeText = 'USB/CAN设备';
+            
             if (devices.length === 0) {
-                container.innerHTML = '<p class="empty">未找到 USB 串口设备。请连接设备并确保已安装驱动。</p>';
+                container.innerHTML = '<p class="empty">未找到 USB 串口或 CAN设备。请连接设备并确保已安装驱动。</p>';
                 return;
             }
         } else {
