@@ -7,7 +7,8 @@
     "communication_interfaces": [
       "USB (on PA9/PA10)",
       "USB to CAN bus bridge (USB on PA9/PA10)",
-      "Serial (on USART1 PA10/PA9)"
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -21,7 +22,9 @@
       "USB (on PA9/PA10)",
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
-      "Serial (on USART1 PA10/PA9)"
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
+      "CAN bus (on PA9/PA10)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -36,7 +39,9 @@
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
-      "Serial (on USART2 PA3/PA2)"
+      "Serial (on USART1 PB7/PB6)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PA15/PA14)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -52,8 +57,12 @@
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
       "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PA15/PA14)",
       "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA9/PA10)",
+      "CAN bus (on PA11/PB9)",
       "CAN bus (on PB8/PB9)"
     ],
     "flash_methods": ["DFU"]
@@ -75,12 +84,18 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
       "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PA15/PA14)",
       "Serial (on USART3 PB11/PB10)",
+      "Serial (on USART3 PD9/PD8)",
       "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA9/PA10)",
+      "CAN bus (on PA11/PB9)",
       "CAN bus (on PB8/PB9)",
-      "USB to CAN bus bridge (USB on PA11/PA12)"
+      "CAN bus (on PD0/PD1)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -95,8 +110,15 @@
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
       "Serial (on USART2 PA3/PA2)",
-      "CAN bus (on PB8/PB9)"
+      "Serial (on USART2 PD6/PD5)",
+      "Serial (on USART3 PB11/PB10)",
+      "Serial (on USART3 PD9/PD8)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)",
+      "CAN bus (on PD0/PD1)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -111,11 +133,16 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
       "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PD6/PD5)",
       "Serial (on USART6 PA12/PA11)",
+      "Serial (on USART6 PC7/PC6)",
       "CAN bus (on PB8/PB9)",
-      "USB to CAN bus bridge (USB on PA11/PA12)"
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -131,12 +158,20 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
       "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PD6/PD5)",
       "Serial (on USART3 PB11/PB10)",
+      "Serial (on USART3 PD9/PD8)",
       "CAN bus (on PB8/PB9)",
       "CAN bus (on PI9/PH13)",
-      "USB to CAN bus bridge (USB on PA11/PA12)"
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)",
+      "CAN bus (on PB5/PB6)",
+      "CAN bus (on PB12/PB13)",
+      "CAN bus (on PD0/PD1)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -152,12 +187,20 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
       "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PD6/PD5)",
       "Serial (on USART3 PB11/PB10)",
+      "Serial (on USART3 PD9/PD8)",
       "CAN bus (on PB8/PB9)",
       "CAN bus (on PI9/PH13)",
-      "USB to CAN bus bridge (USB on PA11/PA12)"
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)",
+      "CAN bus (on PB5/PB6)",
+      "CAN bus (on PB12/PB13)",
+      "CAN bus (on PD0/PD1)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -171,7 +214,18 @@
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
-      "CAN bus (on PB8/PB9)"
+      "Serial (on USART1 PB7/PB6)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PD6/PD5)",
+      "Serial (on USART3 PB11/PB10)",
+      "Serial (on USART3 PD9/PD8)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PI9/PH13)",
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)",
+      "CAN bus (on PB5/PB6)",
+      "CAN bus (on PB12/PB13)",
+      "CAN bus (on PD0/PD1)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -185,7 +239,17 @@
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
-      "CAN bus (on PB8/PB9)"
+      "Serial (on USART1 PB7/PB6)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PD6/PD5)",
+      "Serial (on USART3 PB11/PB10)",
+      "Serial (on USART3 PD9/PD8)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)",
+      "CAN bus (on PB5/PB6)",
+      "CAN bus (on PB12/PB13)",
+      "CAN bus (on PD0/PD1)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -199,7 +263,17 @@
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
-      "CAN bus (on PB8/PB9)"
+      "Serial (on USART1 PB7/PB6)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PD6/PD5)",
+      "Serial (on USART3 PB11/PB10)",
+      "Serial (on USART3 PD9/PD8)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)",
+      "CAN bus (on PB5/PB6)",
+      "CAN bus (on PB12/PB13)",
+      "CAN bus (on PD0/PD1)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -211,8 +285,10 @@
     ],
     "communication_interfaces": [
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
       "USB to CAN bus bridge",
-      "CAN bus (on PB8/PB9)"
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PA11/PB9)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -226,7 +302,11 @@
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
-      "CAN bus (on PB8/PB9)"
+      "Serial (on USART1 PB7/PB6)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PA15/PA14)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PA11/PB9)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -238,8 +318,11 @@
     ],
     "communication_interfaces": [
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
+      "Serial (on USART5 PD2/PD3)",
       "USB to CAN bus bridge",
-      "CAN bus (on PB8/PB9)"
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PA11/PB9)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -251,9 +334,13 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PA15/PA14)",
       "CAN bus (on PB8/PB9)",
-      "USB to CAN bus bridge (USB on PA11/PA12)"
+      "CAN bus (on PA11/PB9)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -267,8 +354,14 @@
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
       "Serial (on USART2 PA3/PA2)",
-      "CAN bus (on PB8/PB9)"
+      "Serial (on USART2 PA15/PA14)",
+      "Serial (on USART2 PB4/PB3)",
+      "Serial (on USART2 PD6/PD5)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -282,9 +375,15 @@
       "USB (on PA11/PA12)",
       "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
       "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PA15/PA14)",
+      "Serial (on USART2 PB4/PB3)",
+      "Serial (on USART2 PD6/PD5)",
       "Serial (on USART3 PC11/PC10)",
-      "CAN bus (on PB8/PB9)"
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -297,11 +396,20 @@
     "communication_interfaces": [
       "USB (on PA11/PA12)",
       "USB (on PB14/PB15)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PD6/PD5)",
+      "Serial (on USART3 PB11/PB10)",
+      "Serial (on USART3 PD9/PD8)",
       "Serial (on UART4 PA0/PA1)",
       "CAN bus (on PB8/PB9)",
       "CAN bus (on PB5/PB6)",
-      "USB to CAN bus bridge (USB on PA11/PA12)"
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)",
+      "CAN bus (on PB12/PB13)",
+      "CAN bus (on PD0/PD1)"
     ],
     "flash_methods": ["DFU"]
   },
@@ -314,11 +422,24 @@
     "communication_interfaces": [
       "USB (on PA11/PA12)",
       "USB (on PB14/PB15)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART1 PB7/PB6)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART2 PD6/PD5)",
+      "Serial (on USART3 PB11/PB10)",
+      "Serial (on USART3 PD9/PD8)",
       "Serial (on UART4 PA0/PA1)",
       "CAN bus (on PB8/PB9)",
       "CAN bus (on PB5/PB6)",
-      "USB to CAN bus bridge (USB on PA11/PA12)"
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PA11/PB9)",
+      "CAN bus (on PB12/PB13)",
+      "CAN bus (on PD0/PD1)",
+      "CAN bus (on PB0/PB1)",
+      "CAN bus (on PD12/PD13)",
+      "CAN bus (on PC2/PC3)",
+      "CAN bus (on PH13/PH14)"
     ],
     "flash_methods": ["DFU"]
   },
