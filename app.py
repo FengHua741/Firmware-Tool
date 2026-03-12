@@ -747,33 +747,7 @@ def flash_firmware():
             returncode = flash_result.returncode
             
         elif flash_mode == 'KAT':
-            # Katapult 烧录
-            # 使用 fenghua 用户的家目录（服务以 root 运行，但 katapult 在用户目录）
-            import pwd
-            try:
-                # 尝试获取 fenghua 用户的家目录
-                home_dir = pwd.getpwnam('fenghua').pw_dir
-            except KeyError:
-                # 如果不存在，使用当前用户的家目录
-                home_dir = os.path.expanduser('~')
-            
-            katapult_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
-            
-            if 'katapult' in device.lower():
-                # 必须指定固件路径，否则 flashtool.py 会使用错误的家目录
-                cmd = f'python3 {katapult_script} -d {device} -f {firmware_path}'
-            else:
-                cmd = f'cd {klipper_path} && make flash FLASH_DEVICE={device}'
-                    
-            import logging
-            logging.info(f'KAT 烧录命令：{cmd}')
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
-            output = result.stdout + result.stderr
-            returncode = result.returncode
-            logging.info(f'KAT 烧录结果：returncode={returncode}, output={output[:200]}')
-            
-        elif flash_mode == 'CAN':
-            # CAN 烧录 - 通过 CAN 总线进入 Katapult 模式后烧录
+            # Katapult 烧录 - 自动判断 USB 或 CAN 方式
             import pwd
             try:
                 home_dir = pwd.getpwnam('fenghua').pw_dir
@@ -782,40 +756,48 @@ def flash_firmware():
                     
             python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
-            can_uuid = device.replace('can0:', '') if 'can0:' in device else device
                     
             import logging
                     
-            # 第一步：发送命令让设备进入烧录模式
-            reset_cmd = f'{python_bin} {flashtool_script} -i can0 -r -u {can_uuid}'
-            logging.info(f'CAN 重置命令：{reset_cmd}')
-            reset_result = subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
-                    
-            if reset_result.returncode != 0:
-                logging.error(f'重置失败：{reset_result.stderr}')
-                return jsonify({'error': f'无法进入烧录模式：{reset_result.stderr}', 'output': reset_result.stdout + reset_result.stderr}), 500
-                    
-            # 第二步：等待设备重新枚举（USB 串口）
-            import time
-            logging.info('等待设备重新枚举...')
-            time.sleep(3)
-                    
-            # 第三步：查找新的 USB 串口设备
-            find_device_cmd = "ls /dev/serial/by-id/*katapult* 2>/dev/null | head -1"
-            device_result = subprocess.run(find_device_cmd, shell=True, capture_output=True, text=True, timeout=10)
-                    
-            if not device_result.stdout.strip():
-                # 如果找不到 katapult 设备，尝试直接使用 flash_can.py 烧录
-                logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
-                flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
-                cmd = f'{python_bin} {flash_can_script} -i can0 -u {can_uuid} -f {firmware_path}'
-                logging.info(f'CAN 烧录命令：{cmd}')
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+            # 判断设备类型
+            if 'can0:' in device or len(device) == 16:  # CAN UUID
+                # CAN 方式：先重置进入烧录模式
+                can_uuid = device.replace('can0:', '') if 'can0:' in device else device
+                reset_cmd = f'{python_bin} {flashtool_script} -i can0 -r -u {can_uuid}'
+                logging.info(f'CAN 重置命令：{reset_cmd}')
+                reset_result = subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                        
+                if reset_result.returncode != 0:
+                    logging.error(f'重置失败：{reset_result.stderr}')
+                    return jsonify({'error': f'无法进入烧录模式：{reset_result.stderr}', 'output': reset_result.stdout + reset_result.stderr}), 500
+                        
+                # 等待设备重新枚举
+                import time
+                logging.info('等待设备重新枚举...')
+                time.sleep(3)
+                        
+                # 查找新的 USB 串口设备
+                find_device_cmd = "ls /dev/serial/by-id/*katapult* 2>/dev/null | head -1"
+                device_result = subprocess.run(find_device_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                        
+                if device_result.stdout.strip():
+                    # 使用 USB 方式烧录
+                    new_device = device_result.stdout.strip()
+                    logging.info(f'找到设备：{new_device}')
+                    cmd = f'{python_bin} {flashtool_script} -d {new_device} -f {firmware_path}'
+                    logging.info(f'USB 烧录命令：{cmd}')
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+                else:
+                    # 降级：直接 CAN 烧录
+                    logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
+                    flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
+                    cmd = f'{python_bin} {flash_can_script} -i can0 -u {can_uuid} -f {firmware_path}'
+                    logging.info(f'CAN 烧录命令：{cmd}')
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
             else:
-                # 第四步：使用 flashtool.py 通过 USB 烧录
-                new_device = device_result.stdout.strip()
-                logging.info(f'找到设备：{new_device}')
-                cmd = f'{python_bin} {flashtool_script} -d {new_device} -f {firmware_path}'
+                # USB 方式：直接烧录
+                logging.info(f'USB 烧录命令：device={device}')
+                cmd = f'{python_bin} {flashtool_script} -d {device} -f {firmware_path}'
                 logging.info(f'USB 烧录命令：{cmd}')
                 result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
                     
