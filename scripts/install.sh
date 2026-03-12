@@ -87,11 +87,22 @@ EOF
 
 chown $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR/config.json"
 
+# 安装依赖
+echo "安装依赖..."
+apt update
+apt install -y python3-flask python3-flask-cors
+
 # 设置目录权限
 echo "设置目录权限..."
 chown -R $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR"
 chmod +x "$PROJECT_DIR/app.py"
 chmod +x "$SCRIPT_DIR"/*.sh 2>/dev/null || true
+
+# 删除logs文件夹（如果存在）
+if [ -d "$PROJECT_DIR/logs" ]; then
+    echo "清理logs文件夹..."
+    rm -rf "$PROJECT_DIR/logs"
+fi
 
 # 创建systemd服务文件
 echo "创建systemd服务..."
