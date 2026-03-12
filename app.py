@@ -768,32 +768,25 @@ def flash_firmware():
             logging.info(f'KAT 烧录结果：returncode={returncode}, output={output[:200]}')
             
         elif flash_mode == 'CAN':
-            # CAN烧录 (Katapult via CAN) - 使用文档推荐的flashtool.py
+            # CAN 烧录 - 使用Klipper 的 flash_can.py
+            import pwd
+            try:
+                home_dir = pwd.getpwnam('fenghua').pw_dir
+            except KeyError:
+                home_dir = os.path.expanduser('~')
+                    
+            flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
             can_uuid = device.replace('can0:', '') if 'can0:' in device else device
-            
-            # 第一步：重置进入烧录模式
-            reset_cmd = f'python3 ~/katapult/scripts/flashtool.py -i can0 -r -u {can_uuid}'
-            reset_result = subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
-            
-            # 等待设备重新枚举
-            import time
-            time.sleep(3)
-            
-            # 第二步：查找新的设备ID
-            find_device_cmd = "ls /dev/serial/by-id/* 2>/dev/null | grep -i katapult || echo ''"
-            device_result = subprocess.run(find_device_cmd, shell=True, capture_output=True, text=True, timeout=10)
-            
-            if device_result.stdout.strip():
-                new_device = device_result.stdout.strip().split('\n')[0]
-                # 第三步：使用make flash烧录
-                cmd = f'cd {klipper_path} && make flash FLASH_DEVICE={new_device}'
-            else:
-                # 如果找不到设备，尝试直接使用UUID烧录
-                cmd = f'python3 ~/katapult/scripts/flashtool.py -i can0 -u {can_uuid} -f {firmware_path}'
-            
+                    
+            # 使用 flash_can.py -u <uuid> 烧录
+            cmd = f'python3 {flash_can_script} -u {can_uuid}'
+                    
+            import logging
+            logging.info(f'CAN 烧录命令：{cmd}')
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
             output = result.stdout + result.stderr
             returncode = result.returncode
+            logging.info(f'CAN 烧录结果：returncode={returncode}, output={output[:200]}')
             
         elif flash_mode == 'UF2':
             # UF2烧录（RP2040/RP2350）- 使用rp2040_flash工具
