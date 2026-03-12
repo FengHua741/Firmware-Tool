@@ -259,6 +259,7 @@ def get_all_ids():
                 '~/klippy-env/bin/python ~/klipper/lib/canboot/flash_can.py -q 2>&1',
                 shell=True, capture_output=True, text=True
             )
+            seen_uuids = set()
             if output.stdout:
                 for line in output.stdout.strip().split('\n'):
                     # 过滤错误信息和警告
@@ -268,6 +269,10 @@ def get_all_ids():
                     match = re.search(r'\b([a-f0-9]{8,})\b', line)
                     if match:
                         uuid = match.group(1)
+                        # 去重
+                        if uuid in seen_uuids:
+                            continue
+                        seen_uuids.add(uuid)
                         # 格式化为 canbus_uuid: <uuid>
                         formatted = f"canbus_uuid: {uuid}"
                         result['can'].append({'raw': uuid, 'formatted': formatted})
