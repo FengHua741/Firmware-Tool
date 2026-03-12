@@ -853,7 +853,21 @@ async function loadCanConfig() {
         const saveBtn = document.getElementById('saveCanBtn');
         
         if (data.exists) {
-            const bitrate = data.bitrate ? (data.bitrate / 1000000) + 'M' : '未知';
+            // 后端返回的bitrate已经是M单位（1, 500, 250）或者是完整数值（1000000, 500000, 250000）
+            let bitrateStr;
+            if (data.bitrate >= 1000000) {
+                bitrateStr = (data.bitrate / 1000000) + 'M';
+            } else if (data.bitrate >= 1000) {
+                bitrateStr = (data.bitrate / 1000) + 'K';
+            } else if (data.bitrate === 1) {
+                bitrateStr = '1M';
+            } else if (data.bitrate === 500) {
+                bitrateStr = '500K';
+            } else if (data.bitrate === 250) {
+                bitrateStr = '250K';
+            } else {
+                bitrateStr = data.bitrate + 'bps';
+            }
             const type = data.type === 'systemd' ? 'systemd-networkd' : '传统interfaces';
             
             statusDiv.innerHTML = `
@@ -864,7 +878,7 @@ async function loadCanConfig() {
                     </div>
                     <div class="info-item">
                         <span class="info-label">当前速率</span>
-                        <span class="info-value">${bitrate}</span>
+                        <span class="info-value">${bitrateStr}</span>
                     </div>
                     <div class="info-item">
                         <span class="info-label">配置类型</span>
