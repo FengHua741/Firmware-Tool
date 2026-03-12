@@ -773,25 +773,55 @@ def flash_firmware():
             logging.info(f'KAT 烧录结果：returncode={returncode}, output={output[:200]}')
             
         elif flash_mode == 'CAN':
-            # CAN 烧录 - 使用Klipper 的 flash_can.py
+            # CAN 烧录 - 通过 CAN 总线进入 Katapult 模式后烧录
             import pwd
             try:
                 home_dir = pwd.getpwnam('fenghua').pw_dir
             except KeyError:
                 home_dir = os.path.expanduser('~')
                     
-            flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
+            python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
+            flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
             can_uuid = device.replace('can0:', '') if 'can0:' in device else device
                     
-            # 使用 flash_can.py -i can0 -u <uuid> -f <firmware>
-            cmd = f'python3 {flash_can_script} -i can0 -u {can_uuid} -f {firmware_path}'
-                    
             import logging
-            logging.info(f'CAN 烧录命令：{cmd}')
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                    
+            # 第一步：发送命令让设备进入烧录模式
+            reset_cmd = f'{python_bin} {flashtool_script} -i can0 -r -u {can_uuid}'
+            logging.info(f'CAN 重置命令：{reset_cmd}')
+            reset_result = subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                    
+            if reset_result.returncode != 0:
+                logging.error(f'重置失败：{reset_result.stderr}')
+                return jsonify({'error': f'无法进入烧录模式：{reset_result.stderr}', 'output': reset_result.stdout + reset_result.stderr}), 500
+                    
+            # 第二步：等待设备重新枚举（USB 串口）
+            import time
+            logging.info('等待设备重新枚举...')
+            time.sleep(3)
+                    
+            # 第三步：查找新的 USB 串口设备
+            find_device_cmd = "ls /dev/serial/by-id/*katapult* 2>/dev/null | head -1"
+            device_result = subprocess.run(find_device_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                    
+            if not device_result.stdout.strip():
+                # 如果找不到 katapult 设备，尝试直接使用 flash_can.py 烧录
+                logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
+                flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
+                cmd = f'{python_bin} {flash_can_script} -i can0 -u {can_uuid} -f {firmware_path}'
+                logging.info(f'CAN 烧录命令：{cmd}')
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+            else:
+                # 第四步：使用 flashtool.py 通过 USB 烧录
+                new_device = device_result.stdout.strip()
+                logging.info(f'找到设备：{new_device}')
+                cmd = f'{python_bin} {flashtool_script} -d {new_device} -f {firmware_path}'
+                logging.info(f'USB 烧录命令：{cmd}')
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+                    
             output = result.stdout + result.stderr
             returncode = result.returncode
-            logging.info(f'CAN 烧录结果：returncode={returncode}, output={output[:200]}')
+            logging.info(f'烧录结果：returncode={returncode}, output={output[:200]}')
             
         elif flash_mode == 'UF2':
             # UF2烧录（RP2040/RP2350）- 使用rp2040_flash工具
