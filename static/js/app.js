@@ -1455,4 +1455,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // 初始化 BL 厂家选择
     initBLManufacturers();
+    
+    // 启动 CAN配置自动刷新（每 5 秒）
+    loadCanConfig(); // 立即加载一次
+    setInterval(loadCanConfig, 5000); // 之后每 5 秒刷新一次
 });
