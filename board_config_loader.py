@@ -181,20 +181,39 @@ def get_board_list(manufacturer=None, board_type=None):
         return result
 
 
-def get_bl_firmwares(manufacturer):
-    """获取指定厂家的BL固件列表（递归扫描所有子目录）"""
+def get_bl_firmwares(manufacturer, board_type=None):
+    """获取指定厂家的BL固件列表（支持按主板类型过滤）
+    
+    目录结构支持:
+    1. BL/mainboard/xxx.bin  - 主板固件
+    2. BL/toolboard/xxx.bin  - 工具板固件  
+    3. BL/xxx.bin           - 旧结构兼容，显示在所有类型
+    """
     bl_dir = os.path.join(CONFIGS_DIR, manufacturer, 'BL')
     firmwares = []
     
-    if os.path.exists(bl_dir):
-        # 使用os.walk递归扫描所有子目录
-        for root, dirs, files in os.walk(bl_dir):
-            for filename in files:
-                if filename.lower().endswith('.bin') or filename.lower().endswith('.uf2'):
+    if not os.path.exists(bl_dir):
+        return firmwares
+    
+    # 如果指定了主板类型，优先从type子目录加载
+    if board_type:
+        type_dir = os.path.join(bl_dir, board_type)
+        if os.path.exists(type_dir):
+            for filename in os.listdir(type_dir):
+                if filename.lower().endswith(('.bin', '.uf2')):
                     firmwares.append({
                         'name': filename,
-                        'path': os.path.join(root, filename)
+                        'path': os.path.join(type_dir, filename)
                     })
+    
+    # 同时加载BL根目录的固件（兼容旧结构）
+    for filename in os.listdir(bl_dir):
+        filepath = os.path.join(bl_dir, filename)
+        if os.path.isfile(filepath) and filename.lower().endswith(('.bin', '.uf2')):
+            firmwares.append({
+                'name': filename,
+                'path': filepath
+            })
     
     # 按文件名排序
     firmwares.sort(key=lambda x: x['name'].lower())

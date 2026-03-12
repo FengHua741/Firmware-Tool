@@ -348,10 +348,11 @@ def get_manufacturers_list():
 
 
 @app.route('/api/firmware/bl-firmwares/<manufacturer>')
-def get_bl_firmwares_list(manufacturer):
-    """获取指定厂家的BL固件列表"""
+@app.route('/api/firmware/bl-firmwares/<manufacturer>/<board_type>')
+def get_bl_firmwares_list(manufacturer, board_type=None):
+    """获取指定厂家的BL固件列表，可按主板类型过滤"""
     try:
-        firmwares = get_bl_firmwares(manufacturer)
+        firmwares = get_bl_firmwares(manufacturer, board_type)
         return jsonify({'firmwares': firmwares})
     except Exception as e:
         return jsonify({'error': str(e)}), 500

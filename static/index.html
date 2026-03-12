@@ -394,22 +394,30 @@
                     <div class="card-body">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">BL固件</label>
-                                <select class="form-control form-select" id="blFirmwareSelect">
-                                    <option value="">请选择BL固件...</option>
+                                <label class="form-label">厂家</label>
+                                <select class="form-control form-select" id="blManufacturerSelect" onchange="onBLManufacturerChange()">
+                                    <option value="">请选择厂家...</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">或自定义路径</label>
-                                <input type="text" class="form-control" id="blFirmwarePath" placeholder="/path/to/katapult.bin">
+                                <label class="form-label">主板类型</label>
+                                <select class="form-control form-select" id="blBoardTypeSelect" onchange="onBLBoardTypeChange()" disabled>
+                                    <option value="">请先选择厂家</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">BL固件</label>
+                                <select class="form-control form-select" id="blFirmwareSelect" disabled>
+                                    <option value="">请先选择主板类型</option>
+                                </select>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">烧录方式</label>
-                                <select class="form-control form-select" id="blFlashMode">
-                                    <option value="DFU">DFU</option>
-                                    <option value="KAT">Katapult</option>
+                                <select class="form-control form-select" id="blFlashMode" onchange="onBLFlashModeChange()">
+                                    <option value="DFU">DFU (STM32)</option>
+                                    <option value="UF2">UF2 (RP2040)</option>
                                 </select>
                             </div>
                             <div class="form-group">

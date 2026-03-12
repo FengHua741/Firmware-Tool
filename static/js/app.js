@@ -806,25 +806,101 @@ async function downloadFirmware() {
 }
 
 // ==================== BL固件烧录 ====================
-async function loadBLFirmwares() {
-    const manufacturer = document.getElementById('manufacturerSelect').value;
-    if (!manufacturer) return;
-    
+
+// 初始化 BL 厂家选择
+async function initBLManufacturers() {
     try {
-        const response = await fetch(`/api/firmware/bl-firmwares/${manufacturer}`);
+        const response = await fetch('/api/firmware/boards');
         const data = await response.json();
         
-        const select = document.getElementById('blFirmwareSelect');
-        select.innerHTML = '<option value="">请选择BL固件...</option>';
+        const select = document.getElementById('blManufacturerSelect');
+        select.innerHTML = '<option value="">请选择厂家...</option>';
         
-        if (data.firmwares) {
-            data.firmwares.forEach(fw => {
-                select.innerHTML += `<option value="${fw.path}">${fw.name}</option>`;
+        if (data.manufacturers) {
+            data.manufacturers.forEach(mfr => {
+                select.innerHTML += `<option value="${mfr}">${mfr}</option>`;
             });
         }
     } catch (error) {
+        console.error('加载BL厂家失败:', error);
+    }
+}
+
+// BL 厂家改变
+async function onBLManufacturerChange() {
+    const manufacturer = document.getElementById('blManufacturerSelect').value;
+    const typeSelect = document.getElementById('blBoardTypeSelect');
+    const firmwareSelect = document.getElementById('blFirmwareSelect');
+    
+    // 重置下级选择
+    firmwareSelect.innerHTML = '<option value="">请先选择主板类型</option>';
+    firmwareSelect.disabled = true;
+    
+    if (!manufacturer) {
+        typeSelect.innerHTML = '<option value="">请先选择厂家</option>';
+        typeSelect.disabled = true;
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/firmware/boards');
+        const data = await response.json();
+        
+        typeSelect.innerHTML = '<option value="">请选择主板类型...</option>';
+        
+        if (data.boards && data.boards[manufacturer]) {
+            const types = Object.keys(data.boards[manufacturer]);
+            types.forEach(type => {
+                const label = type === 'mainboard' ? '主板' : 
+                              type === 'toolboard' ? '工具板' : 
+                              type === 'extensionboard' ? '扩展板' : type;
+                typeSelect.innerHTML += `<option value="${type}">${label}</option>`;
+            });
+        }
+        
+        typeSelect.disabled = false;
+    } catch (error) {
+        console.error('加载主板类型失败:', error);
+    }
+}
+
+// BL 主板类型改变
+async function onBLBoardTypeChange() {
+    const manufacturer = document.getElementById('blManufacturerSelect').value;
+    const boardType = document.getElementById('blBoardTypeSelect').value;
+    const firmwareSelect = document.getElementById('blFirmwareSelect');
+    
+    if (!boardType) {
+        firmwareSelect.innerHTML = '<option value="">请先选择主板类型</option>';
+        firmwareSelect.disabled = true;
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/firmware/bl-firmwares/${manufacturer}/${boardType}`);
+        const data = await response.json();
+        
+        firmwareSelect.innerHTML = '<option value="">请选择BL固件...</option>';
+        
+        if (data.firmwares && data.firmwares.length > 0) {
+            data.firmwares.forEach(fw => {
+                firmwareSelect.innerHTML += `<option value="${fw.path}">${fw.name}</option>`;
+            });
+        } else {
+            firmwareSelect.innerHTML = '<option value="">无可用BL固件</option>';
+        }
+        
+        firmwareSelect.disabled = false;
+    } catch (error) {
         console.error('加载BL固件失败:', error);
     }
+}
+
+// BL 烧录方式改变
+function onBLFlashModeChange() {
+    // 清空设备列表
+    document.getElementById('blDeviceList').innerHTML = '<p class="empty">点击"检测设备"按钮扫描可用设备</p>';
+    document.getElementById('blTargetDevice').value = '';
 }
 
 async function detectBLDevices() {
@@ -842,12 +918,9 @@ async function detectBLDevices() {
         if (flashMode === 'UF2') {
             devices = data.rp_boot || [];
             modeText = 'RP2040 BOOT设备';
-        } else if (flashMode === 'DFU') {
+        } else {
             devices = data.dfu || [];
             modeText = 'DFU设备';
-        } else {
-            devices = data.usb || [];
-            modeText = 'USB设备';
         }
         
         if (devices.length > 0) {
@@ -875,15 +948,12 @@ function selectBLDevice(deviceId) {
 async function flashBLFirmware() {
     if (blFlashInProgress) return;
     
-    const blSelect = document.getElementById('blFirmwareSelect').value;
-    const blPath = document.getElementById('blFirmwarePath').value;
+    const firmwarePath = document.getElementById('blFirmwareSelect').value;
     const flashMode = document.getElementById('blFlashMode').value;
     const device = document.getElementById('blTargetDevice').value;
     
-    const firmwarePath = blSelect || blPath;
-    
     if (!firmwarePath) {
-        showError('请选择或输入BL固件路径');
+        showError('请选择BL固件');
         return;
     }
     
@@ -1375,6 +1445,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // 加载初始页面
     switchPage('resources');
     
-    // 绑定BL固件选择
-    document.getElementById('manufacturerSelect')?.addEventListener('change', loadBLFirmwares);
+    // 初始化 BL 厂家选择
+    initBLManufacturers();
 });
