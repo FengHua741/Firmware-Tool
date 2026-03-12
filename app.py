@@ -976,44 +976,46 @@ def switch_web_ui():
             if os.path.exists(config_file):
                 try:
                     with open(config_file, 'r') as f:
-                        lines = f.readlines()
+                        content = f.read()
                     
-                    new_lines = []
-                    for line in lines:
-                        stripped = line.strip()
-                        # 处理 listen 80 的指令
-                        if 'listen 80' in stripped and not stripped.startswith('#'):
-                            # 如果是目标服务，保持启用 80 端口
-                            if target in config_file:
-                                new_lines.append(line)
-                            else:
-                                # 否则注释掉 80 端口，改为 81 端口
-                                new_lines.append(f'    # {stripped}\n')
-                        elif '# listen 80' in stripped:
-                            # 取消注释 80 端口（如果是目标服务）
-                            if target in config_file:
-                                new_lines.append(stripped.replace('# listen 80', 'listen 80').lstrip() + '\n')
-                            else:
-                                new_lines.append(line)
-                        # 处理 81 端口的备用配置
-                        elif 'listen 81' in stripped:
-                            if target in config_file:
-                                # 目标服务不需要 81 端口，注释掉
-                                new_lines.append(f'    # {stripped}\n')
-                            else:
-                                # 非目标服务启用 81 端口
-                                if stripped.startswith('#'):
-                                    new_lines.append(stripped.lstrip('#').lstrip() + '\n')
-                                else:
-                                    new_lines.append(line)
-                        else:
-                            new_lines.append(line)
+                    # 使用正则表达式精确匹配和替换
+                    import re
+                    
+                    if target in config_file:
+                        # 目标服务：启用 80 端口，禁用 81 端口
+                        content = re.sub(
+                            r'^.*listen\s+80\s*;',
+                            '    listen 80;',
+                            content,
+                            flags=re.MULTILINE
+                        )
+                        content = re.sub(
+                            r'^.*listen\s+81\s*;',
+                            '    # listen 81;',
+                            content,
+                            flags=re.MULTILINE
+                        )
+                        messages.append(f'已启用 {target.capitalize()} (端口 80)')
+                    else:
+                        # 非目标服务：禁用 80 端口，启用 81 端口
+                        content = re.sub(
+                            r'^.*listen\s+80\s*;',
+                            '    # listen 80;',
+                            content,
+                            flags=re.MULTILINE
+                        )
+                        content = re.sub(
+                            r'^.*listen\s+81\s*;',
+                            '    listen 81;',
+                            content,
+                            flags=re.MULTILINE
+                        )
+                        other_name = 'Mainsail' if target == 'fluidd' else 'Fluidd'
+                        messages.append(f'已配置 {other_name} (端口 81)')
                     
                     # 写回文件
                     with open(config_file, 'w') as f:
-                        f.writelines(new_lines)
-                    
-                    messages.append(f'已配置 {config_file}')
+                        f.write(content)
                 except Exception as e:
                     messages.append(f'配置文件处理失败：{str(e)}')
         
