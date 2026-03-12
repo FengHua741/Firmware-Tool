@@ -834,6 +834,21 @@ TxQueueLength={txqueuelen}
             # 重启systemd-networkd
             subprocess.run('sudo systemctl restart systemd-networkd', shell=True, capture_output=True)
             
+            # 立即应用配置到can0接口（如果存在）
+            try:
+                can0_check = subprocess.run('ip link show can0 2>&1', 
+                                           shell=True, capture_output=True, text=True)
+                if 'does not exist' not in can0_check.stdout:
+                    # can0存在，立即应用新配置
+                    subprocess.run('sudo ip link set can0 down', shell=True, capture_output=True)
+                    subprocess.run(f'sudo ip link set can0 type can bitrate {bitrate}', 
+                                 shell=True, capture_output=True)
+                    subprocess.run(f'sudo ip link set can0 txqueuelen {txqueuelen}', 
+                                 shell=True, capture_output=True)
+                    subprocess.run('sudo ip link set can0 up', shell=True, capture_output=True)
+            except:
+                pass
+            
         else:
             # 创建传统interfaces配置
             subprocess.run(f'sudo mkdir -p {CAN_INTERFACES_DIR}', shell=True, capture_output=True)
@@ -851,7 +866,7 @@ iface can0 can static
         
         return jsonify({
             'success': True,
-            'message': f'CAN配置已更新，速率: {bitrate}，重启后生效'
+            'message': f'CAN配置已更新，速率: {bitrate_str}，已立即生效'
         })
         
     except Exception as e:
