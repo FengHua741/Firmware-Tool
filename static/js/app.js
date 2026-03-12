@@ -368,11 +368,20 @@ function onMcuArchChange() {
 function onCommunicationChange() {
     const communication = document.getElementById('communication').value;
     const canRow = document.getElementById('canBusInterfaceRow');
+    const bitrateRow = document.getElementById('canBitrateRow');
     
+    // USB to CAN桥接显示CAN总线接口选择
     if (communication.includes('CAN bus bridge')) {
         canRow.style.display = 'flex';
     } else {
         canRow.style.display = 'none';
+    }
+    
+    // CAN或USB to CAN显示CAN速率选择
+    if (communication.includes('CAN')) {
+        bitrateRow.style.display = 'block';
+    } else {
+        bitrateRow.style.display = 'none';
     }
 }
 
@@ -776,7 +785,7 @@ async function saveTimezone() {
     const timezone = document.getElementById('timezoneSelect').value;
     
     try {
-        const response = await fetch('/api/system/timezone', {
+        const response = await fetch('/api/settings/timezone', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ timezone })
@@ -796,8 +805,10 @@ async function saveTimezone() {
 
 async function manageService(service, action) {
     try {
-        const response = await fetch(`/api/system/service/${service}/${action}`, {
-            method: 'POST'
+        const response = await fetch(`/api/settings/service/${action}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service })
         });
         
         const data = await response.json();
@@ -829,6 +840,86 @@ function showError(message) {
     div.textContent = message;
     document.body.appendChild(div);
     setTimeout(() => div.remove(), 3000);
+}
+
+// ==================== CAN配置 ====================
+async function loadCanConfig() {
+    try {
+        const response = await fetch('/api/system/can-config');
+        const data = await response.json();
+        
+        const statusDiv = document.getElementById('canConfigStatus');
+        const formDiv = document.getElementById('canConfigForm');
+        const saveBtn = document.getElementById('saveCanBtn');
+        
+        if (data.exists) {
+            const bitrate = data.bitrate ? (data.bitrate / 1000000) + 'M' : '未知';
+            const type = data.type === 'systemd' ? 'systemd-networkd' : '传统interfaces';
+            
+            statusDiv.innerHTML = `
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">配置状态</span>
+                        <span class="info-value">已配置</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">当前速率</span>
+                        <span class="info-value">${bitrate}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">配置类型</span>
+                        <span class="info-value">${type}</span>
+                    </div>
+                </div>
+            `;
+            
+            // 设置当前速率
+            if (data.bitrate) {
+                document.getElementById('canBitrate').value = data.bitrate.toString();
+            }
+            
+            formDiv.style.display = 'block';
+            saveBtn.style.display = 'inline-flex';
+        } else {
+            statusDiv.innerHTML = '<p class="empty">未检测到CAN配置</p>';
+            formDiv.style.display = 'block';
+            saveBtn.style.display = 'inline-flex';
+        }
+    } catch (error) {
+        console.error('加载CAN配置失败:', error);
+        document.getElementById('canConfigStatus').innerHTML = 
+            '<p class="empty">加载失败: ' + error.message + '</p>';
+    }
+}
+
+async function saveCanConfig() {
+    const bitrate = parseInt(document.getElementById('canBitrate').value);
+    const messageDiv = document.getElementById('canConfigMessage');
+    
+    messageDiv.innerHTML = '<span class="status-info">正在保存...</span>';
+    
+    try {
+        const response = await fetch('/api/system/can-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                bitrate: bitrate,
+                txqueuelen: 1024,
+                type: 'systemd'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            messageDiv.innerHTML = '<span class="status-success">✅ ' + data.message + '</span>';
+            loadCanConfig(); // 刷新状态
+        } else {
+            messageDiv.innerHTML = `<span class="status-error">❌ ${data.error || data.message}</span>`;
+        }
+    } catch (error) {
+        messageDiv.innerHTML = `<span class="status-error">❌ 保存失败: ${error.message}</span>`;
+    }
 }
 
 // ==================== 初始化 ====================

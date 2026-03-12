@@ -102,6 +102,37 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- CAN配置 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>📡 CAN配置</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="canConfigStatus">
+                            <p class="empty">加载中...</p>
+                        </div>
+                        <div class="form-row" id="canConfigForm" style="display: none;">
+                            <div class="form-group">
+                                <label class="form-label">CAN速率</label>
+                                <select class="form-control form-select" id="canBitrate">
+                                    <option value="1000000">1M (默认)</option>
+                                    <option value="500000">500K</option>
+                                    <option value="250000">250K</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <button class="btn btn-primary" onclick="loadCanConfig()">
+                                <span>🔄</span> 刷新状态
+                            </button>
+                            <button class="btn btn-success" onclick="saveCanConfig()" id="saveCanBtn" style="display: none;">
+                                <span>💾</span> 保存配置
+                            </button>
+                        </div>
+                        <div id="canConfigMessage" class="status-area"></div>
+                    </div>
+                </div>
             </div>
 
             <!-- 固件编译与烧录页面 -->
@@ -183,6 +214,14 @@
                                     <option value="USB to CAN bus bridge (USB on PA11/PA12)">USB to CAN bus bridge</option>
                                     <option value="CAN bus (on PB8/PB9)">CAN bus (on PB8/PB9)</option>
                                     <option value="Serial (on USART1 PA10/PA9)">Serial (RS232)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="canBitrateRow" style="display: none;">
+                                <label class="form-label">CAN速率</label>
+                                <select class="form-control form-select" id="compileCanBitrate">
+                                    <option value="1000000">1M (默认)</option>
+                                    <option value="500000">500K</option>
+                                    <option value="250000">250K</option>
                                 </select>
                             </div>
                         </div>
