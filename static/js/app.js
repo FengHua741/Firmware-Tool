@@ -552,7 +552,7 @@ async function flashFirmware() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                mode: flashMode,
+                flash_mode: flashMode,
                 device: device,
                 dfu_address: dfuAddress
             })

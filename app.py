@@ -242,6 +242,17 @@ def get_all_ids():
         except:
             pass
         
+        # DFU设备检测
+        try:
+            output = subprocess.run(
+                'sudo dfu-util -l 2>/dev/null | grep "Found DFU" || echo ""',
+                shell=True, capture_output=True, text=True
+            )
+            if output.stdout and 'Found DFU' in output.stdout:
+                result['dfu'] = [{'raw': 'dfu', 'formatted': 'DFU模式设备 (0483:df11)'}]
+        except:
+            pass
+        
         # CAN设备 - 格式: canbus_uuid: <uuid>
         try:
             output = subprocess.run(
@@ -782,13 +793,20 @@ def set_can_config():
             if not config_file:
                 config_file = os.path.join(CAN_NETWORK_DIR, '99-can.network')
             
-            # 写入配置
+            # 写入配置 - 转换bitrate为M格式
+            if bitrate >= 1000000:
+                bitrate_str = f"{bitrate // 1000000}M"
+            elif bitrate >= 1000:
+                bitrate_str = f"{bitrate // 1000}K"
+            else:
+                bitrate_str = str(bitrate)
+            
             with open(config_file, 'w') as f:
                 f.write(f"""[Match]
 Name=can*
 
 [CAN]
-BitRate={bitrate}
+BitRate={bitrate_str}
 RestartSec=100ms
 """)
             
