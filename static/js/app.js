@@ -1230,15 +1230,25 @@ async function loadCanConfig() {
             
             // USB CAN设备数量
             const usbCanCount = data.usb_can_count || 0;
-            const usbCanText = usbCanCount > 0 
-                ? `<span style="color: green;">检测到 ${usbCanCount} 个USB CAN设备</span>`
-                : '<span style="color: orange;">未检测到USB CAN设备</span>';
+                        
+            // 判断 CAN0 接口是否存在
+            const can0Exists = data.status && !data.status.includes('not found');
+                        
+            // CAN检查状态：优先显示 CAN 接口状态
+            let canCheckText;
+            if (can0Exists) {
+                canCheckText = '<span style="color: green;">✅ CAN 接口正常</span>';
+            } else if (usbCanCount > 0) {
+                canCheckText = `<span style="color: orange;">⚠️ 检测到 ${usbCanCount} 个USB CAN设备，但 CAN 接口未启用</span>`;
+            } else {
+                canCheckText = '<span style="color: red;">❌ 未检测到 CAN设备</span>';
+            }
             
             statusDiv.innerHTML = `
                 <div class="info-grid">
                     <div class="info-item">
-                        <span class="info-label">CAN检查</span>
-                        <span class="info-value">${usbCanText}</span>
+                        <span class="info-label">CAN 检查</span>
+                        <span class="info-value">${canCheckText}</span>
                     </div>
                     <div class="info-item">
                         <span class="info-label">当前速率</span>
