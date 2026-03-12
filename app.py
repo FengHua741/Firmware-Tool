@@ -760,7 +760,7 @@ def flash_firmware():
             import logging
                     
             # 判断设备类型
-            if 'can0:' in device or len(device) == 16:  # CAN UUID
+            if 'can0:' in device or (len(device) == 12 and all(c in '0123456789abcdef' for c in device.lower())):  # CAN UUID
                 # CAN 方式：先重置进入烧录模式
                 can_uuid = device.replace('can0:', '') if 'can0:' in device else device
                 reset_cmd = f'{python_bin} {flashtool_script} -i can0 -r -u {can_uuid}'
