@@ -966,50 +966,52 @@ def switch_web_ui():
         
         messages = []
         
-        # 1. 停止当前运行的服务（通过 nginx 配置切换）
-        try:
-            # 检测哪个服务正在运行
-            fluidd_running = False
-            mainsail_running = False
-            
-            result = subprocess.run(
-                'systemctl is-active fluidd 2>/dev/null || echo "inactive"',
-                shell=True, capture_output=True, text=True
-            )
-            fluidd_running = result.stdout.strip() == 'active'
-            
-            result = subprocess.run(
-                'systemctl is-active mainsail 2>/dev/null || echo "inactive"',
-                shell=True, capture_output=True, text=True
-            )
-            mainsail_running = result.stdout.strip() == 'active'
-            
-            # 停止另一个服务
-            if target == 'fluidd' and mainsail_running:
-                subprocess.run('sudo systemctl stop mainsail', shell=True, capture_output=True)
-                messages.append('已停止 Mainsail')
-            elif target == 'mainsail' and fluidd_running:
-                subprocess.run('sudo systemctl stop fluidd', shell=True, capture_output=True)
-                messages.append('已停止 Fluidd')
-        except:
-            pass
+        # 1. 读取当前 nginx 配置
+        nginx_configs = [
+            '/etc/nginx/sites-enabled/fluidd',
+            '/etc/nginx/sites-enabled/mainsail',
+            '/etc/nginx/sites-available/fluidd',
+            '/etc/nginx/sites-available/mainsail'
+        ]
         
-        # 2. 启动目标服务
+        # 2. 找到并修改配置文件（注释掉一个，启用另一个）
+        for config_file in nginx_configs:
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, 'r') as f:
+                        lines = f.readlines()
+                    
+                    new_lines = []
+                    for line in lines:
+                        stripped = line.strip()
+                        # 如果是目标服务，取消注释 listen 指令
+                        if target in config_file:
+                            if stripped.startswith('#') and f'listen {target_port}' in stripped:
+                                # 取消注释（去掉开头的 # ）
+                                line = stripped.lstrip('#').lstrip() + '\n'
+                        else:
+                            # 注释掉另一个服务的 listen
+                            if not stripped.startswith('#') and f'listen {other_port}' in stripped:
+                                line = '# ' + stripped + '\n'
+                    
+                    # 写回文件
+                    with open(config_file, 'w') as f:
+                        f.writelines(new_lines)
+                    
+                    messages.append(f'已处理配置文件：{config_file}')
+                except Exception as e:
+                    messages.append(f'配置文件处理失败：{str(e)}')
+        
+        # 3. 重新加载 nginx 配置
         try:
-            if target == 'fluidd':
-                subprocess.run('sudo systemctl start fluidd', shell=True, capture_output=True)
-                messages.append('Fluidd 已启动（端口 80）')
+            result = subprocess.run('sudo nginx -t && sudo systemctl reload nginx', 
+                                  shell=True, capture_output=True, text=True)
+            if result.returncode == 0:
+                messages.append('Nginx 配置已重载')
             else:
-                subprocess.run('sudo systemctl start mainsail', shell=True, capture_output=True)
-                messages.append('Mainsail 已启动（端口 81）')
+                messages.append(f'Nginx 重载失败：{result.stderr}')
         except Exception as e:
-            return jsonify({'error': f'启动服务失败：{str(e)}', 'messages': messages}), 500
-        
-        # 3. 重新加载 nginx（如果使用了 nginx）
-        try:
-            subprocess.run('sudo nginx -s reload 2>/dev/null || true', shell=True, capture_output=True)
-        except:
-            pass
+            messages.append(f'Nginx 重载失败：{str(e)}')
         
         return jsonify({
             'success': True,
