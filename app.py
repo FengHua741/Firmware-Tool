@@ -1018,13 +1018,24 @@ def get_can_config():
         except:
             config['status'] = '无法获取CAN0状态'
         
-        # 检测USB CAN设备数量 (OpenMoko CAN适配器 1d50:xxxx)
+        # 检测 USB CAN设备数量 (OpenMoko CAN 适配器 1d50:xxxx)
         try:
             lsusb_result = subprocess.run(
                 'lsusb | grep "1d50:" || echo ""',
                 shell=True, capture_output=True, text=True
             )
-            usb_devices = [line for line in lsusb_result.stdout.strip().split('\n') if line.strip()]
+            # 过滤掉已知的非 CAN设备（如 stm32f072xb、stm32f446 等 Klipper 主板）
+            usb_devices = []
+            for line in lsusb_result.stdout.strip().split('\n'):
+                if not line.strip():
+                    continue
+                # 排除主板设备，只保留 CAN 适配器
+                # 常见主板ID: 614e(stm32f072), 6018(stm32f446), 等
+                # CAN 适配器通常是 606f 或其他
+                if 'stm32f072' in line.lower() or 'stm32f446' in line.lower():
+                    continue
+                usb_devices.append(line)
+                    
             config['usb_can_count'] = len(usb_devices)
             config['usb_can_devices'] = usb_devices
         except:
