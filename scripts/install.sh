@@ -105,8 +105,8 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=$CURRENT_USER
-Group=$CURRENT_USER
+User=root
+Group=root
 WorkingDirectory=$PROJECT_DIR
 ExecStart=/usr/bin/python3 $PROJECT_DIR/app.py
 Restart=on-failure

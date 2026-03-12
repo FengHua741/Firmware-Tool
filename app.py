@@ -801,41 +801,45 @@ def set_can_config():
             else:
                 bitrate_str = str(bitrate)
             
-            with open(config_file, 'w') as f:
-                f.write(f"""[Match]
+            # 使用sudo tee写入配置文件
+            config_content = f"""[Match]
 Name=can*
 
 [CAN]
 BitRate={bitrate_str}
 RestartSec=100ms
-""")
+"""
+            subprocess.run(f'echo "{config_content}" | sudo tee {config_file} > /dev/null', 
+                         shell=True, capture_output=True, check=True)
             
             # 创建link配置文件
-            link_file = os.path.join(CAN_NETWORK_DIR, '99-can.link')
-            with open(link_file, 'w') as f:
-                f.write(f"""[Match]
+            link_content = f"""[Match]
 OriginalName=can*
 
 [Link]
 TxQueueLength={txqueuelen}
-""")
+"""
+            link_file = os.path.join(CAN_NETWORK_DIR, '99-can.link')
+            subprocess.run(f'echo "{link_content}" | sudo tee {link_file} > /dev/null', 
+                         shell=True, capture_output=True, check=True)
             
             # 重启systemd-networkd
-            subprocess.run('systemctl restart systemd-networkd', shell=True, capture_output=True)
+            subprocess.run('sudo systemctl restart systemd-networkd', shell=True, capture_output=True)
             
         else:
             # 创建传统interfaces配置
-            os.makedirs(CAN_INTERFACES_DIR, exist_ok=True)
+            subprocess.run(f'sudo mkdir -p {CAN_INTERFACES_DIR}', shell=True, capture_output=True)
             config_file = os.path.join(CAN_INTERFACES_DIR, 'can0')
             
-            with open(config_file, 'w') as f:
-                f.write(f"""allow-hotplug can0
+            interfaces_content = f"""allow-hotplug can0
 iface can0 can static
     bitrate {bitrate}
     up ifconfig $IFACE txqueuelen {txqueuelen}
     pre-up ip link set can0 type can bitrate {bitrate}
     pre-up ip link set can0 txqueuelen {txqueuelen}
-""")
+"""
+            subprocess.run(f'echo "{interfaces_content}" | sudo tee {config_file} > /dev/null',
+                         shell=True, capture_output=True, check=True)
         
         return jsonify({
             'success': True,
