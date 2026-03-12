@@ -467,6 +467,16 @@ function onProcessorChange() {
     
     // 更新BL烧录方式
     updateBLFlashMethods(processor);
+    
+    // 清空启动引脚，避免不同MCU架构的引脚格式混淆
+    document.getElementById('startupPin').value = '';
+    
+    // 隐藏/显示CAN总线接口（RP2040使用GPIO配置，不需要此选项）
+    const isRP2040 = processor === 'RP2040' || processor === 'RP2350';
+    const canBusInterfaceRow = document.getElementById('canBusInterfaceRow');
+    if (isRP2040) {
+        canBusInterfaceRow.style.display = 'none';
+    }
 }
 
 // 更新Bootloader偏移选项
@@ -567,18 +577,41 @@ function onStartupPinInput(input) {
 async function compileFirmware() {
     if (compileInProgress) return;
     
+    const processor = document.getElementById('processorModel').value;
+    const isRP2040 = processor === 'RP2040' || processor === 'RP2350';
+    
     const config = {
-        mcu: document.getElementById('mcuArch').value,
-        processor: document.getElementById('processorModel').value,
+        mcu_arch: document.getElementById('mcuArch').value,
+        processor: processor,
         bootloader_offset: document.getElementById('bootloaderOffset').value,
-        communication: document.getElementById('communication').value,
-        can_bus_interface: document.getElementById('canBusInterface').value,
-        startup_pin: document.getElementById('startupPin').value
+        communication: document.getElementById('communication').value
     };
     
+    // STM32专用参数（CAN总线接口选择）
+    if (!isRP2040) {
+        config.can_bus_interface = document.getElementById('canBusInterface').value;
+    }
+    
+    // 启动引脚（需验证格式）
+    const startupPin = document.getElementById('startupPin').value.trim();
+    if (startupPin) {
+        // 验证引脚格式与处理器匹配
+        const hasSTM32Pin = /P[A-K]\d+/i.test(startupPin);  // PA0, PB9等
+        const hasRP2040Pin = /gpio\d+/i.test(startupPin);   // gpio4, gpio5等
+        
+        if (isRP2040 && hasSTM32Pin && !hasRP2040Pin) {
+            alert('RP2040/RP2350启动引脚格式应为gpio开头（如gpio5），当前包含STM32引脚格式');
+            return;
+        }
+        if (!isRP2040 && hasRP2040Pin && !hasSTM32Pin) {
+            alert('STM32启动引脚格式应为大写字母+数字（如PA2, PB9），当前包含RP2040引脚格式');
+            return;
+        }
+        config.startup_pin = startupPin;
+    }
+    
     // RP2040/RP2350 CAN GPIO配置
-    const processor = document.getElementById('processorModel').value;
-    if ((processor === 'RP2040' || processor === 'RP2350') && config.communication === 'CAN bus') {
+    if (isRP2040 && (config.communication === 'CAN bus' || config.communication.includes('CAN bus bridge'))) {
         config.rp2040_can_rx_gpio = document.getElementById('rp2040CanRxGpio').value || '4';
         config.rp2040_can_tx_gpio = document.getElementById('rp2040CanTxGpio').value || '5';
     }

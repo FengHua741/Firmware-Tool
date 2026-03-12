@@ -495,8 +495,20 @@ def compile_firmware():
                 config_lines.append('CONFIG_SERIAL=y')
                 config_lines.append('CONFIG_STM32_SERIAL_USART1=y')
         
-        # 启动引脚
+        # 启动引脚（验证格式）
         if startup_pin:
+            is_rp2040 = 'RP2040' in processor or 'RP2350' in processor
+            import re
+            has_stm32_pin = bool(re.search(r'P[A-K]\d+', startup_pin, re.IGNORECASE))
+            has_rp2040_pin = bool(re.search(r'gpio\d+', startup_pin, re.IGNORECASE))
+            
+            # RP2040不应包含STM32格式引脚
+            if is_rp2040 and has_stm32_pin and not has_rp2040_pin:
+                return jsonify({'error': 'RP2040/RP2350启动引脚格式错误，应使用gpio格式（如gpio5）'}), 400
+            # STM32不应包含RP2040格式引脚
+            if not is_rp2040 and has_rp2040_pin and not has_stm32_pin:
+                return jsonify({'error': 'STM32启动引脚格式错误，应使用大写格式（如PA2, PB9）'}), 400
+            
             config_lines.append(f'CONFIG_INITIAL_PINS="{startup_pin}"')
         
         # 写入配置
