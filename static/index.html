@@ -454,7 +454,7 @@
                     <div class="card-body">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Klipper路径</label>
+                                <label class="form-label">Klipper 路径</label>
                                 <input type="text" class="form-control" id="klipperPath" value="~/klipper">
                             </div>
                         </div>
@@ -462,6 +462,21 @@
                             <div class="form-group">
                                 <label class="form-label">服务端口号</label>
                                 <input type="number" class="form-control" id="serverPort" value="9999">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Web 界面切换</label>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <button class="btn btn-primary" id="fluiddBtn" onclick="switchWebUI('fluidd')" title="切换到 Fluidd (端口 80)">
+                                        🎨 Fluidd
+                                    </button>
+                                    <button class="btn btn-secondary" id="mainsailBtn" onclick="switchWebUI('mainsail')" title="切换到 Mainsail (端口 81)">
+                                        ⛵ Mainsail
+                                    </button>
+                                    <span id="currentWebUI" style="margin-left: 10px; color: #666;">当前：检测中...</span>
+                                </div>
+                                <p class="form-hint">点击按钮切换 Web 界面：Fluidd (80 端口) ↔ Mainsail (81 端口)</p>
                             </div>
                         </div>
                     </div>

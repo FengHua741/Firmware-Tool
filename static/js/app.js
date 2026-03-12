@@ -1017,8 +1017,70 @@ async function loadSettings() {
             document.getElementById('jsonRepoUrl').value = config.json_repo_url || '';
             document.getElementById('lastJsonUpdate').textContent = config.last_json_update || '从未';
         }
+        
+        // 加载 Web 界面状态
+        loadCurrentWebUI();
     } catch (error) {
         console.error('加载设置失败:', error);
+    }
+}
+
+// 加载当前 Web 界面状态
+async function loadCurrentWebUI() {
+    try {
+        const response = await fetch('/api/system/web-ui');
+        const data = await response.json();
+        
+        const currentUI = data.current_ui || 'unknown';
+        const statusEl = document.getElementById('currentWebUI');
+        const fluiddBtn = document.getElementById('fluiddBtn');
+        const mainsailBtn = document.getElementById('mainsailBtn');
+        
+        if (currentUI === 'fluidd') {
+            statusEl.textContent = '当前：Fluidd (端口 80)';
+            fluiddBtn.classList.add('btn-success');
+            fluiddBtn.classList.remove('btn-primary');
+            mainsailBtn.classList.add('btn-secondary');
+            mainsailBtn.classList.remove('btn-primary');
+        } else if (currentUI === 'mainsail') {
+            statusEl.textContent = '当前：Mainsail (端口 81)';
+            mainsailBtn.classList.add('btn-success');
+            mainsailBtn.classList.remove('btn-secondary');
+            fluiddBtn.classList.add('btn-primary');
+            fluiddBtn.classList.remove('btn-success');
+        } else {
+            statusEl.textContent = '当前：未检测到';
+            fluiddBtn.classList.add('btn-primary');
+            fluiddBtn.classList.remove('btn-success');
+            mainsailBtn.classList.add('btn-secondary');
+            mainsailBtn.classList.remove('btn-success');
+        }
+    } catch (error) {
+        console.error('加载 Web 界面状态失败:', error);
+        document.getElementById('currentWebUI').textContent = '当前：检测失败';
+    }
+}
+
+// 切换 Web 界面
+async function switchWebUI(target) {
+    try {
+        const response = await fetch('/api/system/web-ui/switch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: target })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showSuccess(data.message);
+            // 延迟刷新状态
+            setTimeout(loadCurrentWebUI, 2000);
+        } else {
+            showError('切换失败：' + data.error);
+        }
+    } catch (error) {
+        showError('切换失败：' + error.message);
     }
 }
 
