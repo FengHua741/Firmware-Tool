@@ -369,6 +369,14 @@ function applyBoardConfig(config) {
         console.log('Setting startupPin to:', config.startup_pin);
         document.getElementById('startupPin').value = config.startup_pin;
     }
+    
+    // 保存 can_gpio 配置到全局变量，供 onCommunicationChange 使用
+    if (config.can_gpio) {
+        console.log('Board has can_gpio config:', config.can_gpio);
+        window.boardCanGpio = config.can_gpio;
+    } else {
+        window.boardCanGpio = null;
+    }
 }
 
 // 根据产品配置更新通信方式选项
@@ -525,6 +533,17 @@ function onCommunicationChange() {
     if ((processor === 'RP2040' || processor === 'RP2350') && communication === 'CAN bus') {
         rp2040CanGpioRow.style.display = 'block';
         rp2040CanGpioTxRow.style.display = 'block';
+        
+        // 如果主板配置了特殊的 can_gpio，自动填充
+        if (window.boardCanGpio) {
+            document.getElementById('rp2040CanRxGpio').value = window.boardCanGpio.rx;
+            document.getElementById('rp2040CanTxGpio').value = window.boardCanGpio.tx;
+            console.log('Auto-filled CAN GPIO from board config:', window.boardCanGpio);
+        } else {
+            // 使用默认值
+            document.getElementById('rp2040CanRxGpio').value = 4;
+            document.getElementById('rp2040CanTxGpio').value = 5;
+        }
     } else {
         rp2040CanGpioRow.style.display = 'none';
         rp2040CanGpioTxRow.style.display = 'none';

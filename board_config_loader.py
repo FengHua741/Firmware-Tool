@@ -48,6 +48,7 @@ def normalize_config(config):
         '烧录方法': 'flash_methods',
         '默认烧录': 'default_flash',
         '启动引脚': 'startup_pin',
+        'can_gpio': 'can_gpio',
         'BL烧录': 'bl_flash_support',
         'BL默认方式': 'bl_default_method',
         'id': 'id'
