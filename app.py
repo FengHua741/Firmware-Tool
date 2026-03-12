@@ -978,38 +978,48 @@ def switch_web_ui():
                     with open(config_file, 'r') as f:
                         content = f.read()
                     
-                    # 使用正则表达式精确匹配和替换
-                    import re
+                    # 逐行处理 nginx 配置
+                    lines = content.split('\n')
+                    new_lines = []
+                    has_active_listen_80 = False
+                    has_active_listen_81 = False
                     
+                    for line in lines:
+                        stripped = line.strip()
+                        
+                        # 检查是否是 listen 80 或 listen 81 的行（包括已注释的）
+                        if re.match(r'^#?\s*listen\s+80\s*;$', stripped):
+                            # 只有未注释的才算数
+                            if not stripped.startswith('#'):
+                                has_active_listen_80 = True
+                            
+                            if target in config_file:
+                                # 目标服务：应该在 80 运行
+                                new_lines.append('    listen 80;')
+                            else:
+                                # 非目标服务：禁用 80
+                                new_lines.append('    # listen 80;')
+                        elif re.match(r'^#?\s*listen\s+81\s*;$', stripped):
+                            # 只有未注释的才算数
+                            if not stripped.startswith('#'):
+                                has_active_listen_81 = True
+                            
+                            if target in config_file:
+                                # 目标服务：禁用 81
+                                new_lines.append('    # listen 81;')
+                            else:
+                                # 非目标服务：应该在 81 运行
+                                new_lines.append('    listen 81;')
+                        else:
+                            # 其他行保持不变
+                            new_lines.append(line)
+                    
+                    content = '\n'.join(new_lines)
+                    
+                    # 添加成功消息
                     if target in config_file:
-                        # 目标服务：启用 80 端口，禁用 81 端口
-                        content = re.sub(
-                            r'^.*listen\s+80\s*;',
-                            '    listen 80;',
-                            content,
-                            flags=re.MULTILINE
-                        )
-                        content = re.sub(
-                            r'^.*listen\s+81\s*;',
-                            '    # listen 81;',
-                            content,
-                            flags=re.MULTILINE
-                        )
                         messages.append(f'已启用 {target.capitalize()} (端口 80)')
                     else:
-                        # 非目标服务：禁用 80 端口，启用 81 端口
-                        content = re.sub(
-                            r'^.*listen\s+80\s*;',
-                            '    # listen 80;',
-                            content,
-                            flags=re.MULTILINE
-                        )
-                        content = re.sub(
-                            r'^.*listen\s+81\s*;',
-                            '    listen 81;',
-                            content,
-                            flags=re.MULTILINE
-                        )
                         other_name = 'Mainsail' if target == 'fluidd' else 'Fluidd'
                         messages.append(f'已配置 {other_name} (端口 81)')
                     
