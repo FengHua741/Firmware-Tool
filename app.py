@@ -332,7 +332,8 @@ def get_boards():
     """获取所有主板配置"""
     try:
         boards = load_all_boards()
-        return jsonify({'boards': boards})
+        manufacturers = get_manufacturers()
+        return jsonify({'boards': boards, 'manufacturers': manufacturers})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
