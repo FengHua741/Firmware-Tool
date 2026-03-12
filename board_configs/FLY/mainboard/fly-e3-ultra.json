@@ -1,0 +1,21 @@
+{
+  "id": "fly-e3-ultra",
+  "type": "mainboard",
+  "name": "FLY-E3 Ultra",
+  "processor": "STM32H723",
+  "bootloader_offset": "128KiB bootloader",
+  "communication": [
+    "USB",
+    "USB桥接CAN"
+  ],
+  "default_comm": "USB",
+  "flash_methods": [
+    "DFU",
+    "KAT"
+  ],
+  "default_flash": "DFU",
+  "clock": "25 MHz crystal",
+  "startup_pin": null,
+  "mcu": "STMicroelectronics STM32",
+  "flash_start": "0x8020000"
+}

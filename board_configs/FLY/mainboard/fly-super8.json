@@ -1,0 +1,22 @@
+{
+  "id": "fly-super8",
+  "type": "mainboard",
+  "name": "FLY-Super8",
+  "processor": "STM32F407",
+  "bootloader_offset": "32KiB bootloader",
+  "communication": [
+    "USB",
+    "USB桥接CAN"
+  ],
+  "default_comm": "USB",
+  "flash_methods": [
+    "DFU",
+    "KAT",
+    "TF"
+  ],
+  "default_flash": "KAT",
+  "clock": "8 MHz crystal",
+  "startup_pin": null,
+  "mcu": "STMicroelectronics STM32",
+  "flash_start": "0x8008000"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "sht36",
+  "type": "toolboard",
+  "name": "FLY-SHT36",
+  "processor": "STM32F072",
+  "bootloader_offset": "8KiB bootloader",
+  "communication": [
+    "CAN",
+    "USB",
+    "RS232"
+  ],
+  "default_comm": "CAN",
+  "flash_methods": [
+    "DFU",
+    "KAT"
+  ],
+  "default_flash": "KAT",
+  "clock": "8 MHz crystal",
+  "startup_pin": null,
+  "mcu": "STMicroelectronics STM32",
+  "flash_start": "0x8002000"
+}
