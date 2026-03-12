@@ -915,7 +915,7 @@ def handle_config():
 # ==================== Web 界面切换 API ====================
 @app.route('/api/system/web-ui', methods=['GET'])
 def get_web_ui_status():
-    """获取当前 Web 界面状态"""
+    """获取当前 Web界面状态"""
     try:
         # 检测哪个端口有服务在运行
         fluidd_active = False
@@ -924,20 +924,20 @@ def get_web_ui_status():
         try:
             # 检查端口 80（Fluidd）
             result = subprocess.run(
-                'sudo netstat -tlnp 2>/dev/null | grep ":80 " || sudo ss -tlnp 2>/dev/null | grep ":80 "',
+                'sudo ss -tlnp 2>/dev/null | grep ":80 " || sudo netstat -tlnp 2>/dev/null | grep ":80 "',
                 shell=True, capture_output=True, text=True
             )
-            fluidd_active = '80' in result.stdout
+            fluidd_active = ':80' in result.stdout and 'LISTEN' in result.stdout
         except:
             pass
         
         try:
             # 检查端口 81（Mainsail）
             result = subprocess.run(
-                'sudo netstat -tlnp 2>/dev/null | grep ":81 " || sudo ss -tlnp 2>/dev/null | grep ":81 "',
+                'sudo ss -tlnp 2>/dev/null | grep ":81 " || sudo netstat -tlnp 2>/dev/null | grep ":81 "',
                 shell=True, capture_output=True, text=True
             )
-            mainsail_active = '81' in result.stdout
+            mainsail_active = ':81' in result.stdout and 'LISTEN' in result.stdout
         except:
             pass
         
@@ -952,7 +952,7 @@ def get_web_ui_status():
 
 @app.route('/api/system/web-ui/switch', methods=['POST'])
 def switch_web_ui():
-    """切换 Web 界面（Fluidd ↔ Mainsail）"""
+    """切换 Web界面（Fluidd ↔ Mainsail）"""
     try:
         data = request.get_json()
         target = data.get('target', '')
@@ -966,51 +966,50 @@ def switch_web_ui():
         
         messages = []
         
-        # 1. 停止当前运行的服务
-        for port in [80, 81]:
-            try:
-                # 查找占用端口的进程
-                result = subprocess.run(
-                    f'sudo lsof -ti:{port} | xargs -r sudo kill -9 2>/dev/null || true',
-                    shell=True, capture_output=True, text=True
-                )
-                if result.returncode == 0 or 'kill' in result.cmd:
-                    messages.append(f'已停止端口 {port} 的服务')
-            except:
-                pass
+        # 1. 停止当前运行的服务（通过 nginx 配置切换）
+        try:
+            # 检测哪个服务正在运行
+            fluidd_running = False
+            mainsail_running = False
+            
+            result = subprocess.run(
+                'systemctl is-active fluidd 2>/dev/null || echo "inactive"',
+                shell=True, capture_output=True, text=True
+            )
+            fluidd_running = result.stdout.strip() == 'active'
+            
+            result = subprocess.run(
+                'systemctl is-active mainsail 2>/dev/null || echo "inactive"',
+                shell=True, capture_output=True, text=True
+            )
+            mainsail_running = result.stdout.strip() == 'active'
+            
+            # 停止另一个服务
+            if target == 'fluidd' and mainsail_running:
+                subprocess.run('sudo systemctl stop mainsail', shell=True, capture_output=True)
+                messages.append('已停止 Mainsail')
+            elif target == 'mainsail' and fluidd_running:
+                subprocess.run('sudo systemctl stop fluidd', shell=True, capture_output=True)
+                messages.append('已停止 Fluidd')
+        except:
+            pass
         
-        # 2. 等待一下
-        import time
-        time.sleep(1)
-        
-        # 3. 启动目标服务
+        # 2. 启动目标服务
         try:
             if target == 'fluidd':
-                # 启动 Fluidd（端口 80）
-                subprocess.run(
-                    'sudo systemctl restart fluidd 2>/dev/null || sudo service fluidd restart 2>/dev/null || true',
-                    shell=True, capture_output=True
-                )
-                # 如果没有 systemd 服务，尝试直接启动 nginx 配置
-                subprocess.run(
-                    f'sudo nginx -s reload 2>/dev/null || true',
-                    shell=True, capture_output=True
-                )
+                subprocess.run('sudo systemctl start fluidd', shell=True, capture_output=True)
                 messages.append('Fluidd 已启动（端口 80）')
             else:
-                # 启动 Mainsail（端口 81）
-                subprocess.run(
-                    'sudo systemctl restart mainsail 2>/dev/null || sudo service mainsail restart 2>/dev/null || true',
-                    shell=True, capture_output=True
-                )
-                # 如果没有 systemd 服务，尝试通过 moonraker 启动
-                subprocess.run(
-                    f'sudo nginx -s reload 2>/dev/null || true',
-                    shell=True, capture_output=True
-                )
+                subprocess.run('sudo systemctl start mainsail', shell=True, capture_output=True)
                 messages.append('Mainsail 已启动（端口 81）')
         except Exception as e:
             return jsonify({'error': f'启动服务失败：{str(e)}', 'messages': messages}), 500
+        
+        # 3. 重新加载 nginx（如果使用了 nginx）
+        try:
+            subprocess.run('sudo nginx -s reload 2>/dev/null || true', shell=True, capture_output=True)
+        except:
+            pass
         
         return jsonify({
             'success': True,
