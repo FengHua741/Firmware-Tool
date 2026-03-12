@@ -47,6 +47,7 @@
     ],
     "communication_interfaces": [
       "USB (on PA11/PA12)",
+      "USB to CAN bus bridge (USB on PA11/PA12)",
       "Serial (on USART1 PA10/PA9)",
       "Serial (on USART2 PA3/PA2)",
       "CAN bus (on PA11/PA12)",
