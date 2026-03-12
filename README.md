@@ -200,7 +200,7 @@ Firmware-Tool/
 
 ## 相关链接
 
-- [FLY 官方文档](https://docs.fly3d.cn)
+- [FLY 官方文档](https://mellow.klipper.cn/docs/intro)
 - [Klipper 文档](https://www.klipper3d.org)
 - [主板配置仓库](https://github.com/FengHua741/board_configs)
 
