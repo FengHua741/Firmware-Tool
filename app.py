@@ -761,34 +761,32 @@ def flash_firmware():
                     
             # 判断设备类型
             if 'can0:' in device or (len(device) == 12 and all(c in '0123456789abcdef' for c in device.lower())):  # CAN UUID
-                # CAN 方式：先重置进入烧录模式
+                # CAN 方式：先尝试重置进入 USB 烧录模式
                 can_uuid = device.replace('can0:', '') if 'can0:' in device else device
+                
+                # 第一步：发送重置命令，让设备进入 Katapult USB 模式
                 reset_cmd = f'{python_bin} {flashtool_script} -i can0 -r -u {can_uuid}'
                 logging.info(f'CAN 重置命令：{reset_cmd}')
                 reset_result = subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
-                        
-                if reset_result.returncode != 0:
-                    logging.error(f'重置失败：{reset_result.stderr}')
-                    return jsonify({'error': f'无法进入烧录模式：{reset_result.stderr}', 'output': reset_result.stdout + reset_result.stderr}), 500
-                        
-                # 等待设备重新枚举
+                
+                # 第二步：等待设备重新枚举
                 import time
                 logging.info('等待设备重新枚举...')
                 time.sleep(3)
-                        
-                # 查找新的 USB 串口设备
+                
+                # 第三步：查找新的 USB 串口设备
                 find_device_cmd = "ls /dev/serial/by-id/*katapult* 2>/dev/null | head -1"
                 device_result = subprocess.run(find_device_cmd, shell=True, capture_output=True, text=True, timeout=10)
-                        
+                
                 if device_result.stdout.strip():
-                    # 使用 USB 方式烧录
+                    # 成功进入 USB 模式，使用 USB 方式烧录
                     new_device = device_result.stdout.strip()
                     logging.info(f'找到设备：{new_device}')
                     cmd = f'{python_bin} {flashtool_script} -d {new_device} -f {firmware_path}'
                     logging.info(f'USB 烧录命令：{cmd}')
                     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
                 else:
-                    # 降级：直接 CAN 烧录
+                    # 降级方案：设备可能已经在 Katapult CAN 模式，直接 CAN 烧录
                     logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
                     flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
                     cmd = f'{python_bin} {flash_can_script} -i can0 -u {can_uuid} -f {firmware_path}'
