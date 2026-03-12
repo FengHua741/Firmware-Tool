@@ -256,13 +256,16 @@ def get_all_ids():
         # CAN设备 - 格式: canbus_uuid: <uuid>
         try:
             output = subprocess.run(
-                '~/klippy-env/bin/python ~/klipper/lib/canboot/flash_can.py -q 2>/dev/null || echo ""',
+                '~/klippy-env/bin/python ~/klipper/lib/canboot/flash_can.py -q 2>&1',
                 shell=True, capture_output=True, text=True
             )
             if output.stdout:
                 for line in output.stdout.strip().split('\n'):
-                    # 解析UUID
-                    match = re.search(r'([a-f0-9]{8,})', line)
+                    # 过滤错误信息和警告
+                    if 'Error' in line or 'Traceback' in line or 'DeprecationWarning' in line:
+                        continue
+                    # 解析UUID (8位或更长的十六进制)
+                    match = re.search(r'\b([a-f0-9]{8,})\b', line)
                     if match:
                         uuid = match.group(1)
                         # 格式化为 canbus_uuid: <uuid>
