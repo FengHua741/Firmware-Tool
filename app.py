@@ -857,6 +857,189 @@ iface can0 can static
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/system/can-diagnose', methods=['GET'])
+def diagnose_can_network():
+    """诊断CAN网络状态"""
+    try:
+        result = {
+            'can_device_exists': False,
+            'can_device_info': '',
+            'can0_exists': False,
+            'can0_state': '',
+            'can0_bitrate': '',
+            'kernel_support': False,
+            'errors': []
+        }
+        
+        # 1. 检查内核CAN支持
+        try:
+            modprobe_result = subprocess.run(
+                'sudo modprobe can && echo "OK" || echo "FAIL"',
+                shell=True, capture_output=True, text=True
+            )
+            result['kernel_support'] = 'OK' in modprobe_result.stdout
+        except:
+            result['errors'].append('内核CAN模块检查失败')
+        
+        # 2. 检查USB CAN设备（GS_USB或UTOC）
+        try:
+            lsusb_result = subprocess.run(
+                'lsusb | grep -E "(GS_USB|CAN|UTOC|can)" || echo ""',
+                shell=True, capture_output=True, text=True
+            )
+            if lsusb_result.stdout.strip():
+                result['can_device_exists'] = True
+                result['can_device_info'] = lsusb_result.stdout.strip()
+        except:
+            pass
+        
+        # 3. 检查can0接口
+        try:
+            can0_result = subprocess.run(
+                'ip link show can0 2>&1',
+                shell=True, capture_output=True, text=True
+            )
+            if 'can0' in can0_result.stdout and 'does not exist' not in can0_result.stdout:
+                result['can0_exists'] = True
+                # 解析状态
+                if 'state UP' in can0_result.stdout:
+                    result['can0_state'] = 'UP'
+                elif 'state DOWN' in can0_result.stdout:
+                    result['can0_state'] = 'DOWN'
+                else:
+                    result['can0_state'] = 'UNKNOWN'
+                
+                # 获取详细比特率信息
+                details_result = subprocess.run(
+                    'ip -details link show can0 2>&1 | grep bitrate || echo ""',
+                    shell=True, capture_output=True, text=True
+                )
+                if details_result.stdout.strip():
+                    result['can0_bitrate'] = details_result.stdout.strip()
+            else:
+                result['can0_exists'] = False
+                result['errors'].append('can0接口不存在')
+        except:
+            result['errors'].append('can0接口检查失败')
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system/can-repair', methods=['POST'])
+def repair_can_network():
+    """修复CAN网络"""
+    try:
+        data = request.json or {}
+        bitrate = data.get('bitrate', 1000000)
+        txqueuelen = data.get('txqueuelen', 1024)
+        
+        messages = []
+        
+        # 1. 加载CAN内核模块
+        try:
+            subprocess.run('sudo modprobe can', shell=True, capture_output=True)
+            subprocess.run('sudo modprobe can_raw', shell=True, capture_output=True)
+            subprocess.run('sudo modprobe gs_usb', shell=True, capture_output=True)
+            messages.append('CAN内核模块已加载')
+        except:
+            messages.append('CAN内核模块加载失败')
+        
+        # 2. 检查是否有USB CAN设备
+        lsusb_result = subprocess.run(
+            'lsusb | grep -E "(GS_USB|CAN|UTOC)" || echo ""',
+            shell=True, capture_output=True, text=True
+        )
+        
+        if not lsusb_result.stdout.strip():
+            return jsonify({
+                'success': False,
+                'error': '未检测到USB CAN设备，请检查硬件连接',
+                'messages': messages
+            }), 400
+        
+        # 3. 创建systemd-networkd配置
+        try:
+            os.makedirs(CAN_NETWORK_DIR, exist_ok=True)
+            
+            # 转换bitrate为M格式
+            if bitrate >= 1000000:
+                bitrate_str = f"{bitrate // 1000000}M"
+            elif bitrate >= 1000:
+                bitrate_str = f"{bitrate // 1000}K"
+            else:
+                bitrate_str = str(bitrate)
+            
+            config_content = f"""[Match]
+Name=can*
+
+[CAN]
+BitRate={bitrate_str}
+RestartSec=100ms
+"""
+            subprocess.run(
+                f'echo "{config_content}" | sudo tee {CAN_NETWORK_DIR}/99-can.network > /dev/null',
+                shell=True, capture_output=True, check=True
+            )
+            
+            # 创建link配置文件
+            link_content = f"""[Match]
+OriginalName=can*
+
+[Link]
+TxQueueLength={txqueuelen}
+"""
+            subprocess.run(
+                f'echo "{link_content}" | sudo tee {CAN_NETWORK_DIR}/99-can.link > /dev/null',
+                shell=True, capture_output=True, check=True
+            )
+            
+            messages.append(f'CAN配置文件已创建（速率: {bitrate_str}）')
+        except Exception as e:
+            messages.append(f'配置文件创建失败: {str(e)}')
+        
+        # 4. 重启systemd-networkd
+        try:
+            subprocess.run('sudo systemctl restart systemd-networkd', 
+                         shell=True, capture_output=True, check=True)
+            messages.append('systemd-networkd已重启')
+        except:
+            messages.append('systemd-networkd重启失败')
+        
+        # 5. 等待并启动can0
+        import time
+        time.sleep(2)
+        
+        try:
+            # 检查can0是否存在，如果不存在尝试手动创建
+            can0_check = subprocess.run('ip link show can0 2>&1', 
+                                       shell=True, capture_output=True, text=True)
+            
+            if 'does not exist' in can0_check.stdout:
+                # 尝试手动创建can0（如果知道设备名）
+                messages.append('can0接口不存在，尝试手动创建...')
+                # 查找CAN设备
+                can_devs = subprocess.run('ls /sys/bus/usb/devices/*/can* 2>/dev/null || echo ""',
+                                         shell=True, capture_output=True, text=True)
+                messages.append(f'找到的CAN设备: {can_devs.stdout.strip() or "无"}')
+            else:
+                # 启动can0
+                subprocess.run('sudo ip link set can0 up', 
+                             shell=True, capture_output=True, check=True)
+                messages.append('can0接口已启动')
+        except Exception as e:
+            messages.append(f'can0启动失败: {str(e)}')
+        
+        return jsonify({
+            'success': True,
+            'messages': messages,
+            'note': '修复完成，请刷新页面查看状态。如果仍有问题，请检查硬件连接或重启系统。'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ==================== JSON仓库更新 API ====================
 @app.route('/api/settings/update-json', methods=['POST'])
 def update_json_repo():

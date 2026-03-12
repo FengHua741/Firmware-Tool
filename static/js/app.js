@@ -936,6 +936,128 @@ async function saveCanConfig() {
     }
 }
 
+// ==================== CAN网络诊断与修复 ====================
+async function diagnoseCanNetwork() {
+    const resultDiv = document.getElementById('canDiagnoseResult');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<span class="status-info">🔍 正在诊断CAN网络...</span>';
+    
+    try {
+        const response = await fetch('/api/system/can-diagnose');
+        const data = await response.json();
+        
+        let html = '<div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-top: 10px;">';
+        html += '<h4>📊 CAN网络诊断结果</h4>';
+        
+        // 内核支持
+        html += `<div style="margin: 8px 0;">
+            <span class="info-label">内核CAN支持:</span>
+            <span class="info-value" style="color: ${data.kernel_support ? 'green' : 'red'};">
+                ${data.kernel_support ? '✅ 支持' : '❌ 不支持'}
+            </span>
+        </div>`;
+        
+        // USB CAN设备
+        html += `<div style="margin: 8px 0;">
+            <span class="info-label">USB CAN设备:</span>
+            <span class="info-value" style="color: ${data.can_device_exists ? 'green' : 'red'};">
+                ${data.can_device_exists ? '✅ 已连接' : '❌ 未连接'}
+            </span>
+            ${data.can_device_info ? `<br><small>${data.can_device_info}</small>` : ''}
+        </div>`;
+        
+        // can0接口
+        html += `<div style="margin: 8px 0;">
+            <span class="info-label">can0接口:</span>
+            <span class="info-value" style="color: ${data.can0_exists ? (data.can0_state === 'UP' ? 'green' : 'orange') : 'red'};">
+                ${data.can0_exists ? (data.can0_state === 'UP' ? '✅ 正常' : '⚠️ 已停止') : '❌ 不存在'}
+            </span>
+            ${data.can0_bitrate ? `<br><small>${data.can0_bitrate}</small>` : ''}
+        </div>`;
+        
+        // 错误信息
+        if (data.errors && data.errors.length > 0) {
+            html += '<div style="margin: 8px 0; color: red;"><strong>⚠️ 检测到的问题:</strong><ul>';
+            data.errors.forEach(err => {
+                html += `<li>${err}</li>`;
+            });
+            html += '</ul></div>';
+        }
+        
+        // 建议
+        if (!data.can_device_exists) {
+            html += '<div style="margin: 8px 0; color: orange;">💡 请检查USB CAN设备（UTOC或刷了CAN桥接固件的主板）是否连接</div>';
+        } else if (!data.can0_exists || data.can0_state !== 'UP') {
+            html += '<div style="margin: 8px 0; color: orange;">💡 点击"修复网络"按钮尝试修复</div>';
+        } else {
+            html += '<div style="margin: 8px 0; color: green;">✅ CAN网络正常</div>';
+        }
+        
+        html += '</div>';
+        resultDiv.innerHTML = html;
+        
+    } catch (error) {
+        resultDiv.innerHTML = `<span class="status-error">❌ 诊断失败: ${error.message}</span>`;
+    }
+}
+
+async function repairCanNetwork() {
+    const resultDiv = document.getElementById('canDiagnoseResult');
+    const bitrate = parseInt(document.getElementById('canBitrate').value) || 1000000;
+    
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<span class="status-info">🔧 正在修复CAN网络...</span>';
+    
+    try {
+        const response = await fetch('/api/system/can-repair', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                bitrate: bitrate,
+                txqueuelen: 1024
+            })
+        });
+        
+        const data = await response.json();
+        
+        let html = '<div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-top: 10px;">';
+        
+        if (data.success) {
+            html += '<h4>✅ CAN网络修复完成</h4>';
+        } else {
+            html += '<h4>❌ CAN网络修复失败</h4>';
+        }
+        
+        // 显示操作日志
+        if (data.messages && data.messages.length > 0) {
+            html += '<div style="margin: 10px 0;"><strong>操作日志:</strong><ul>';
+            data.messages.forEach(msg => {
+                html += `<li>${msg}</li>`;
+            });
+            html += '</ul></div>';
+        }
+        
+        // 错误信息
+        if (data.error) {
+            html += `<div style="color: red; margin: 10px 0;"><strong>错误:</strong> ${data.error}</div>`;
+        }
+        
+        // 备注
+        if (data.note) {
+            html += `<div style="color: blue; margin: 10px 0;">💡 ${data.note}</div>`;
+        }
+        
+        html += '</div>';
+        resultDiv.innerHTML = html;
+        
+        // 刷新CAN配置状态
+        setTimeout(() => loadCanConfig(), 2000);
+        
+    } catch (error) {
+        resultDiv.innerHTML = `<span class="status-error">❌ 修复失败: ${error.message}</span>`;
+    }
+}
+
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', () => {
     // 加载初始页面

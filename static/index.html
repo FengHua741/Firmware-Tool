@@ -130,6 +130,15 @@
                                 <span>💾</span> 保存配置
                             </button>
                         </div>
+                        <div class="form-row" style="margin-top: 10px;">
+                            <button class="btn btn-info" onclick="diagnoseCanNetwork()">
+                                <span>🔍</span> 诊断网络
+                            </button>
+                            <button class="btn btn-warning" onclick="repairCanNetwork()">
+                                <span>🔧</span> 修复网络
+                            </button>
+                        </div>
+                        <div id="canDiagnoseResult" class="status-area" style="display: none;"></div>
                         <div id="canConfigMessage" class="status-area"></div>
                     </div>
                 </div>
