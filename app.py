@@ -952,7 +952,7 @@ def get_web_ui_status():
 
 @app.route('/api/system/web-ui/switch', methods=['POST'])
 def switch_web_ui():
-    """切换 Web界面（Fluidd ↔ Mainsail）"""
+    """切换 Web界面（Fluidd ↔ Mainsail）- 80 端口固定显示激活的界面"""
     try:
         data = request.get_json()
         target = data.get('target', '')
@@ -960,21 +960,18 @@ def switch_web_ui():
         if not target or target not in ['fluidd', 'mainsail']:
             return jsonify({'error': '无效的目标界面'}), 400
         
-        # 目标端口
-        target_port = 80 if target == 'fluidd' else 81
-        other_port = 81 if target == 'fluidd' else 80
+        # 目标端口（始终使用 80）
+        target_port = 80
+        other_port = 81
         
         messages = []
         
-        # 1. 读取当前 nginx 配置
+        # 1. 读取并修改 nginx 配置
         nginx_configs = [
             '/etc/nginx/sites-enabled/fluidd',
-            '/etc/nginx/sites-enabled/mainsail',
-            '/etc/nginx/sites-available/fluidd',
-            '/etc/nginx/sites-available/mainsail'
+            '/etc/nginx/sites-enabled/mainsail'
         ]
         
-        # 2. 找到并修改配置文件（注释掉一个，启用另一个）
         for config_file in nginx_configs:
             if os.path.exists(config_file):
                 try:
@@ -984,30 +981,48 @@ def switch_web_ui():
                     new_lines = []
                     for line in lines:
                         stripped = line.strip()
-                        # 如果是目标服务，取消注释 listen 指令
-                        if target in config_file:
-                            if stripped.startswith('#') and f'listen {target_port}' in stripped:
-                                # 取消注释（去掉开头的 # ）
-                                line = stripped.lstrip('#').lstrip() + '\n'
+                        # 处理 listen 80 的指令
+                        if 'listen 80' in stripped and not stripped.startswith('#'):
+                            # 如果是目标服务，保持启用 80 端口
+                            if target in config_file:
+                                new_lines.append(line)
+                            else:
+                                # 否则注释掉 80 端口，改为 81 端口
+                                new_lines.append(f'    # {stripped}\n')
+                        elif '# listen 80' in stripped:
+                            # 取消注释 80 端口（如果是目标服务）
+                            if target in config_file:
+                                new_lines.append(stripped.replace('# listen 80', 'listen 80').lstrip() + '\n')
+                            else:
+                                new_lines.append(line)
+                        # 处理 81 端口的备用配置
+                        elif 'listen 81' in stripped:
+                            if target in config_file:
+                                # 目标服务不需要 81 端口，注释掉
+                                new_lines.append(f'    # {stripped}\n')
+                            else:
+                                # 非目标服务启用 81 端口
+                                if stripped.startswith('#'):
+                                    new_lines.append(stripped.lstrip('#').lstrip() + '\n')
+                                else:
+                                    new_lines.append(line)
                         else:
-                            # 注释掉另一个服务的 listen
-                            if not stripped.startswith('#') and f'listen {other_port}' in stripped:
-                                line = '# ' + stripped + '\n'
+                            new_lines.append(line)
                     
                     # 写回文件
                     with open(config_file, 'w') as f:
                         f.writelines(new_lines)
                     
-                    messages.append(f'已处理配置文件：{config_file}')
+                    messages.append(f'已配置 {config_file}')
                 except Exception as e:
                     messages.append(f'配置文件处理失败：{str(e)}')
         
-        # 3. 重新加载 nginx 配置
+        # 2. 重新加载 nginx 配置
         try:
             result = subprocess.run('sudo nginx -t && sudo systemctl reload nginx', 
                                   shell=True, capture_output=True, text=True)
             if result.returncode == 0:
-                messages.append('Nginx 配置已重载')
+                messages.append(f'Nginx 配置已重载，{target.capitalize()} 已在端口 80 就绪')
             else:
                 messages.append(f'Nginx 重载失败：{result.stderr}')
         except Exception as e:
@@ -1015,7 +1030,7 @@ def switch_web_ui():
         
         return jsonify({
             'success': True,
-            'message': f'已切换到 {target.capitalize()}（端口 {target_port}）',
+            'message': f'已切换到 {target.capitalize()}（端口 80）',
             'messages': messages
         })
     except Exception as e:
