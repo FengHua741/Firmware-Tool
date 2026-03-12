@@ -524,9 +524,10 @@ function onCommunicationChange() {
     const rp2040CanGpioRow = document.getElementById('rp2040CanGpioRow');
     const rp2040CanGpioTxRow = document.getElementById('rp2040CanGpioTxRow');
     const processor = document.getElementById('processorModel').value;
+    const isRP2040 = processor === 'RP2040' || processor === 'RP2350';
     
-    // USB to CAN桥接显示CAN总线接口选择
-    if (communication.includes('CAN bus bridge')) {
+    // USB to CAN桥接显示CAN总线接口选择（仅STM32，RP2040使用GPIO配置）
+    if (communication.includes('CAN bus bridge') && !isRP2040) {
         canRow.style.display = 'flex';
     } else {
         canRow.style.display = 'none';
@@ -539,8 +540,8 @@ function onCommunicationChange() {
         bitrateRow.style.display = 'none';
     }
     
-    // RP2040/RP2350选择CAN bus时显示GPIO配置
-    if ((processor === 'RP2040' || processor === 'RP2350') && communication === 'CAN bus') {
+    // RP2040/RP2350选择CAN bus或USB桥接CAN时显示GPIO配置
+    if (isRP2040 && (communication === 'CAN bus' || communication.includes('CAN bus bridge'))) {
         rp2040CanGpioRow.style.display = 'block';
         rp2040CanGpioTxRow.style.display = 'block';
         
