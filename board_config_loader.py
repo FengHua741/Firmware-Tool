@@ -34,14 +34,92 @@ def get_board_types(manufacturer):
     return sorted(types)
 
 
+def normalize_config(config):
+    """将中文key的JSON配置转换为英文key"""
+    # 中文到英文的映射
+    key_mapping = {
+        '产品类型': 'type',
+        '名称': 'name',
+        '处理器': 'processor',
+        '晶振': 'clock',
+        'BL偏移': 'bootloader_offset',
+        '通讯方式': 'communication',
+        '默认通讯': 'default_comm',
+        '烧录方法': 'flash_methods',
+        '默认烧录': 'default_flash',
+        '启动引脚': 'startup_pin',
+        'BL烧录': 'bl_flash_support',
+        'BL默认方式': 'bl_default_method',
+        'id': 'id'
+    }
+    
+    normalized = {}
+    for cn_key, en_key in key_mapping.items():
+        if cn_key in config:
+            normalized[en_key] = config[cn_key]
+    
+    # 处理通讯方式映射回Klipper格式
+    if 'communication' in normalized:
+        comm_map = {
+            'USB': 'USB (on PA11/PA12)',
+            'USB转CAN': 'USB to CAN bus bridge (USB on PA11/PA12)',
+            'CANBUS': 'CAN bus (on PB8/PB9)',
+            '串口': 'Serial (on USART1 PA10/PA9)'
+        }
+        normalized['communication'] = [comm_map.get(c, c) for c in normalized['communication']]
+    
+    # 处理烧录方法映射
+    if 'flash_methods' in normalized:
+        method_map = {
+            'TF卡': 'TF'
+        }
+        normalized['flash_methods'] = [method_map.get(m, m) for m in normalized['flash_methods']]
+    
+    # 处理处理器名称，并生成mcu字段
+    if 'processor' in normalized:
+        processor = normalized['processor']
+        if processor == 'Raspberry Pi RP2040':
+            normalized['processor'] = 'RP2040'
+            normalized['mcu'] = 'Raspberry Pi RP2040/RP235x'
+        elif processor == 'Raspberry Pi RP2350':
+            normalized['processor'] = 'RP2350'
+            normalized['mcu'] = 'Raspberry Pi RP2040/RP235x'
+        elif processor.startswith('STM32'):
+            normalized['mcu'] = 'STMicroelectronics STM32'
+        elif processor.startswith('GD32'):
+            normalized['mcu'] = 'GigaDevice GD32'
+        elif processor.startswith('CH32'):
+            normalized['mcu'] = 'WCH CH32'
+        elif processor.startswith('AT32'):
+            normalized['mcu'] = 'ArteryTek AT32'
+        elif processor.startswith('HC32'):
+            normalized['mcu'] = 'HDSC HC32'
+        elif processor.startswith('N32'):
+            normalized['mcu'] = 'Nations N32'
+        elif processor.startswith('MM32'):
+            normalized['mcu'] = 'MindMotion MM32'
+        elif processor.startswith('SAMD'):
+            normalized['mcu'] = 'Microchip SAMD21/SAMC21/SAME5x'
+        elif processor.startswith('LPC'):
+            normalized['mcu'] = 'NXP LPC176x'
+        elif processor.startswith('RP2040'):
+            normalized['mcu'] = 'Raspberry Pi RP2040/RP235x'
+        elif processor.startswith('RP2350'):
+            normalized['mcu'] = 'Raspberry Pi RP2040/RP235x'
+    
+    return normalized
+
+
 def load_board_config(manufacturer, board_type, board_id):
     """加载单个主板配置"""
     filepath = os.path.join(CONFIGS_DIR, manufacturer, board_type, f"{board_id}.json")
     if os.path.exists(filepath):
         with open(filepath, 'r', encoding='utf-8') as f:
             config = json.load(f)
+            # 标准化配置（中文key转英文）
+            config = normalize_config(config)
             config['manufacturer'] = manufacturer
-            config['type'] = board_type
+            config['board_type'] = board_type
             return config
     return None
 
@@ -61,6 +139,8 @@ def load_all_boards():
                     filepath = os.path.join(type_dir, filename)
                     with open(filepath, 'r', encoding='utf-8') as f:
                         config = json.load(f)
+                        # 标准化配置（中文key转英文）
+                        config = normalize_config(config)
                         board_id = config.get('id') or filename[:-5]
                         boards[manufacturer][board_type][board_id] = config
     

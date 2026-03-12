@@ -116,9 +116,21 @@
                             <div class="form-group">
                                 <label class="form-label">CAN速率</label>
                                 <select class="form-control form-select" id="canBitrate">
-                                    <option value="1000000">1M (默认)</option>
+                                    <option value="1000000">1M</option>
                                     <option value="500000">500K</option>
                                     <option value="250000">250K</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">CAN缓存 (txqueuelen)</label>
+                                <select class="form-control form-select" id="canTxqueuelen">
+                                    <option value="128">128</option>
+                                    <option value="256">256</option>
+                                    <option value="512">512</option>
+                                    <option value="1024">1024 (默认)</option>
+                                    <option value="2048">2048</option>
+                                    <option value="4096">4096</option>
+                                    <option value="8192">8192</option>
                                 </select>
                             </div>
                         </div>
@@ -138,8 +150,8 @@
                                 <span>🔧</span> 修复网络
                             </button>
                         </div>
-                        <div id="canDiagnoseResult" class="status-area" style="display: none;"></div>
-                        <div id="canConfigMessage" class="status-area"></div>
+                        <div id="canDiagnoseResult" class="status-area" style="display: none; margin-top: 10px;"></div>
+                        <div id="canConfigMessage" class="status-area" style="margin-top: 10px;"></div>
                     </div>
                 </div>
             </div>
@@ -190,18 +202,34 @@
                                 <label class="form-label">微控制器架构</label>
                                 <select class="form-control form-select" id="mcuArch" onchange="onMcuArchChange()">
                                     <option value="STMicroelectronics STM32">STMicroelectronics STM32</option>
-                                    <option value="Raspberry Pi RP2040">Raspberry Pi RP2040</option>
+                                    <option value="Raspberry Pi RP2040/RP235x">Raspberry Pi RP2040/RP235x</option>
                                 </select>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">处理器型号</label>
-                                <select class="form-control form-select" id="processorModel">
+                                <select class="form-control form-select" id="processorModel" onchange="onProcessorChange()">
+                                    <option value="STM32F031">STM32F031</option>
+                                    <option value="STM32F042">STM32F042</option>
+                                    <option value="STM32F070">STM32F070</option>
                                     <option value="STM32F072">STM32F072</option>
                                     <option value="STM32F103">STM32F103</option>
-                                    <option value="STM32F407">STM32F407</option>
+                                    <option value="STM32F207">STM32F207</option>
+                                    <option value="STM32F401">STM32F401</option>
                                     <option value="STM32F405">STM32F405</option>
+                                    <option value="STM32F407">STM32F407</option>
+                                    <option value="STM32F429">STM32F429</option>
+                                    <option value="STM32F446">STM32F446</option>
+                                    <option value="STM32F765">STM32F765</option>
+                                    <option value="STM32G070">STM32G070</option>
+                                    <option value="STM32G071">STM32G071</option>
+                                    <option value="STM32G0B0">STM32G0B0</option>
+                                    <option value="STM32G0B1">STM32G0B1</option>
+                                    <option value="STM32G431">STM32G431</option>
+                                    <option value="STM32G474">STM32G474</option>
                                     <option value="STM32H723">STM32H723</option>
+                                    <option value="STM32H743">STM32H743</option>
                                     <option value="RP2040">RP2040</option>
+                                    <option value="RP2350">RP2350</option>
                                 </select>
                             </div>
                         </div>
@@ -210,9 +238,17 @@
                                 <label class="form-label">Bootloader偏移</label>
                                 <select class="form-control form-select" id="bootloaderOffset">
                                     <option value="No bootloader">No bootloader</option>
+                                    <option value="2KiB bootloader">2KiB bootloader</option>
+                                    <option value="4KiB bootloader">4KiB bootloader</option>
                                     <option value="8KiB bootloader">8KiB bootloader</option>
                                     <option value="16KiB bootloader">16KiB bootloader</option>
+                                    <option value="20KiB bootloader">20KiB bootloader</option>
+                                    <option value="28KiB bootloader">28KiB bootloader</option>
                                     <option value="32KiB bootloader">32KiB bootloader</option>
+                                    <option value="34KiB bootloader">34KiB bootloader</option>
+                                    <option value="36KiB bootloader">36KiB bootloader</option>
+                                    <option value="48KiB bootloader">48KiB bootloader</option>
+                                    <option value="64KiB bootloader">64KiB bootloader</option>
                                     <option value="128KiB bootloader">128KiB bootloader</option>
                                 </select>
                             </div>
@@ -232,6 +268,14 @@
                                     <option value="500000">500K</option>
                                     <option value="250000">250K</option>
                                 </select>
+                            </div>
+                            <div class="form-group" id="rp2040CanGpioRow" style="display: none;">
+                                <label class="form-label">CAN RX GPIO</label>
+                                <input type="number" class="form-control" id="rp2040CanRxGpio" value="4" placeholder="4">
+                            </div>
+                            <div class="form-group" id="rp2040CanGpioTxRow" style="display: none;">
+                                <label class="form-label">CAN TX GPIO</label>
+                                <input type="number" class="form-control" id="rp2040CanTxGpio" value="5" placeholder="5">
                             </div>
                         </div>
                         <div class="form-row" id="canBusInterfaceRow" style="display: none;">
@@ -270,10 +314,10 @@
                     </div>
                 </div>
 
-                <!-- 烧录配置 -->
+                <!-- 固件烧录 -->
                 <div class="card">
                     <div class="card-header">
-                        <h3>💾 烧录配置</h3>
+                        <h3>💾 固件烧录</h3>
                     </div>
                     <div class="card-body">
                         <div class="form-row">

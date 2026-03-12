@@ -1,0 +1,338 @@
+{
+  "STM32F031": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA9/PA10)",
+      "Serial (on USART1 PA10/PA9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F042": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "4KiB bootloader", "config": "CONFIG_STM32_FLASH_START_1000", "offset_hex": "0x8001000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA9/PA10)",
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F070": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "4KiB bootloader", "config": "CONFIG_STM32_FLASH_START_1000", "offset_hex": "0x8001000"},
+      {"name": "8KiB bootloader", "config": "CONFIG_STM32_FLASH_START_2000", "offset_hex": "0x8002000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART2 PA3/PA2)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F072": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "4KiB bootloader", "config": "CONFIG_STM32_FLASH_START_1000", "offset_hex": "0x8001000"},
+      {"name": "8KiB bootloader", "config": "CONFIG_STM32_FLASH_START_2000", "offset_hex": "0x8002000"},
+      {"name": "16KiB bootloader", "config": "CONFIG_STM32_FLASH_START_4000", "offset_hex": "0x8004000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART2 PA3/PA2)",
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F103": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "2KiB bootloader", "config": "CONFIG_STM32_FLASH_START_800", "offset_hex": "0x8000800"},
+      {"name": "4KiB bootloader", "config": "CONFIG_STM32_FLASH_START_1000", "offset_hex": "0x8001000"},
+      {"name": "8KiB bootloader", "config": "CONFIG_STM32_FLASH_START_2000", "offset_hex": "0x8002000"},
+      {"name": "16KiB bootloader", "config": "CONFIG_STM32_FLASH_START_4000", "offset_hex": "0x8004000"},
+      {"name": "20KiB bootloader", "config": "CONFIG_STM32_FLASH_START_5000", "offset_hex": "0x8005000"},
+      {"name": "28KiB bootloader", "config": "CONFIG_STM32_FLASH_START_7000", "offset_hex": "0x8007000"},
+      {"name": "32KiB bootloader", "config": "CONFIG_STM32_FLASH_START_8000", "offset_hex": "0x8008000"},
+      {"name": "34KiB bootloader", "config": "CONFIG_STM32_FLASH_START_8800", "offset_hex": "0x8008800"},
+      {"name": "36KiB bootloader", "config": "CONFIG_STM32_FLASH_START_9000", "offset_hex": "0x8009000"},
+      {"name": "64KiB bootloader", "config": "CONFIG_STM32_FLASH_START_10000", "offset_hex": "0x8010000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART3 PB11/PB10)",
+      "CAN bus (on PA11/PA12)",
+      "CAN bus (on PB8/PB9)",
+      "USB to CAN bus bridge (USB on PA11/PA12)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F207": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "16KiB bootloader", "config": "CONFIG_STM32_FLASH_START_4000", "offset_hex": "0x8004000"},
+      {"name": "32KiB bootloader", "config": "CONFIG_STM32_FLASH_START_8000", "offset_hex": "0x8008000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART2 PA3/PA2)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F401": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "16KiB bootloader", "config": "CONFIG_STM32_FLASH_START_4000", "offset_hex": "0x8004000"},
+      {"name": "32KiB bootloader", "config": "CONFIG_STM32_FLASH_START_8000", "offset_hex": "0x8008000"},
+      {"name": "48KiB bootloader", "config": "CONFIG_STM32_FLASH_START_C000", "offset_hex": "0x800C000"},
+      {"name": "64KiB bootloader", "config": "CONFIG_STM32_FLASH_START_10000", "offset_hex": "0x8010000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART6 PA12/PA11)",
+      "CAN bus (on PB8/PB9)",
+      "USB to CAN bus bridge (USB on PA11/PA12)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F405": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "16KiB bootloader", "config": "CONFIG_STM32_FLASH_START_4000", "offset_hex": "0x8004000"},
+      {"name": "32KiB bootloader", "config": "CONFIG_STM32_FLASH_START_8000", "offset_hex": "0x8008000"},
+      {"name": "48KiB bootloader", "config": "CONFIG_STM32_FLASH_START_C000", "offset_hex": "0x800C000"},
+      {"name": "64KiB bootloader", "config": "CONFIG_STM32_FLASH_START_10000", "offset_hex": "0x8010000"},
+      {"name": "128KiB bootloader with 512 byte offset", "config": "CONFIG_STM32_FLASH_START_20200", "offset_hex": "0x8020200"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART3 PB11/PB10)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PI9/PH13)",
+      "USB to CAN bus bridge (USB on PA11/PA12)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F407": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "16KiB bootloader", "config": "CONFIG_STM32_FLASH_START_4000", "offset_hex": "0x8004000"},
+      {"name": "32KiB bootloader", "config": "CONFIG_STM32_FLASH_START_8000", "offset_hex": "0x8008000"},
+      {"name": "48KiB bootloader", "config": "CONFIG_STM32_FLASH_START_C000", "offset_hex": "0x800C000"},
+      {"name": "64KiB bootloader", "config": "CONFIG_STM32_FLASH_START_10000", "offset_hex": "0x8010000"},
+      {"name": "128KiB bootloader with 512 byte offset", "config": "CONFIG_STM32_FLASH_START_20200", "offset_hex": "0x8020200"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART3 PB11/PB10)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PI9/PH13)",
+      "USB to CAN bus bridge (USB on PA11/PA12)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F429": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "32KiB bootloader", "config": "CONFIG_STM32_FLASH_START_8000", "offset_hex": "0x8008000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F446": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "32KiB bootloader", "config": "CONFIG_STM32_FLASH_START_8000", "offset_hex": "0x8008000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32F765": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "32KiB bootloader", "config": "CONFIG_STM32_FLASH_START_8000", "offset_hex": "0x8008000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32G070": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "8KiB bootloader", "config": "CONFIG_STM32_FLASH_START_2000", "offset_hex": "0x8002000"}
+    ],
+    "communication_interfaces": [
+      "Serial (on USART1 PA10/PA9)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32G071": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "8KiB bootloader", "config": "CONFIG_STM32_FLASH_START_2000", "offset_hex": "0x8002000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32G0B0": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "8KiB bootloader", "config": "CONFIG_STM32_FLASH_START_2000", "offset_hex": "0x8002000"}
+    ],
+    "communication_interfaces": [
+      "Serial (on USART1 PA10/PA9)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32G0B1": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "8KiB bootloader", "config": "CONFIG_STM32_FLASH_START_2000", "offset_hex": "0x8002000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "CAN bus (on PB8/PB9)",
+      "USB to CAN bus bridge (USB on PA11/PA12)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32G431": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "8KiB bootloader", "config": "CONFIG_STM32_FLASH_START_2000", "offset_hex": "0x8002000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART2 PA3/PA2)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32G474": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "8KiB bootloader", "config": "CONFIG_STM32_FLASH_START_2000", "offset_hex": "0x8002000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on USART2 PA3/PA2)",
+      "Serial (on USART3 PC11/PC10)",
+      "CAN bus (on PB8/PB9)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32H723": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "128KiB bootloader", "config": "CONFIG_STM32_FLASH_START_20000", "offset_hex": "0x8020000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "USB (on PB14/PB15)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on UART4 PA0/PA1)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PB5/PB6)",
+      "USB to CAN bus bridge (USB on PA11/PA12)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "STM32H743": {
+    "architecture": "STMicroelectronics STM32",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_STM32_FLASH_START_0000", "offset_hex": "0x8000000"},
+      {"name": "128KiB bootloader", "config": "CONFIG_STM32_FLASH_START_20000", "offset_hex": "0x8020000"}
+    ],
+    "communication_interfaces": [
+      "USB (on PA11/PA12)",
+      "USB (on PB14/PB15)",
+      "Serial (on USART1 PA10/PA9)",
+      "Serial (on UART4 PA0/PA1)",
+      "CAN bus (on PB8/PB9)",
+      "CAN bus (on PB5/PB6)",
+      "USB to CAN bus bridge (USB on PA11/PA12)"
+    ],
+    "flash_methods": ["DFU"]
+  },
+  "RP2040": {
+    "architecture": "Raspberry Pi RP2040/RP235x",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_RPXXXX_FLASH_START_0100", "offset_hex": "0x1000100"},
+      {"name": "16KiB bootloader", "config": "CONFIG_RPXXXX_FLASH_START_4000", "offset_hex": "0x1004000"}
+    ],
+    "communication_interfaces": [
+      "USBSERIAL",
+      "CAN bus",
+      "USB to CAN bus bridge"
+    ],
+    "flash_methods": ["UF2"]
+  },
+  "RP2350": {
+    "architecture": "Raspberry Pi RP2040/RP235x",
+    "bootloader_offsets": [
+      {"name": "No bootloader", "config": "CONFIG_RPXXXX_FLASH_START_0000", "offset_hex": "0x1000000"},
+      {"name": "16KiB bootloader", "config": "CONFIG_RPXXXX_FLASH_START_4000", "offset_hex": "0x1004000"}
+    ],
+    "communication_interfaces": [
+      "USBSERIAL",
+      "CAN bus",
+      "USB to CAN bus bridge"
+    ],
+    "flash_methods": ["UF2"]
+  }
+}

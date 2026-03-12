@@ -1,21 +1,20 @@
 {
-  "id": "fly-dp5",
-  "type": "mainboard",
-  "name": "FLY-DP5",
-  "processor": "STM32F072",
-  "bootloader_offset": "8KiB bootloader",
-  "communication": [
+  "产品类型": "mainboard",
+  "名称": "FLY-DP5",
+  "处理器": "STM32F072",
+  "BL偏移": "8KiB bootloader",
+  "通讯方式": [
     "USB",
-    "USB桥接CAN"
+    "USB转CAN"
   ],
-  "default_comm": "USB",
-  "flash_methods": [
-    "DFU",
-    "KAT"
+  "默认通讯": "USB (on PA11/PA12)",
+  "烧录方法": [
+    "DFU"
   ],
-  "default_flash": "DFU",
-  "clock": "8 MHz crystal",
-  "startup_pin": null,
-  "mcu": "STMicroelectronics STM32",
-  "flash_start": "0x8002000"
+  "默认烧录": "DFU",
+  "启动引脚": null,
+  "晶振": "8 MHz crystal",
+  "BL烧录": "支持",
+  "BL默认方式": "DFU",
+  "id": "fly-dp5"
 }

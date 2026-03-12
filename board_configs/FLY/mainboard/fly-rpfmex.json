@@ -1,21 +1,19 @@
 {
-  "id": "fly-rpfmex",
-  "type": "mainboard",
-  "name": "FLY-RPFMEX",
-  "processor": "RP2040",
-  "mcu": "Raspberry Pi RP2040",
-  "bootloader_offset": "16KiB bootloader",
-  "communication": [
+  "产品类型": "mainboard",
+  "名称": "FLY-RPFMEX",
+  "处理器": "Raspberry Pi RP2040",
+  "BL偏移": "16KiB bootloader",
+  "通讯方式": [
     "USB",
-    "USB桥接CAN"
+    "USB转CAN"
   ],
-  "default_comm": "USB",
-  "flash_methods": [
-    "UF2",
-    "KAT"
+  "默认通讯": "USB",
+  "烧录方法": [
+    "UF2"
   ],
-  "default_flash": "UF2",
-  "clock": null,
-  "startup_pin": null,
-  "flash_start": "0x8004000"
+  "默认烧录": "UF2",
+  "启动引脚": "gpio5",
+  "BL烧录": "支持",
+  "BL默认方式": "UF2",
+  "id": "fly-rpfmex"
 }

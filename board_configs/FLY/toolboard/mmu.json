@@ -1,22 +1,21 @@
 {
-  "id": "mmu",
-  "type": "toolboard",
-  "name": "FLY-MMU",
-  "processor": "STM32H723",
-  "bootloader_offset": "128KiB bootloader",
-  "communication": [
-    "CAN",
+  "产品类型": "toolboard",
+  "名称": "FLY-MMU",
+  "处理器": "STM32H723",
+  "BL偏移": "128KiB bootloader",
+  "通讯方式": [
+    "CANBUS",
     "USB",
-    "RS232"
+    "串口"
   ],
-  "default_comm": "CAN",
-  "flash_methods": [
-    "DFU",
-    "KAT"
+  "默认通讯": "CAN bus (on PB8/PB9)",
+  "烧录方法": [
+    "DFU"
   ],
-  "default_flash": "KAT",
-  "clock": "25 MHz crystal",
-  "startup_pin": null,
-  "mcu": "STMicroelectronics STM32",
-  "flash_start": "0x8020000"
+  "默认烧录": "KAT",
+  "启动引脚": null,
+  "晶振": "25 MHz crystal",
+  "BL烧录": "支持",
+  "BL默认方式": "DFU",
+  "id": "mmu"
 }

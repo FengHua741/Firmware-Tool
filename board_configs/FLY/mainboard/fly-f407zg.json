@@ -1,22 +1,20 @@
 {
-  "id": "fly-f407zg",
-  "type": "mainboard",
-  "name": "FLY-F407ZG",
-  "processor": "STM32F407",
-  "bootloader_offset": "32KiB bootloader",
-  "communication": [
+  "产品类型": "mainboard",
+  "名称": "FLY-F407ZG",
+  "处理器": "STM32F407",
+  "BL偏移": "32KiB bootloader",
+  "通讯方式": [
     "USB",
-    "USB桥接CAN"
+    "USB转CAN"
   ],
-  "default_comm": "USB",
-  "flash_methods": [
-    "DFU",
-    "KAT",
-    "TF"
+  "默认通讯": "USB (on PA11/PA12)",
+  "烧录方法": [
+    "DFU"
   ],
-  "default_flash": "DFU",
-  "clock": "8 MHz crystal",
-  "startup_pin": null,
-  "mcu": "STMicroelectronics STM32",
-  "flash_start": "0x8008000"
+  "默认烧录": "DFU",
+  "启动引脚": null,
+  "晶振": "8 MHz crystal",
+  "BL烧录": "支持",
+  "BL默认方式": "DFU",
+  "id": "fly-f407zg"
 }

@@ -308,15 +308,22 @@ function onBoardModelChange() {
 
 async function loadBoardConfig(manufacturer, boardType, boardId) {
     try {
+        console.log('loadBoardConfig called:', manufacturer, boardType, boardId);
         const response = await fetch('/api/firmware/boards');
         const data = await response.json();
+        console.log('API response:', data);
         
         if (data.boards && data.boards[manufacturer] && data.boards[manufacturer][boardType]) {
             const config = data.boards[manufacturer][boardType][boardId];
+            console.log('Found config:', config);
             if (config) {
                 selectedBoard = config;
                 applyBoardConfig(config);
+            } else {
+                console.error('Config not found for boardId:', boardId);
             }
+        } else {
+            console.error('Invalid path:', data.boards?.[manufacturer]?.[boardType]);
         }
     } catch (error) {
         console.error('加载主板配置失败:', error);
@@ -324,44 +331,171 @@ async function loadBoardConfig(manufacturer, boardType, boardId) {
 }
 
 function applyBoardConfig(config) {
+    console.log('applyBoardConfig called with:', config);
     // 应用配置到表单
     if (config.mcu) {
+        console.log('Setting mcuArch to:', config.mcu);
         document.getElementById('mcuArch').value = config.mcu;
         onMcuArchChange();
+    } else {
+        console.warn('config.mcu is missing');
     }
     
     if (config.processor) {
+        console.log('Setting processorModel to:', config.processor);
         document.getElementById('processorModel').value = config.processor;
+        // 触发处理器改变事件，加载该处理器的Klipper规则
+        onProcessorChange();
+    } else {
+        console.warn('config.processor is missing');
     }
     
     if (config.bootloader_offset) {
+        console.log('Setting bootloaderOffset to:', config.bootloader_offset);
         document.getElementById('bootloaderOffset').value = config.bootloader_offset;
+    } else {
+        console.warn('config.bootloader_offset is missing');
     }
     
-    if (config.communication) {
-        document.getElementById('communication').value = config.communication;
-        onCommunicationChange();
+    // 更新通信方式下拉框为产品支持的所有选项
+    if (config.communication && Array.isArray(config.communication)) {
+        console.log('Setting communication options:', config.communication);
+        updateCommunicationOptionsFromProduct(config.communication, config.default_comm);
+    } else {
+        console.warn('config.communication is missing or not array:', config.communication);
     }
     
     if (config.startup_pin) {
+        console.log('Setting startupPin to:', config.startup_pin);
         document.getElementById('startupPin').value = config.startup_pin;
     }
 }
+
+// 根据产品配置更新通信方式选项
+function updateCommunicationOptionsFromProduct(communicationList, defaultComm) {
+    const commSelect = document.getElementById('communication');
+    
+    // 生成选项HTML
+    commSelect.innerHTML = communicationList.map(comm => 
+        `<option value="${comm}">${comm}</option>`
+    ).join('');
+    
+    // 设置默认值
+    if (defaultComm && communicationList.includes(defaultComm)) {
+        commSelect.value = defaultComm;
+    } else if (communicationList.length > 0) {
+        commSelect.value = communicationList[0];
+    }
+    
+    // 触发通信接口改变事件
+    onCommunicationChange();
+}
+
+// Klipper规则缓存
+let klipperRules = {};
+
+// 加载Klipper规则
+async function loadKlipperRules() {
+    try {
+        const response = await fetch('/api/firmware/rules');
+        if (response.ok) {
+            klipperRules = await response.json();
+        }
+    } catch (error) {
+        console.error('加载Klipper规则失败:', error);
+    }
+}
+
+// 页面加载时初始化
+loadKlipperRules();
 
 function onMcuArchChange() {
     const mcuArch = document.getElementById('mcuArch').value;
     const processorSelect = document.getElementById('processorModel');
     
-    if (mcuArch === 'Raspberry Pi RP2040') {
-        processorSelect.innerHTML = '<option value="RP2040">RP2040</option>';
+    if (mcuArch === 'Raspberry Pi RP2040/RP235x') {
+        processorSelect.innerHTML = `
+            <option value="RP2040">RP2040</option>
+            <option value="RP2350">RP2350</option>
+        `;
     } else {
         processorSelect.innerHTML = `
+            <option value="STM32F031">STM32F031</option>
+            <option value="STM32F042">STM32F042</option>
+            <option value="STM32F070">STM32F070</option>
             <option value="STM32F072">STM32F072</option>
             <option value="STM32F103">STM32F103</option>
-            <option value="STM32F407">STM32F407</option>
+            <option value="STM32F207">STM32F207</option>
+            <option value="STM32F401">STM32F401</option>
             <option value="STM32F405">STM32F405</option>
+            <option value="STM32F407">STM32F407</option>
+            <option value="STM32F429">STM32F429</option>
+            <option value="STM32F446">STM32F446</option>
+            <option value="STM32F765">STM32F765</option>
+            <option value="STM32G070">STM32G070</option>
+            <option value="STM32G071">STM32G071</option>
+            <option value="STM32G0B0">STM32G0B0</option>
+            <option value="STM32G0B1">STM32G0B1</option>
+            <option value="STM32G431">STM32G431</option>
+            <option value="STM32G474">STM32G474</option>
             <option value="STM32H723">STM32H723</option>
+            <option value="STM32H743">STM32H743</option>
         `;
+    }
+    
+    // 更新处理器相关选项
+    onProcessorChange();
+}
+
+// 处理器型号改变时更新选项
+function onProcessorChange() {
+    const processor = document.getElementById('processorModel').value;
+    
+    // 更新Bootloader偏移选项
+    updateBootloaderOptions(processor);
+    
+    // 更新通信接口选项
+    updateCommunicationOptions(processor);
+    
+    // 更新BL烧录方式
+    updateBLFlashMethods(processor);
+}
+
+// 更新Bootloader偏移选项
+function updateBootloaderOptions(processor) {
+    const blSelect = document.getElementById('bootloaderOffset');
+    const rules = klipperRules[processor];
+    
+    if (rules && rules.bootloader_offsets) {
+        blSelect.innerHTML = rules.bootloader_offsets.map(bl => 
+            `<option value="${bl.name}">${bl.name}</option>`
+        ).join('');
+    }
+}
+
+// 更新通信接口选项
+function updateCommunicationOptions(processor) {
+    const commSelect = document.getElementById('communication');
+    const rules = klipperRules[processor];
+    
+    if (rules && rules.communication_interfaces) {
+        commSelect.innerHTML = rules.communication_interfaces.map(comm => 
+            `<option value="${comm}">${comm}</option>`
+        ).join('');
+    }
+    
+    // 触发通信接口改变事件
+    onCommunicationChange();
+}
+
+// 更新BL烧录方式
+function updateBLFlashMethods(processor) {
+    const rules = klipperRules[processor];
+    
+    // 更新主板配置中的flash_methods
+    if (rules && rules.flash_methods) {
+        // 保存到全局变量供后续使用
+        window.currentFlashMethods = rules.flash_methods;
     }
 }
 
@@ -369,6 +503,9 @@ function onCommunicationChange() {
     const communication = document.getElementById('communication').value;
     const canRow = document.getElementById('canBusInterfaceRow');
     const bitrateRow = document.getElementById('canBitrateRow');
+    const rp2040CanGpioRow = document.getElementById('rp2040CanGpioRow');
+    const rp2040CanGpioTxRow = document.getElementById('rp2040CanGpioTxRow');
+    const processor = document.getElementById('processorModel').value;
     
     // USB to CAN桥接显示CAN总线接口选择
     if (communication.includes('CAN bus bridge')) {
@@ -382,6 +519,15 @@ function onCommunicationChange() {
         bitrateRow.style.display = 'block';
     } else {
         bitrateRow.style.display = 'none';
+    }
+    
+    // RP2040/RP2350选择CAN bus时显示GPIO配置
+    if ((processor === 'RP2040' || processor === 'RP2350') && communication === 'CAN bus') {
+        rp2040CanGpioRow.style.display = 'block';
+        rp2040CanGpioTxRow.style.display = 'block';
+    } else {
+        rp2040CanGpioRow.style.display = 'none';
+        rp2040CanGpioTxRow.style.display = 'none';
     }
 }
 
@@ -410,6 +556,13 @@ async function compileFirmware() {
         can_bus_interface: document.getElementById('canBusInterface').value,
         startup_pin: document.getElementById('startupPin').value
     };
+    
+    // RP2040/RP2350 CAN GPIO配置
+    const processor = document.getElementById('processorModel').value;
+    if ((processor === 'RP2040' || processor === 'RP2350') && config.communication === 'CAN bus') {
+        config.rp2040_can_rx_gpio = document.getElementById('rp2040CanRxGpio').value || '4';
+        config.rp2040_can_tx_gpio = document.getElementById('rp2040CanTxGpio').value || '5';
+    }
     
     compileInProgress = true;
     const statusDiv = document.getElementById('compileStatus');
@@ -478,6 +631,8 @@ async function detectDevicesForFlash() {
         
         if (flashMode === 'CAN') {
             devices = data.can || [];
+        } else if (flashMode === 'DFU') {
+            devices = data.dfu || [];
         } else {
             devices = data.usb || [];
         }
@@ -697,13 +852,13 @@ async function flashBLFirmware() {
 async function loadSettings() {
     try {
         const response = await fetch('/api/settings/config');
-        const data = await response.json();
+        const config = await response.json();
         
-        if (data.config) {
-            document.getElementById('klipperPath').value = data.config.klipper_path || '~/klipper';
-            document.getElementById('serverPort').value = data.config.port || 9999;
-            document.getElementById('jsonRepoUrl').value = data.config.json_repo_url || '';
-            document.getElementById('lastJsonUpdate').textContent = data.config.last_json_update || '从未';
+        if (config) {
+            document.getElementById('klipperPath').value = config.klipper_path || '~/klipper';
+            document.getElementById('serverPort').value = config.port || 9999;
+            document.getElementById('jsonRepoUrl').value = config.json_repo_url || '';
+            document.getElementById('lastJsonUpdate').textContent = config.last_json_update || '从未';
         }
     } catch (error) {
         console.error('加载设置失败:', error);
@@ -843,6 +998,58 @@ function showError(message) {
 }
 
 // ==================== CAN配置 ====================
+// 自动诊断CAN网络（当未检测到设备时调用）
+async function autoDiagnoseCan() {
+    const diagnoseDiv = document.getElementById('canAutoDiagnose');
+    if (!diagnoseDiv) return;
+    
+    diagnoseDiv.innerHTML = '<span class="status-info">🔍 正在自动诊断CAN网络...</span>';
+    
+    try {
+        const response = await fetch('/api/system/can-diagnose');
+        const data = await response.json();
+        
+        let html = '<div style="background: #fff3cd; padding: 10px; border-radius: 8px; border-left: 4px solid #ffc107;">';
+        html += '<h4 style="margin: 0 0 10px 0; color: #856404;">⚠️ 自动诊断结果</h4>';
+        
+        // 检查问题
+        const issues = [];
+        
+        if (!data.kernel_support) {
+            issues.push('内核不支持CAN');
+        }
+        
+        if (!data.can_device_exists) {
+            issues.push('未检测到USB CAN设备，请检查硬件连接');
+        }
+        
+        if (!data.can0_exists) {
+            issues.push('can0接口不存在');
+        } else if (data.can0_state !== 'UP') {
+            issues.push(`can0接口状态: ${data.can0_state}`);
+        }
+        
+        // 显示问题
+        if (issues.length > 0) {
+            html += '<ul style="margin: 5px 0; color: #856404;">';
+            issues.forEach(issue => {
+                html += `<li>${issue}</li>`;
+            });
+            html += '</ul>';
+        } else {
+            html += '<p style="color: #856404;">CAN网络配置正常，请检查硬件连接</p>';
+        }
+        
+        html += '<p style="margin: 10px 0 0 0; font-size: 12px;">💡 点击"诊断网络"按钮查看详细信息</p>';
+        html += '</div>';
+        
+        diagnoseDiv.innerHTML = html;
+        
+    } catch (error) {
+        diagnoseDiv.innerHTML = '<span class="status-error">❌ 自动诊断失败</span>';
+    }
+}
+
 async function loadCanConfig() {
     try {
         const response = await fetch('/api/system/can-config');
@@ -853,44 +1060,59 @@ async function loadCanConfig() {
         const saveBtn = document.getElementById('saveCanBtn');
         
         if (data.exists) {
-            // 后端返回的bitrate已经是M单位（1, 500, 250）或者是完整数值（1000000, 500000, 250000）
+            // 后端返回的bitrate已经是完整数值（1000000, 500000, 250000）
             let bitrateStr;
             if (data.bitrate >= 1000000) {
                 bitrateStr = (data.bitrate / 1000000) + 'M';
             } else if (data.bitrate >= 1000) {
                 bitrateStr = (data.bitrate / 1000) + 'K';
-            } else if (data.bitrate === 1) {
-                bitrateStr = '1M';
-            } else if (data.bitrate === 500) {
-                bitrateStr = '500K';
-            } else if (data.bitrate === 250) {
-                bitrateStr = '250K';
             } else {
                 bitrateStr = data.bitrate + 'bps';
             }
             const type = data.type === 'systemd' ? 'systemd-networkd' : '传统interfaces';
             
+            // 获取txqueuelen显示值
+            const txqueuelen = data.txqueuelen || 1024;
+            
+            // USB CAN设备数量
+            const usbCanCount = data.usb_can_count || 0;
+            const usbCanText = usbCanCount > 0 
+                ? `<span style="color: green;">检测到 ${usbCanCount} 个USB CAN设备</span>`
+                : '<span style="color: orange;">未检测到USB CAN设备</span>';
+            
             statusDiv.innerHTML = `
                 <div class="info-grid">
                     <div class="info-item">
-                        <span class="info-label">配置状态</span>
-                        <span class="info-value">已配置</span>
+                        <span class="info-label">CAN检查</span>
+                        <span class="info-value">${usbCanText}</span>
                     </div>
                     <div class="info-item">
                         <span class="info-label">当前速率</span>
                         <span class="info-value">${bitrateStr}</span>
                     </div>
                     <div class="info-item">
+                        <span class="info-label">CAN缓存</span>
+                        <span class="info-value">${txqueuelen}</span>
+                    </div>
+                    <div class="info-item">
                         <span class="info-label">配置类型</span>
                         <span class="info-value">${type}</span>
                     </div>
                 </div>
+                <div id="canAutoDiagnose" style="margin-top: 10px;"></div>
             `;
+            
+            // 如果未检测到USB CAN设备，自动进行诊断
+            if (usbCanCount === 0) {
+                autoDiagnoseCan();
+            }
             
             // 设置当前速率
             if (data.bitrate) {
                 document.getElementById('canBitrate').value = data.bitrate.toString();
             }
+            // 设置当前txqueuelen
+            document.getElementById('canTxqueuelen').value = txqueuelen.toString();
             
             formDiv.style.display = 'block';
             saveBtn.style.display = 'inline-flex';
@@ -908,7 +1130,11 @@ async function loadCanConfig() {
 
 async function saveCanConfig() {
     const bitrate = parseInt(document.getElementById('canBitrate').value);
+    const txqueuelen = parseInt(document.getElementById('canTxqueuelen').value) || 1024;
     const messageDiv = document.getElementById('canConfigMessage');
+    
+    // 隐藏诊断结果，避免重叠
+    document.getElementById('canDiagnoseResult').style.display = 'none';
     
     messageDiv.innerHTML = '<span class="status-info">正在保存...</span>';
     
@@ -918,7 +1144,7 @@ async function saveCanConfig() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 bitrate: bitrate,
-                txqueuelen: 1024,
+                txqueuelen: txqueuelen,
                 type: 'systemd'
             })
         });
@@ -939,6 +1165,11 @@ async function saveCanConfig() {
 // ==================== CAN网络诊断与修复 ====================
 async function diagnoseCanNetwork() {
     const resultDiv = document.getElementById('canDiagnoseResult');
+    const messageDiv = document.getElementById('canConfigMessage');
+    
+    // 隐藏配置消息，避免重叠
+    messageDiv.innerHTML = '';
+    
     resultDiv.style.display = 'block';
     resultDiv.innerHTML = '<span class="status-info">🔍 正在诊断CAN网络...</span>';
     
@@ -1003,7 +1234,12 @@ async function diagnoseCanNetwork() {
 
 async function repairCanNetwork() {
     const resultDiv = document.getElementById('canDiagnoseResult');
+    const messageDiv = document.getElementById('canConfigMessage');
     const bitrate = parseInt(document.getElementById('canBitrate').value) || 1000000;
+    const txqueuelen = parseInt(document.getElementById('canTxqueuelen').value) || 1024;
+    
+    // 隐藏配置消息，避免重叠
+    messageDiv.innerHTML = '';
     
     resultDiv.style.display = 'block';
     resultDiv.innerHTML = '<span class="status-info">🔧 正在修复CAN网络...</span>';
@@ -1014,7 +1250,7 @@ async function repairCanNetwork() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 bitrate: bitrate,
-                txqueuelen: 1024
+                txqueuelen: txqueuelen
             })
         });
         

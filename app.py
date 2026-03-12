@@ -253,10 +253,10 @@ def get_all_ids():
         except:
             pass
         
-        # CAN设备 - 格式: canbus_uuid: <uuid>
+        # CAN设备 - 使用Klipper的canbus_query.py
         try:
             output = subprocess.run(
-                '~/klippy-env/bin/python ~/klipper/lib/canboot/flash_can.py -q 2>&1',
+                '~/klippy-env/bin/python ~/klipper/scripts/canbus_query.py can0 2>&1',
                 shell=True, capture_output=True, text=True
             )
             seen_uuids = set()
@@ -326,6 +326,37 @@ def get_bl_firmwares_list(manufacturer):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# 加载Klipper规则
+def load_klipper_rules():
+    """加载Klipper固件编译规则"""
+    rules_path = os.path.join(BASE_DIR, 'klipper_rules.json')
+    if os.path.exists(rules_path):
+        with open(rules_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+# ==================== 固件编译规则 API ====================
+@app.route('/api/firmware/rules/<processor>')
+def get_processor_rules(processor):
+    """获取指定处理器的固件编译规则"""
+    try:
+        rules = load_klipper_rules()
+        if processor in rules:
+            return jsonify(rules[processor])
+        else:
+            return jsonify({'error': f'未找到处理器 {processor} 的规则'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/firmware/rules')
+def get_all_rules():
+    """获取所有处理器的固件编译规则"""
+    try:
+        rules = load_klipper_rules()
+        return jsonify(rules)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ==================== 固件编译 API ====================
 @app.route('/api/firmware/compile', methods=['POST'])
 def compile_firmware():
@@ -339,6 +370,8 @@ def compile_firmware():
         communication = data.get('communication', 'USB (on PA11/PA12)')
         can_bus_interface = data.get('can_bus_interface', 'CAN bus (on PB8/PB9)')
         startup_pin = data.get('startup_pin', '')
+        rp2040_can_rx_gpio = data.get('rp2040_can_rx_gpio', '4')
+        rp2040_can_tx_gpio = data.get('rp2040_can_tx_gpio', '5')
         
         if not os.path.exists(klipper_path):
             return jsonify({'error': f'Klipper目录不存在: {klipper_path}'}), 400
@@ -350,58 +383,117 @@ def compile_firmware():
         # 生成配置文件
         config_lines = ['CONFIG_LOW_LEVEL_OPTIONS=y']
         
-        # MCU架构
+        # MCU架构 (支持新的文档格式 "Raspberry Pi RP2040/RP235x")
         if 'STM32' in mcu_arch:
             config_lines.append('CONFIG_MACH_STM32=y')
-        elif 'RP2040' in mcu_arch:
-            config_lines.append('CONFIG_MACH_RP2040=y')
+        elif 'RP2040' in mcu_arch or 'RP235x' in mcu_arch:
+            # RP2040/RP2350使用RPXXXX配置
+            config_lines.append('CONFIG_MACH_RPXXXX=y')
         
         # 处理器
         processor_map = {
+            'STM32F031': 'CONFIG_MACH_STM32F031=y',
+            'STM32F042': 'CONFIG_MACH_STM32F042=y',
+            'STM32F070': 'CONFIG_MACH_STM32F070=y',
             'STM32F072': 'CONFIG_MACH_STM32F072=y',
             'STM32F103': 'CONFIG_MACH_STM32F103=y',
-            'STM32F407': 'CONFIG_MACH_STM32F407=y',
+            'STM32F207': 'CONFIG_MACH_STM32F207=y',
+            'STM32F401': 'CONFIG_MACH_STM32F401=y',
             'STM32F405': 'CONFIG_MACH_STM32F405=y',
+            'STM32F407': 'CONFIG_MACH_STM32F407=y',
+            'STM32F429': 'CONFIG_MACH_STM32F429=y',
+            'STM32F446': 'CONFIG_MACH_STM32F446=y',
+            'STM32F765': 'CONFIG_MACH_STM32F765=y',
+            'STM32G070': 'CONFIG_MACH_STM32G070=y',
+            'STM32G071': 'CONFIG_MACH_STM32G071=y',
+            'STM32G0B0': 'CONFIG_MACH_STM32G0B0=y',
+            'STM32G0B1': 'CONFIG_MACH_STM32G0B1=y',
+            'STM32G431': 'CONFIG_MACH_STM32G431=y',
+            'STM32G474': 'CONFIG_MACH_STM32G474=y',
             'STM32H723': 'CONFIG_MACH_STM32H723=y',
-            'RP2040': 'CONFIG_MACH_RP2040=y'
+            'STM32H743': 'CONFIG_MACH_STM32H743=y',
+            'RP2040': 'CONFIG_MACH_RP2040=y',
+            'RP2350': 'CONFIG_MACH_RP2350=y'
         }
         if processor in processor_map:
             config_lines.append(processor_map[processor])
         
-        # Bootloader偏移
-        offset_map = {
-            'No bootloader': 'CONFIG_FLASH_START=0x8000000',
-            '8KiB bootloader': 'CONFIG_FLASH_START=0x8002000',
-            '16KiB bootloader': 'CONFIG_FLASH_START=0x8004000',
-            '32KiB bootloader': 'CONFIG_FLASH_START=0x8008000',
-            '128KiB bootloader': 'CONFIG_FLASH_START=0x8020000'
-        }
+        # Bootloader偏移 (区分STM32和RP2040/RP2350)
+        if 'RP2040' in processor:
+            # RP2040使用256字节stage2
+            offset_map = {
+                'No bootloader': 'CONFIG_RPXXXX_FLASH_START_0100=y',
+                '16KiB bootloader': 'CONFIG_RPXXXX_FLASH_START_4000=y'
+            }
+        elif 'RP2350' in processor:
+            # RP2350真正无bootloader
+            offset_map = {
+                'No bootloader': 'CONFIG_RPXXXX_FLASH_START_0000=y',
+                '16KiB bootloader': 'CONFIG_RPXXXX_FLASH_START_4000=y'
+            }
+        else:
+            # STM32
+            offset_map = {
+                'No bootloader': 'CONFIG_STM32_FLASH_START_0000=y',
+                '2KiB bootloader': 'CONFIG_STM32_FLASH_START_800=y',
+                '4KiB bootloader': 'CONFIG_STM32_FLASH_START_1000=y',
+                '8KiB bootloader': 'CONFIG_STM32_FLASH_START_2000=y',
+                '16KiB bootloader': 'CONFIG_STM32_FLASH_START_4000=y',
+                '20KiB bootloader': 'CONFIG_STM32_FLASH_START_5000=y',
+                '28KiB bootloader': 'CONFIG_STM32_FLASH_START_7000=y',
+                '32KiB bootloader': 'CONFIG_STM32_FLASH_START_8000=y',
+                '34KiB bootloader': 'CONFIG_STM32_FLASH_START_8800=y',
+                '36KiB bootloader': 'CONFIG_STM32_FLASH_START_9000=y',
+                '48KiB bootloader': 'CONFIG_STM32_FLASH_START_C000=y',
+                '64KiB bootloader': 'CONFIG_STM32_FLASH_START_10000=y',
+                '128KiB bootloader': 'CONFIG_STM32_FLASH_START_20000=y'
+            }
         if bootloader_offset in offset_map:
             config_lines.append(offset_map[bootloader_offset])
         
         # 通信接口
-        if 'USB to CAN bus bridge' in communication:
-            config_lines.append('CONFIG_USBCANBUS=y')
-            config_lines.append('CONFIG_USB=y')
-            config_lines.append('CONFIG_CANBUS=y')
-            config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
-            config_lines.append('CONFIG_STM32_USBCANBUS_PA11_PA12=y')
-            if 'PB8/PB9' in can_bus_interface:
-                config_lines.append('CONFIG_STM32_CMENU_CANBUS_PB8_PB9=y')
-                config_lines.append('CONFIG_STM32_CANBUS_PB8_PB9=y')
-            elif 'PD0/PD1' in can_bus_interface:
-                config_lines.append('CONFIG_STM32_CMENU_CANBUS_PD0_PD1=y')
-                config_lines.append('CONFIG_STM32_CANBUS_PD0_PD1=y')
-        elif 'USB' in communication:
-            config_lines.append('CONFIG_USB=y')
-            config_lines.append('CONFIG_USB_BUS=y')
-        elif 'CAN' in communication:
-            config_lines.append('CONFIG_CANBUS=y')
-            config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
-            if 'PB8/PB9' in communication:
-                config_lines.append('CONFIG_STM32_CANBUS_PB8_PB9=y')
-        elif 'Serial' in communication:
-            config_lines.append('CONFIG_SERIAL=y')
+        if 'RP2040' in processor or 'RP2350' in processor:
+            # RP2040/RP2350通信接口
+            if 'USB to CAN bus bridge' in communication:
+                config_lines.append('CONFIG_RPXXXX_USBCANBUS=y')
+                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_RX={rp2040_can_rx_gpio}')
+                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_TX={rp2040_can_tx_gpio}')
+            elif 'USBSERIAL' in communication:
+                config_lines.append('CONFIG_RPXXXX_USB=y')
+            elif 'CAN' in communication:
+                config_lines.append('CONFIG_RPXXXX_CANBUS=y')
+                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_RX={rp2040_can_rx_gpio}')
+                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_TX={rp2040_can_tx_gpio}')
+            elif 'UART' in communication:
+                config_lines.append('CONFIG_RPXXXX_SERIAL_UART0_PINS_0_1=y')
+        else:
+            # STM32通信接口
+            if 'USB to CAN bus bridge' in communication:
+                config_lines.append('CONFIG_USBCANBUS=y')
+                config_lines.append('CONFIG_USB=y')
+                config_lines.append('CONFIG_CANBUS=y')
+                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
+                config_lines.append('CONFIG_STM32_USBCANBUS_PA11_PA12=y')
+                if 'PB8/PB9' in can_bus_interface:
+                    config_lines.append('CONFIG_STM32_CMENU_CANBUS_PB8_PB9=y')
+                    config_lines.append('CONFIG_STM32_CANBUS_PB8_PB9=y')
+                elif 'PD0/PD1' in can_bus_interface:
+                    config_lines.append('CONFIG_STM32_CMENU_CANBUS_PD0_PD1=y')
+                    config_lines.append('CONFIG_STM32_CANBUS_PD0_PD1=y')
+            elif 'USB' in communication:
+                config_lines.append('CONFIG_USB=y')
+                config_lines.append('CONFIG_USB_BUS=y')
+                config_lines.append('CONFIG_STM32_USB_PA11_PA12=y')
+            elif 'CAN' in communication:
+                config_lines.append('CONFIG_CANBUS=y')
+                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
+                if 'PB8/PB9' in communication:
+                    config_lines.append('CONFIG_STM32_CANBUS_PB8_PB9=y')
+                elif 'PA11/PA12' in communication:
+                    config_lines.append('CONFIG_STM32_CANBUS_PA11_PA12=y')
+            elif 'Serial' in communication:
+                config_lines.append('CONFIG_SERIAL=y')
+                config_lines.append('CONFIG_STM32_SERIAL_USART1=y')
         
         # 启动引脚
         if startup_pin:
@@ -524,10 +616,10 @@ def detect_devices():
 # ==================== CAN设备搜索 API ====================
 @app.route('/api/firmware/can/scan')
 def scan_can_devices():
-    """扫描CAN设备"""
+    """扫描CAN设备 - 使用Klipper的canbus_query.py"""
     try:
         result = subprocess.run(
-            '~/klippy-env/bin/python ~/klipper/lib/canboot/flash_can.py -q 2>/dev/null || echo ""',
+            '~/klippy-env/bin/python ~/klipper/scripts/canbus_query.py can0 2>/dev/null || echo ""',
             shell=True, capture_output=True, text=True, timeout=10
         )
         
@@ -598,9 +690,28 @@ def flash_firmware():
             returncode = result.returncode
             
         elif flash_mode == 'CAN':
-            # CAN烧录 (Katapult via CAN)
+            # CAN烧录 (Katapult via CAN) - 使用文档推荐的flashtool.py
             can_uuid = device.replace('can0:', '') if 'can0:' in device else device
-            cmd = f'~/klippy-env/bin/python ~/klipper/lib/canboot/flash_can.py -u {can_uuid} -f {firmware_path}'
+            
+            # 第一步：重置进入烧录模式
+            reset_cmd = f'python3 ~/katapult/scripts/flashtool.py -i can0 -r -u {can_uuid}'
+            reset_result = subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
+            
+            # 等待设备重新枚举
+            import time
+            time.sleep(3)
+            
+            # 第二步：查找新的设备ID
+            find_device_cmd = "ls /dev/serial/by-id/* 2>/dev/null | grep -i katapult || echo ''"
+            device_result = subprocess.run(find_device_cmd, shell=True, capture_output=True, text=True, timeout=10)
+            
+            if device_result.stdout.strip():
+                new_device = device_result.stdout.strip().split('\n')[0]
+                # 第三步：使用make flash烧录
+                cmd = f'cd {klipper_path} && make flash FLASH_DEVICE={new_device}'
+            else:
+                # 如果找不到设备，尝试直接使用UUID烧录
+                cmd = f'python3 ~/katapult/scripts/flashtool.py -i can0 -u {can_uuid} -f {firmware_path}'
             
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
             output = result.stdout + result.stderr
@@ -731,16 +842,29 @@ def get_can_config():
         
         # 解析速率
         if config_type == 'systemd':
-            # 解析 BitRate=1000000
+            # 解析 BitRate=1000000 或 BitRate=1M
             import re
             bitrate_match = re.search(r'BitRate\s*=\s*(\d+)', content)
             if bitrate_match:
-                config['bitrate'] = int(bitrate_match.group(1))
+                bitrate_val = int(bitrate_match.group(1))
+                # 转换M单位到完整数值
+                if bitrate_val == 1:
+                    config['bitrate'] = 1000000
+                elif bitrate_val == 500:
+                    config['bitrate'] = 500000
+                elif bitrate_val == 250:
+                    config['bitrate'] = 250000
+                else:
+                    config['bitrate'] = bitrate_val
             
-            # 解析 TxQueueLength
-            txqueue_match = re.search(r'TxQueueLength\s*=\s*(\d+)', content)
-            if txqueue_match:
-                config['txqueuelen'] = int(txqueue_match.group(1))
+            # 解析 TxQueueLength（从.link文件）
+            link_file = os.path.join(CAN_NETWORK_DIR, '99-can.link')
+            if os.path.exists(link_file):
+                with open(link_file, 'r') as f:
+                    link_content = f.read()
+                txqueue_match = re.search(r'TxQueueLength\s*=\s*(\d+)', link_content)
+                if txqueue_match:
+                    config['txqueuelen'] = int(txqueue_match.group(1))
         else:
             # 解析传统配置 bitrate 1000000
             import re
@@ -757,6 +881,19 @@ def get_can_config():
             config['status'] = result.stdout
         except:
             config['status'] = '无法获取CAN0状态'
+        
+        # 检测USB CAN设备数量 (OpenMoko CAN适配器 1d50:xxxx)
+        try:
+            lsusb_result = subprocess.run(
+                'lsusb | grep "1d50:" || echo ""',
+                shell=True, capture_output=True, text=True
+            )
+            usb_devices = [line for line in lsusb_result.stdout.strip().split('\n') if line.strip()]
+            config['usb_can_count'] = len(usb_devices)
+            config['usb_can_devices'] = usb_devices
+        except:
+            config['usb_can_count'] = 0
+            config['usb_can_devices'] = []
         
         return jsonify(config)
         
