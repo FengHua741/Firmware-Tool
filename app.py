@@ -253,10 +253,19 @@ def get_all_ids():
         except:
             pass
         
-        # CAN设备 - 使用Klipper的canbus_query.py
+        # CAN设备 - 使用Klipper的 canbus_query.py
         try:
+            import pwd
+            try:
+                home_dir = pwd.getpwnam('fenghua').pw_dir
+            except KeyError:
+                home_dir = os.path.expanduser('~')
+                    
+            python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python')
+            canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
+                    
             output = subprocess.run(
-                '~/klippy-env/bin/python ~/klipper/scripts/canbus_query.py can0 2>&1',
+                f'{python_bin} {canbus_script} can0 2>&1',
                 shell=True, capture_output=True, text=True
             )
             seen_uuids = set()
@@ -265,7 +274,7 @@ def get_all_ids():
                     # 过滤错误信息和警告
                     if 'Error' in line or 'Traceback' in line or 'DeprecationWarning' in line:
                         continue
-                    # 解析UUID (8位或更长的十六进制)
+                    # 解析 UUID (8 位或更长的十六进制)
                     match = re.search(r'\b([a-f0-9]{8,})\b', line)
                     if match:
                         uuid = match.group(1)
@@ -276,8 +285,9 @@ def get_all_ids():
                         # 格式化为 canbus_uuid: <uuid>
                         formatted = f"canbus_uuid: {uuid}"
                         result['can'].append({'raw': uuid, 'formatted': formatted})
-        except:
-            pass
+        except Exception as e:
+            import logging
+            logging.error(f'CAN设备检测失败：{e}')
         
         # 摄像头设备
         try:
@@ -732,15 +742,30 @@ def flash_firmware():
             returncode = flash_result.returncode
             
         elif flash_mode == 'KAT':
-            # Katapult烧录
+            # Katapult 烧录
+            # 使用 fenghua 用户的家目录（服务以 root 运行，但 katapult 在用户目录）
+            import pwd
+            try:
+                # 尝试获取 fenghua 用户的家目录
+                home_dir = pwd.getpwnam('fenghua').pw_dir
+            except KeyError:
+                # 如果不存在，使用当前用户的家目录
+                home_dir = os.path.expanduser('~')
+            
+            katapult_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
+            
             if 'katapult' in device.lower():
-                cmd = f'python3 ~/katapult/scripts/flashtool.py -d {device}'
+                # 必须指定固件路径，否则 flashtool.py 会使用错误的家目录
+                cmd = f'python3 {katapult_script} -d {device} -f {firmware_path}'
             else:
                 cmd = f'cd {klipper_path} && make flash FLASH_DEVICE={device}'
-            
+                    
+            import logging
+            logging.info(f'KAT 烧录命令：{cmd}')
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
             output = result.stdout + result.stderr
             returncode = result.returncode
+            logging.info(f'KAT 烧录结果：returncode={returncode}, output={output[:200]}')
             
         elif flash_mode == 'CAN':
             # CAN烧录 (Katapult via CAN) - 使用文档推荐的flashtool.py
