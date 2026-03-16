@@ -1,20 +1,29 @@
 {
-  "产品类型": "mainboard",
-  "名称": "FLY-C8",
-  "处理器": "STM32F407",
-  "BL偏移": "32KiB bootloader",
-  "通讯方式": [
+  "type": "mainboard",
+  "name": "FLY-C8",
+  "platform": "STM32",
+  "mcu": "stm32f407",
+  "bl_offset": "2048",
+  "connections": [
     "USB",
     "USB转CAN"
   ],
-  "默认通讯": "USB (on PA11/PA12)",
-  "烧录方法": [
+  "default_connection": "USB (on PA11/PA12)",
+  "flash_modes": [
     "DFU"
   ],
-  "默认烧录": "DFU",
-  "启动引脚": null,
-  "晶振": "8 MHz crystal",
-  "BL烧录": "支持",
-  "BL默认方式": "DFU",
-  "id": "fly-c8"
+  "default_flash": "DFU",
+  "boot_pins": null,
+  "crystal": "8000000",
+  "bl_flash_support": "支持",
+  "bl_default_flash": "DFU",
+  "id": "fly-c8",
+  "firmware_update": {
+    "enabled": false,
+    "katapult_mode": "USB",
+    "device_id": "",
+    "flash_mode": "DFU",
+    "custom_config": ""
+  },
+  "manufacturer": "FLY"
 }

@@ -1,0 +1,104 @@
+<!-- 固件编译与烧录页面 -->
+<div id="page-firmware" class="page">
+    <div class="page-header">
+        <h2>🔨 固件编译与烧录</h2>
+    </div>
+    
+    <!-- 依赖检查 -->
+    <div class="card">
+        <div class="card-header">
+            <h3>📦 Klipper依赖检测</h3>
+        </div>
+        <div class="card-body">
+            <div id="depsStatus" class="deps-status">
+                <p>点击按钮检测依赖...</p>
+            </div>
+            <div class="form-row" style="margin-top: 15px;">
+                <button class="btn btn-primary" onclick="checkDependencies()">
+                    <span>🔍</span> 检测依赖
+                </button>
+                <button class="btn btn-warning" onclick="installDependencies()" style="margin-left: 10px;">
+                    <span>📥</span> 安装依赖
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 编译配置 -->
+    <div class="card">
+        <div class="card-header">
+            <h3>⚙️ 编译配置</h3>
+        </div>
+        <div class="card-body">
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">厂家</label>
+                    <select class="form-control form-select" id="compileManufacturer">
+                        <option value="FLY">FLY</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">产品类型</label>
+                    <select class="form-control form-select" id="compileBoardType" onchange="loadCompileConfigs()">
+                        <option value="">-- 选择类型 --</option>
+                        <option value="mainboard">主板</option>
+                        <option value="toolboard">工具板</option>
+                        <option value="expansion">扩展板</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">配置列表</label>
+                    <select class="form-control form-select" id="compileConfig">
+                        <option value="">-- 先选择产品类型 --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">烧录模式</label>
+                    <select class="form-control form-select" id="flashMode">
+                        <option value="DFU">USB/DFU</option>
+                        <option value="KAT">USB/KATAPULT</option>
+                        <option value="CAN">CAN/KATAPULT</option>
+                        <option value="CAN_BRIDGE_DFU">CAN_BRIDGE_DFU</option>
+                        <option value="CAN_BRIDGE_KAT">CAN_BRIDGE_KATAPULT</option>
+                        <option value="HOST">HOST (仅编译)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <button class="btn btn-success" onclick="compileFirmware()">
+                    <span>🔨</span> 一键编译
+                </button>
+            </div>
+            <div id="compileProgress" class="compile-progress" style="display:none;">
+                <div class="progress-bar"></div>
+                <p><span id="compileStatus">准备编译...</span></p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- BL 固件上传 -->
+    <div class="card">
+        <div class="card-header">
+            <h3>💾 BL 固件管理</h3>
+        </div>
+        <div class="card-body">
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">选择厂家</label>
+                    <select class="form-control form-select" id="blManufacturer">
+                        <option value="FLY">FLY</option>
+                    </select>
+                </div>
+            </div>
+            <div class="upload-area" id="blUploadArea" style="margin-top: 15px;">
+                <p>拖拽 BL 固件 (.bin) 到此处，或点击选择文件</p>
+                <input type="file" id="blFileInput" accept=".bin" style="display:none;">
+            </div>
+            <div id="blFirmwareList" class="bl-list" style="margin-top: 20px;">
+                <p class="empty">暂无 BL 固件</p>
+            </div>
+        </div>
+    </div>
+</div>

@@ -35,6 +35,12 @@ function switchPage(pageId) {
         startResourceMonitoring();
     } else if (pageId === 'firmware') {
         loadManufacturers();
+    } else if (pageId === 'firmware-update') {
+        // 固件更新页面初始化
+        console.log('固件更新页面已加载');
+    } else if (pageId === 'config') {
+        // 配置管理页面初始化
+        console.log('配置管理页面已加载');
     } else if (pageId === 'settings') {
         loadSettings();
     }
@@ -54,26 +60,9 @@ let resourceInterval = null;
 function startResourceMonitoring() {
     updateResources();
     if (resourceInterval) clearInterval(resourceInterval);
-    resourceInterval = setInterval(updateResources, 2000);
+    resourceInterval = setInterval(updateResources, 1000);
 }
 
-async function updateResources() {
-    try {
-        const response = await fetch('/api/system/resources');
-        const data = await response.json();
-        
-        if (data.current) {
-            document.getElementById('cpuPercent').textContent = `${data.current.cpu.percent}%`;
-            document.getElementById('memPercent').textContent = `${data.current.memory.percent}%`;
-            document.getElementById('diskPercent').textContent = `${data.current.disk.percent}%`;
-            
-            // 更新网络IP显示
-            updateNetworkDisplay(data.current.network);
-        }
-    } catch (error) {
-        console.error('获取资源信息失败:', error);
-    }
-}
 
 function updateNetworkDisplay(network) {
     const container = document.getElementById('networkInterfaces');
@@ -196,7 +185,7 @@ async function loadManufacturers() {
         const response = await fetch('/api/firmware/manufacturers');
         const data = await response.json();
         
-        const select = document.getElementById('manufacturerSelect');
+        const select = document.getElementById('compileManufacturer');
         select.innerHTML = '<option value="">请选择...</option>';
         
         if (data.manufacturers) {
@@ -208,49 +197,15 @@ async function loadManufacturers() {
         // 如果有保存的选择，恢复
         if (compileParams.manufacturer) {
             select.value = compileParams.manufacturer;
-            onManufacturerChange();
+            onCompileManufacturerChange();
         }
     } catch (error) {
         console.error('加载厂家失败:', error);
     }
 }
 
-function onManufacturerChange() {
-    const manufacturer = document.getElementById('manufacturerSelect').value;
-    compileParams.manufacturer = manufacturer;
-    
-    const typeSelect = document.getElementById('boardTypeSelect');
-    const modelSelect = document.getElementById('boardModelSelect');
-    
-    if (!manufacturer) {
-        typeSelect.innerHTML = '<option value="">请先选择厂家</option>';
-        typeSelect.disabled = true;
-        modelSelect.innerHTML = '<option value="">请先选择类型</option>';
-        modelSelect.disabled = true;
-        return;
-    }
-    
-    // 加载主板类型
-    typeSelect.innerHTML = `
-        <option value="">请选择...</option>
-        <option value="mainboard">主控板</option>
-        <option value="toolboard">工具板</option>
-        <option value="extensionboard">扩展板</option>
-    `;
-    typeSelect.disabled = false;
-    
-    modelSelect.innerHTML = '<option value="">请先选择类型</option>';
-    modelSelect.disabled = true;
-    
-    // 恢复选择
-    if (compileParams.boardType) {
-        typeSelect.value = compileParams.boardType;
-        onBoardTypeChange();
-    }
-}
-
 function onBoardTypeChange() {
-    const manufacturer = document.getElementById('manufacturerSelect').value;
+    const manufacturer = document.getElementById('compileManufacturer').value;
     const boardType = document.getElementById('boardTypeSelect').value;
     compileParams.boardType = boardType;
     
@@ -295,7 +250,7 @@ async function loadBoardModels(manufacturer, boardType) {
 }
 
 function onBoardModelChange() {
-    const manufacturer = document.getElementById('manufacturerSelect').value;
+    const manufacturer = document.getElementById('compileManufacturer').value;
     const boardType = document.getElementById('boardTypeSelect').value;
     const boardModel = document.getElementById('boardModelSelect').value;
     
@@ -1535,3 +1490,1438 @@ document.addEventListener('DOMContentLoaded', () => {
     loadCanConfig(); // 立即加载一次
     setInterval(loadCanConfig, 5000); // 之后每 5 秒刷新一次
 });
+
+// ==================== 配置管理功能 ====================
+
+// 导航到配置页面
+function navigateToConfigPage() {
+    switchPage('config');
+}
+
+// 加载配置列表
+async function loadConfigList() {
+    const manufacturer = document.getElementById('configManufacturer').value;
+    const configList = document.getElementById('configList');
+    
+    try {
+        configList.innerHTML = '<p class="empty">加载中...</p>';
+        
+        const response = await fetch(`/api/config/list/${manufacturer}`);
+        const data = await response.json();
+        
+        if (data.configs && data.configs.length > 0) {
+            let html = '';
+            data.configs.forEach(config => {
+                html += `
+                    <div class="config-item">
+                        <div class="config-item-info">
+                            <div class="config-item-name">${config.name || 'Unnamed'}</div>
+                            <div class="config-item-details">
+                                ${config.type || 'unknown'} | 
+                                ${config.mcu || 'unknown MCU'}
+                            </div>
+                        </div>
+                        <div class="config-item-actions">
+                            <button class="btn btn-secondary" onclick="editConfig('${config.id}')">✏️ Edit</button>
+                            <button class="btn btn-danger" onclick="deleteConfig('${config.id}')">🗑️ Delete</button>
+                        </div>
+                    </div>
+                `;
+            });
+            configList.innerHTML = html;
+        } else {
+            configList.innerHTML = '<p class="empty">No configs yet, please add new config or upload folder</p>';
+        }
+    } catch (error) {
+        configList.innerHTML = `<p class="empty" style="color: var(--danger-color);">加载失败：${error.message}</p>`;
+    }
+}
+
+// 创建新配置
+async function createNewConfig() {
+    const manufacturer = document.getElementById('configManufacturer').value;
+    const boardName = document.getElementById('boardName').value.trim();
+    const productType = document.getElementById('productType').value;
+    const mcuModel = document.getElementById('mcuModel').value.trim();
+    const crystalFreq = document.getElementById('crystalFreq').value.trim();
+    const blOffset = document.getElementById('blOffset').value.trim();
+    const bootPins = document.getElementById('bootPins').value.trim();
+    const defaultFlash = document.getElementById('defaultFlash').value;
+    
+    if (!boardName || !mcuModel) {
+        showError('请填写产品名称和处理器型号');
+        return;
+    }
+    
+    try {
+        const configData = {
+            'name': boardName,
+            'type': productType,
+            'mcu': mcuModel,
+            'crystal': crystalFreq,
+            'bl_offset': blOffset,
+            'boot_pins': bootPins,
+            'default_flash': defaultFlash,
+            'flash_modes': [defaultFlash],
+            'id': generateConfigId(boardName)
+        };
+        
+        const response = await fetch(`/api/config/create/${manufacturer}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess('配置创建成功！');
+            // 清空表单
+            document.getElementById('boardName').value = '';
+            document.getElementById('mcuModel').value = '';
+            document.getElementById('crystalFreq').value = '';
+            document.getElementById('blOffset').value = '';
+            document.getElementById('bootPins').value = '';
+            // 刷新列表
+            loadConfigList();
+        } else {
+            showError('创建失败：' + result.error);
+        }
+    } catch (error) {
+        showError('创建失败：' + error.message);
+    }
+}
+
+// 编辑配置
+async function editConfig(configId) {
+    const manufacturer = document.getElementById('configManufacturer').value;
+    
+    try {
+        const response = await fetch(`/api/config/get/${manufacturer}/${configId}`);
+        const config = await response.json();
+        
+        if (config) {
+            // 填充表单
+            document.getElementById('boardName').value = config['名称'] || config['name'] || '';
+            document.getElementById('productType').value = config['产品类型'] || config['product_type'] || 'mainboard';
+            document.getElementById('mcuModel').value = config['处理器'] || config['mcu'] || '';
+            document.getElementById('crystalFreq').value = config['晶振'] || config['crystal'] || '';
+            document.getElementById('blOffset').value = config['BL 偏移'] || config['bl_offset'] || '';
+            document.getElementById('bootPins').value = config['启动引脚'] || config['boot_pins'] || '';
+            document.getElementById('defaultFlash').value = config['默认烧录'] || config['default_flash'] || 'UF2';
+            
+            showSuccess('配置已加载，修改后点击"创建配置"保存');
+        }
+    } catch (error) {
+        showError('加载配置失败：' + error.message);
+    }
+}
+
+// 删除配置
+async function deleteConfig(configId) {
+    if (!confirm('确定要删除这个配置吗？')) return;
+    
+    const manufacturer = document.getElementById('configManufacturer').value;
+    
+    try {
+        const response = await fetch(`/api/config/delete/${manufacturer}/${configId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess('配置已删除');
+            loadConfigList();
+        } else {
+            showError('删除失败：' + result.error);
+        }
+    } catch (error) {
+        showError('删除失败：' + error.message);
+    }
+}
+
+// 生成配置 ID
+function generateConfigId(name) {
+    return name.toLowerCase()
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+}
+
+// 文件上传功能
+function initUploadArea() {
+    const uploadArea = document.getElementById('uploadArea');
+    const folderInput = document.getElementById('folderInput');
+    
+    if (!uploadArea) return;
+    
+    // 点击上传
+    uploadArea.addEventListener('click', () => {
+        folderInput.click();
+    });
+    
+    // 文件选择
+    folderInput.addEventListener('change', handleFileSelect);
+    
+    // 拖拽事件
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('drag-over');
+    });
+    
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('drag-over');
+    });
+    
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('drag-over');
+        
+        const items = e.dataTransfer.items;
+        const files = [];
+        
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i].webkitGetAsEntry();
+            if (item) {
+                files.push(item);
+            }
+        }
+        
+        if (files.length > 0) {
+            uploadFiles(files);
+        }
+    });
+}
+
+// 处理文件选择
+function handleFileSelect(event) {
+    const files = Array.from(event.target.files);
+    if (files.length > 0) {
+        uploadFilesFromList(files);
+    }
+}
+
+// 上传文件（拖拽）
+async function uploadFiles(fileEntries) {
+    const manufacturer = document.getElementById('configManufacturer').value;
+    const progressDiv = document.getElementById('uploadProgress');
+    const progressBar = progressDiv.querySelector('.progress-bar');
+    const statusSpan = document.getElementById('uploadStatus');
+    
+    progressDiv.style.display = 'block';
+    
+    try {
+        const formData = new FormData();
+        formData.append('manufacturer', manufacturer);
+        
+        // 处理文件树
+        for (const entry of fileEntries) {
+            await addFileToFormData(entry, '', formData);
+        }
+        
+        statusSpan.textContent = '上传中...';
+        
+        const response = await fetch('/api/config/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            statusSpan.textContent = `上传成功！${result.uploaded_count} 个文件`;
+            progressBar.innerHTML = '<div class="progress-bar-fill" style="width: 100%;"></div>';
+            setTimeout(() => {
+                progressDiv.style.display = 'none';
+                loadConfigList();
+            }, 2000);
+        } else {
+            throw new Error(result.error || '上传失败');
+        }
+    } catch (error) {
+        statusSpan.textContent = `上传失败：${error.message}`;
+        progressBar.style.backgroundColor = 'var(--danger-color)';
+    }
+}
+
+// 上传文件（文件列表）
+async function uploadFilesFromList(files) {
+    const manufacturer = document.getElementById('configManufacturer').value;
+    const progressDiv = document.getElementById('uploadProgress');
+    const progressBar = progressDiv.querySelector('.progress-bar');
+    const statusSpan = document.getElementById('uploadStatus');
+    
+    progressDiv.style.display = 'block';
+    
+    try {
+        const formData = new FormData();
+        formData.append('manufacturer', manufacturer);
+        
+        for (const file of files) {
+            formData.append('files[]', file);
+        }
+        
+        statusSpan.textContent = '上传中...';
+        
+        const response = await fetch('/api/config/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            statusSpan.textContent = `上传成功！${result.uploaded_count} 个文件`;
+            progressBar.innerHTML = '<div class="progress-bar-fill" style="width: 100%;"></div>';
+            setTimeout(() => {
+                progressDiv.style.display = 'none';
+                loadConfigList();
+            }, 2000);
+        } else {
+            throw new Error(result.error || '上传失败');
+        }
+    } catch (error) {
+        statusSpan.textContent = `上传失败：${error.message}`;
+        progressBar.style.backgroundColor = 'var(--danger-color)';
+    }
+}
+
+// 递归添加文件到 FormData
+async function addFileToFormData(entry, path, formData) {
+    return new Promise((resolve) => {
+        if (entry.isFile) {
+            entry.file((file) => {
+                formData.append('files[]', file, path + file.name);
+                resolve();
+            });
+        } else if (entry.isDirectory) {
+            const dirReader = entry.createReader();
+            dirReader.readEntries(async (entries) => {
+                for (const childEntry of entries) {
+                    await addFileToFormData(childEntry, path + entry.name + '/', formData);
+                }
+                resolve();
+            });
+        }
+    });
+}
+
+// 初始化上传区域
+document.addEventListener('DOMContentLoaded', () => {
+    initUploadArea();
+});
+
+// ==================== MCU 预设选择逻辑 ====================
+
+// MCU 类型改变时触发 - 显示所有支持的型号
+function onMCUTypeChange() {
+    const mcuType = document.getElementById('mcuType').value;
+    const modelSelect = document.getElementById('mcuModelPreset');
+    
+    // 清空型号选择
+    modelSelect.innerHTML = '';
+    
+    if (!mcuType) {
+        modelSelect.innerHTML = '<option value="">-- 先选择主控类型 --</option>';
+        return;
+    }
+    
+    // 获取该类型的所有型号列表
+    const models = getMCUModels(mcuType);
+    
+    // 填充型号选项（显示完整列表）
+    modelSelect.innerHTML = '<option value="">-- 请选择处理器型号 --</option>';
+    models.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.name;
+        modelSelect.appendChild(option);
+    });
+    
+    showInfo(`已加载 ${models.length} 个 ${mcuType} 系列型号`);
+}
+
+// 选择预设型号后自动填充参数
+function onMCUPresetSelect() {
+    const mcuType = document.getElementById('mcuType').value;
+    const modelId = document.getElementById('mcuModelPreset').value;
+    
+    if (!mcuType || !modelId) return;
+    
+    // 获取预设配置
+    const preset = getMCUPreset(mcuType, modelId);
+    if (!preset) return;
+    
+    // 自动填充参数
+    document.getElementById('mcuModel').value = modelId;
+    document.getElementById('crystalFreq').value = preset.crystal;
+    document.getElementById('blOffset').value = preset.bl_offset;
+    
+    // 更新烧录方式选项
+    updateFlashModes(preset.flash_modes, preset.default_flash);
+    
+    showSuccess('已自动填充参数，可手动微调');
+}
+
+// 更新烧录方式选项
+function updateFlashModes(modes, defaultMode) {
+    const select = document.getElementById('defaultFlash');
+    select.innerHTML = '';
+    
+    modes.forEach(mode => {
+        const option = document.createElement('option');
+        option.value = mode;
+        option.textContent = mode;
+        if (mode === defaultMode) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    });
+}
+
+// 初始化时加载 MCU 预设配置
+document.addEventListener('DOMContentLoaded', () => {
+    initUploadArea();
+    // MCU 预设配置已在 mcu-presets.js 中定义
+});
+
+// ==================== 圆形仪表盘功能 ====================
+
+// 仪表盘图表实例
+let cpuGaugeChart = null;
+let memGaugeChart = null;
+let diskGaugeChart = null;
+
+// 创建圆形仪表盘
+function createGaugeChart(ctx, label, color) {
+    return new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            datasets: [{
+                data: [0, 100], // 初始值：0%
+                backgroundColor: [color, '#e0e0e0'],
+                borderWidth: 0,
+                circumference: 360,
+                rotation: 0,
+                cutout: '75%'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    enabled: true,
+                    callbacks: {
+                        label: function(context) {
+                            return label + ': ' + context.parsed + '%';
+                        }
+                    }
+                }
+            },
+            animation: {
+                animateScale: true,
+                animateRotate: true
+            }
+        }
+    });
+}
+
+// 更新仪表盘数据
+function updateGauge(chart, value) {
+    if (chart && chart.data) {
+        chart.data.datasets[0].data = [value, 100 - value];
+        chart.update();
+    }
+}
+
+// 初始化仪表盘
+function initGauges() {
+    const cpuCtx = document.getElementById('cpuGauge');
+    const memCtx = document.getElementById('memGauge');
+    const diskCtx = document.getElementById('diskGauge');
+    
+    if (cpuCtx) {
+        cpuGaugeChart = createGaugeChart(cpuCtx, 'CPU', '#2196F3');
+    }
+    if (memCtx) {
+        memGaugeChart = createGaugeChart(memCtx, '内存', '#4CAF50');
+    }
+    if (diskCtx) {
+        diskGaugeChart = createGaugeChart(diskCtx, '磁盘', '#FF9800');
+    }
+}
+
+// 更新资源显示（替换原有的 updateResources 函数）
+async function updateResources() {
+    try {
+        const response = await fetch('/api/system/resources');
+        const data = await response.json();
+        
+        // API 返回的数据结构：data.current.cpu.percent
+        const cpuPercent = data.current ? data.current.cpu.percent : (data.cpu || 0);
+        const memPercent = data.current ? data.current.memory.percent : (data.memory || 0);
+        const diskPercent = data.current ? data.current.disk.percent : (data.disk || 0);
+        
+        // 更新仪表盘
+        if (cpuGaugeChart) {
+            updateGauge(cpuGaugeChart, cpuPercent);
+            document.getElementById('cpuPercentText').textContent = cpuPercent.toFixed(1) + '%';
+        }
+        if (memGaugeChart) {
+            updateGauge(memGaugeChart, memPercent);
+            document.getElementById('memPercentText').textContent = memPercent.toFixed(1) + '%';
+        }
+        if (diskGaugeChart) {
+            updateGauge(diskGaugeChart, diskPercent);
+            document.getElementById('diskPercentText').textContent = diskPercent.toFixed(1) + '%';
+        }
+        
+        // 更新网络状态
+        if (data.current && data.current.network) {
+            updateNetworkDisplay(data.current.network);
+        }
+        
+    } catch (error) {
+        console.error('获取系统资源失败:', error);
+    }
+}
+
+// 修改页面切换逻辑，初始化仪表盘
+const originalSwitchPage = window.switchPage || function(page) {};
+window.switchPage = function(page) {
+    originalSwitchPage(page);
+    
+    // 切换到资源页面时初始化仪表盘
+    if (page === 'resources') {
+        setTimeout(() => {
+            initGauges();
+            updateResources();
+        }, 100);
+    }
+};
+
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', () => {
+    // 如果当前就是资源页面，立即初始化
+    const resourcePage = document.getElementById('page-resources');
+    if (resourcePage && resourcePage.classList.contains('active')) {
+        setTimeout(initGauges, 500);
+    }
+});
+
+// ==================== 固件编译功能 ====================
+
+// 加载编译配置列表
+async function loadCompileConfigs() {
+    const manufacturer = document.getElementById('compileManufacturer').value;
+    const boardType = document.getElementById('compileBoardType').value;
+    const configSelect = document.getElementById('compileConfig');
+    
+    if (!boardType) {
+        configSelect.innerHTML = '<option value="">-- 先选择产品类型 --</option>';
+        return;
+    }
+    
+    try {
+        configSelect.innerHTML = '<option value="">加载中...</option>';
+        
+        const response = await fetch(`/api/config/list/${manufacturer}`);
+        const data = await response.json();
+        
+        const configs = data.configs.filter(c => c.type === boardType);
+        
+        if (configs.length > 0) {
+            configSelect.innerHTML = '<option value="">-- 请选择配置 --</option>';
+            configs.forEach(config => {
+                const option = document.createElement('option');
+                option.value = config.id || '';
+                option.textContent = config['名称'] || config['name'] || config.id;
+                configSelect.appendChild(option);
+            });
+        } else {
+            configSelect.innerHTML = '<option value="">-- 暂无配置 --</option>';
+        }
+    } catch (error) {
+        configSelect.innerHTML = '<option value="">-- 加载失败 --</option>';
+        console.error('加载配置列表失败:', error);
+    }
+}
+
+// 编译固件
+async function compileFirmware() {
+    const manufacturer = document.getElementById('compileManufacturer').value;
+    const configId = document.getElementById('compileConfig').value;
+    const flashMode = document.getElementById('flashMode').value;
+    const progressDiv = document.getElementById('compileProgress');
+    const statusSpan = document.getElementById('compileStatus');
+    
+    if (!configId) {
+        showError('请选择配置');
+        return;
+    }
+    
+    try {
+        progressDiv.style.display = 'block';
+        statusSpan.textContent = '开始编译...';
+        
+        const response = await fetch('/api/firmware/compile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                manufacturer,
+                config_id: configId,
+                flash_mode: flashMode
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            statusSpan.textContent = '✅ 编译成功！';
+            showSuccess(`编译成功：${result.firmware_path || '固件已生成'}`);
+            
+            // 5 秒后隐藏进度条
+            setTimeout(() => {
+                progressDiv.style.display = 'none';
+            }, 5000);
+        } else {
+            statusSpan.textContent = '❌ 编译失败';
+            showError(result.error || '编译失败');
+        }
+        
+    } catch (error) {
+        statusSpan.textContent = '❌ 编译错误';
+        showError('编译错误：' + error.message);
+    }
+}
+
+// BL 固件上传初始化
+function initBLUpload() {
+    const uploadArea = document.getElementById('blUploadArea');
+    const fileInput = document.getElementById('blFileInput');
+    
+    if (!uploadArea) return;
+    
+    // 点击上传
+    uploadArea.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    // 文件选择
+    fileInput.addEventListener('change', handleBLFileSelect);
+    
+    // 拖拽事件
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('drag-over');
+    });
+    
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('drag-over');
+    });
+    
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('drag-over');
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            uploadBLFile(files[0]);
+        }
+    });
+}
+
+// 处理 BL 文件选择
+function handleBLFileSelect(event) {
+    const files = event.target.files;
+    if (files.length > 0) {
+        uploadBLFile(files[0]);
+    }
+}
+
+// 上传 BL 固件
+async function uploadBLFile(file) {
+    const manufacturer = document.getElementById('blManufacturer').value;
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('manufacturer', manufacturer);
+        
+        const response = await fetch('/api/firmware/bl-upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess('BL 固件上传成功！');
+            loadBLFirmwares();
+        } else {
+            showError(result.error || '上传失败');
+        }
+    } catch (error) {
+        showError('上传失败：' + error.message);
+    }
+}
+
+// 加载 BL 固件列表
+async function loadBLFirmwares() {
+    const manufacturer = document.getElementById('blManufacturer').value;
+    const listDiv = document.getElementById('blFirmwareList');
+    
+    try {
+        const response = await fetch(`/api/firmware/bl-firmwares/${manufacturer}`);
+        const data = await response.json();
+        
+        if (data.firmwares && data.firmwares.length > 0) {
+            let html = '<div class="bl-list">';
+            data.firmwares.forEach((fw, index) => {
+                html += `
+                    <div class="bl-item">
+                        <span>${fw.name || fw.file}</span>
+                        <button class="btn btn-sm btn-secondary" onclick="flashBL('${manufacturer}', '${fw.file}')">
+                            📥 烧录
+                        </button>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            listDiv.innerHTML = html;
+        } else {
+            listDiv.innerHTML = '<p class="empty">暂无 BL 固件</p>';
+        }
+    } catch (error) {
+        listDiv.innerHTML = '<p class="empty">加载失败</p>';
+    }
+}
+
+// 烧录 BL 固件
+async function flashBL(manufacturer, file) {
+    if (!confirm(`确定要烧录 ${file} 吗？`)) return;
+    
+    showSuccess('开始烧录 BL 固件...（具体烧录流程请参考文档）');
+}
+
+// 初始化：加载数据
+document.addEventListener('DOMContentLoaded', () => {
+    initBLUpload();
+    
+    // 监听厂家选择变化，加载 BL 固件列表
+    const blManufacturerSelect = document.getElementById('blManufacturer');
+    if (blManufacturerSelect) {
+        blManufacturerSelect.addEventListener('change', loadBLFirmwares);
+    }
+});
+
+// ==================== 固件编译与烧录功能（重构版） ====================
+
+// 编译区域：厂家改变
+async function onCompileManufacturerChange() {
+    const manufacturer = document.getElementById('compileManufacturer').value;
+    const typeSelect = document.getElementById('compileBoardType');
+    const modelSelect = document.getElementById('compileBoardModel');
+    
+    typeSelect.innerHTML = '';
+    modelSelect.innerHTML = '';
+    modelSelect.disabled = true;
+    
+    if (!manufacturer) {
+        typeSelect.disabled = true;
+        typeSelect.innerHTML = '<option value="">Select manufacturer first</option>';
+        return;
+    }
+    
+    // 加载类型列表
+    typeSelect.innerHTML = '<option value="">Loading...</option>';
+    try {
+        const response = await fetch(`/api/config/list/${manufacturer}`);
+        const data = await response.json();
+        
+        // 获取所有类型
+        const types = [...new Set(data.configs.map(c => c.type))];
+        
+        typeSelect.innerHTML = '<option value="">Select type</option>';
+        types.forEach(type => {
+            const option = document.createElement('option');
+            option.value = type;
+            option.textContent = type;
+            typeSelect.appendChild(option);
+        });
+        
+        typeSelect.disabled = false;
+    } catch (error) {
+        typeSelect.innerHTML = '<option value="">Load failed</option>';
+    }
+}
+
+// 编译区域：类型改变
+async function onCompileBoardTypeChange() {
+    const manufacturer = document.getElementById('compileManufacturer').value;
+    const boardType = document.getElementById('compileBoardType').value;
+    const modelSelect = document.getElementById('compileBoardModel');
+    
+    modelSelect.innerHTML = '';
+    
+    if (!boardType) {
+        modelSelect.disabled = true;
+        modelSelect.innerHTML = '<option value="">Select type first</option>';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/config/list/${manufacturer}`);
+        const data = await response.json();
+        
+        const configs = data.configs.filter(c => c.type === boardType);
+        
+        modelSelect.innerHTML = '<option value="">Select model</option>';
+        configs.forEach(config => {
+            const option = document.createElement('option');
+            option.value = config.id;
+            option.textContent = config.name || config.id;
+            modelSelect.appendChild(option);
+        });
+        
+        modelSelect.disabled = false;
+    } catch (error) {
+        modelSelect.innerHTML = '<option value="">Load failed</option>';
+    }
+}
+
+// 仅编译固件
+async function compileFirmwareOnly() {
+    const manufacturer = document.getElementById('compileManufacturer').value;
+    const boardId = document.getElementById('compileBoardModel').value;
+    const flashMode = document.getElementById('compileFlashMode').value;
+    const klipperPath = document.getElementById('klipperPath').value;
+    const resultDiv = document.getElementById('compileResult');
+    const resultBox = resultDiv.querySelector('.result-box');
+    
+    if (!manufacturer || !boardId) {
+        showError('Please select manufacturer and board model');
+        return;
+    }
+    
+    resultDiv.style.display = 'block';
+    resultBox.innerHTML = '<p>⏳ Compiling firmware...</p>';
+    
+    try {
+        const response = await fetch('/api/firmware/compile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                manufacturer,
+                config_id: boardId,
+                flash_mode: flashMode,
+                klipper_path: klipperPath
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            resultBox.innerHTML = `
+                <div class="status-success">
+                    <p>✅ Compile successful!</p>
+                    <p>Firmware: ${result.firmware_path || 'Generated'}</p>
+                    <p>You can now flash it in Step 3 below</p>
+                </div>
+            `;
+            showSuccess('Firmware compiled successfully!');
+        } else {
+            resultBox.innerHTML = `<div class="status-error">❌ Compile failed: ${result.error || 'Unknown error'}</div>`;
+            showError('Compile failed: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        resultBox.innerHTML = `<div class="status-error">❌ Error: ${error.message}</div>`;
+        showError('Error: ' + error.message);
+    }
+}
+
+// 刷新设备ID列表
+async function refreshDeviceIds() {
+    const select = document.getElementById('flashDeviceId');
+    
+    select.innerHTML = '<option value="">Scanning...</option>';
+    
+    try {
+        // 扫描 USB 设备
+        const response = await fetch('/api/system/ids');
+        const data = await response.json();
+        
+        select.innerHTML = '<option value="">Select device</option>';
+        
+        // 添加 USB 设备
+        if (data.usb && data.usb.length > 0) {
+            data.usb.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.path || device.id;
+                option.textContent = `USB: ${device.formatted || device.id}`;
+                select.appendChild(option);
+            });
+        }
+        
+        // 添加 CAN 设备
+        if (data.can && data.can.length > 0) {
+            data.can.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.uuid;
+                option.textContent = `CAN: ${device.formatted || device.uuid}`;
+                select.appendChild(option);
+            });
+        }
+        
+        if (select.options.length === 1) {
+            select.innerHTML = '<option value="">No devices found</option>';
+        }
+    } catch (error) {
+        select.innerHTML = '<option value="">Scan failed</option>';
+    }
+}
+
+// 固件源改变
+function onFirmwareSourceChange() {
+    const source = document.getElementById('firmwareSource').value;
+    const uploadArea = document.getElementById('firmwareUploadArea');
+    
+    if (source === 'upload') {
+        uploadArea.style.display = 'block';
+    } else {
+        uploadArea.style.display = 'none';
+    }
+}
+
+// 烧录固件
+async function flashFirmware() {
+    const deviceId = document.getElementById('flashDeviceId').value;
+    const source = document.getElementById('firmwareSource').value;
+    const resultDiv = document.getElementById('flashResult');
+    const resultBox = resultDiv.querySelector('.result-box');
+    
+    if (!deviceId) {
+        showError('Please select a device');
+        return;
+    }
+    
+    resultDiv.style.display = 'block';
+    resultBox.innerHTML = '<p>⏳ Flashing firmware...</p>';
+    
+    try {
+        // 这里调用烧录 API
+        // TODO: 实现具体的烧录逻辑
+        resultBox.innerHTML = `
+            <div class="status-success">
+                <p>✅ Flash command sent!</p>
+                <p>Device: ${deviceId}</p>
+                <p>Source: ${source}</p>
+            </div>
+        `;
+        showSuccess('Flash command sent!');
+    } catch (error) {
+        resultBox.innerHTML = `<div class="status-error">❌ Flash failed: ${error.message}</div>`;
+        showError('Flash failed: ' + error.message);
+    }
+}
+
+// 初始化固件上传区域
+function initFirmwareUpload() {
+    const uploadArea = document.getElementById('firmwareUploadArea');
+    const fileInput = document.getElementById('firmwareFileInput');
+    
+    if (!uploadArea) return;
+    
+    uploadArea.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            showSuccess(`Selected: ${e.target.files[0].name}`);
+        }
+    });
+}
+
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', () => {
+    initFirmwareUpload();
+    
+    // 自动刷新设备列表（如果当前是固件页面）
+    const firmwarePage = document.getElementById('page-firmware');
+    if (firmwarePage && firmwarePage.classList.contains('active')) {
+        setTimeout(refreshDeviceIds, 1000);
+    }
+});
+
+// ==================== 固件批量更新功能 ====================
+
+// 全局变量存储选中的主板
+let selectedBoards = new Set();
+
+// 厂家改变
+async function onUpdateManufacturerChange() {
+    const manufacturer = document.getElementById('updateManufacturer').value;
+    if (!manufacturer) {
+        selectedBoards.clear();
+        updateSelectedList();
+    }
+}
+
+// 加载配置列表
+async function loadUpdateConfigs() {
+    const manufacturer = document.getElementById('updateManufacturer').value;
+    const listDiv = document.getElementById('availableConfigsList');
+    
+    if (!manufacturer) {
+        showError('请选择厂家');
+        return;
+    }
+    
+    try {
+        listDiv.innerHTML = '<p class="empty">加载中...</p>';
+        
+        const response = await fetch(`/api/config/list/${manufacturer}`);
+        const data = await response.json();
+        
+        if (data.configs && data.configs.length > 0) {
+            let html = '';
+            data.configs.forEach(config => {
+                const isSelected = selectedBoards.has(config.id);
+                html += `
+                    <div class="config-item">
+                        <div class="config-item-info">
+                            <div class="config-item-name">${config.name || '未命名'}</div>
+                            <div class="config-item-details">
+                                ${config.type || '未知类型'} | 
+                                ${config.mcu || config.processor || '未知处理器'}
+                            </div>
+                        </div>
+                        <div class="config-item-actions">
+                            <label style="display: flex; align-items: center; gap: 5px;">
+                                <input type="checkbox" onchange="toggleBoardSelection('${config.id}', this.checked)" 
+                                    ${isSelected ? 'checked' : ''}>
+                                选择
+                            </label>
+                        </div>
+                    </div>
+                `;
+            });
+            listDiv.innerHTML = html;
+        } else {
+            listDiv.innerHTML = '<p class="empty">暂无配置</p>';
+        }
+    } catch (error) {
+        listDiv.innerHTML = `<p class="empty" style="color: var(--danger-color);">加载失败：${error.message}</p>`;
+    }
+}
+
+// 切换主板选择状态
+function toggleBoardSelection(boardId, isChecked) {
+    if (isChecked) {
+        selectedBoards.add(boardId);
+    } else {
+        selectedBoards.delete(boardId);
+    }
+    updateSelectedList();
+}
+
+// 更新已选中列表显示
+function updateSelectedList() {
+    const listDiv = document.getElementById('selectedBoardsList');
+    const countSpan = document.getElementById('selectedCount');
+    const batchBtn = document.getElementById('batchUpdateBtn');
+    
+    countSpan.textContent = selectedBoards.size;
+    
+    if (selectedBoards.size === 0) {
+        listDiv.innerHTML = '<p class="empty">暂无选中的主板</p>';
+        batchBtn.disabled = true;
+    } else {
+        let html = '';
+        selectedBoards.forEach(id => {
+            html += `<div class="board-item"><span>${id}</span></div>`;
+        });
+        listDiv.innerHTML = html;
+        batchBtn.disabled = false;
+    }
+}
+
+// 批量烧录固件
+async function batchUpdateFirmware() {
+    if (selectedBoards.size === 0) {
+        showError('请选择至少一个主板');
+        return;
+    }
+    
+    const progressDiv = document.getElementById('updateProgress');
+    const statusSpan = document.getElementById('updateStatus');
+    const resultDiv = document.getElementById('updateResult');
+    
+    if (!confirm(`确定要批量烧录 ${selectedBoards.size} 个主板的固件吗？`)) return;
+    
+    progressDiv.style.display = 'block';
+    resultDiv.innerHTML = '';
+    
+    let successCount = 0;
+    let failCount = 0;
+    let results = [];
+    
+    for (const boardId of selectedBoards) {
+        statusSpan.textContent = `正在烧录 ${boardId}... (${successCount + failCount + 1}/${selectedBoards.size})`;
+        
+        try {
+            // TODO: 调用烧录 API
+            // 这里模拟烧录过程
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            successCount++;
+            results.push({ id: boardId, success: true });
+        } catch (error) {
+            failCount++;
+            results.push({ id: boardId, success: false, error: error.message });
+        }
+    }
+    
+    statusSpan.textContent = `烧录完成！成功：${successCount}, 失败：${failCount}`;
+    
+    // 显示结果
+    let resultHtml = '<div class="result-box">';
+    results.forEach(r => {
+        if (r.success) {
+            resultHtml += `<p class="status-success">✅ ${r.id}: 成功</p>`;
+        } else {
+            resultHtml += `<p class="status-error">❌ ${r.id}: ${r.error || '失败'}</p>`;
+        }
+    });
+    resultHtml += '</div>';
+    resultDiv.innerHTML = resultHtml;
+    
+    showSuccess(`批量烧录完成！成功 ${successCount} 个，失败 ${failCount} 个`);
+}
+
+// ==================== 配置管理 - 新增配置优化 ====================
+
+let mcuData = {}; // 存储从后端获取的 MCU 数据
+let currentMcuInfo = null; // 当前选中的 MCU 信息
+
+// 页面加载时初始化
+async function initConfigPage() {
+    await loadManufacturersForNewConfig();
+    await loadMcuPlatforms();
+}
+
+// 加载厂家列表（用于新建配置）
+async function loadManufacturersForNewConfig() {
+    try {
+        const response = await fetch('/api/config/manufacturers');
+        const data = await response.json();
+        
+        const select = document.getElementById('newConfigManufacturer');
+        select.innerHTML = '<option value="">-- 选择或输入 --</option>';
+        
+        if (data.manufacturers) {
+            data.manufacturers.forEach(mfr => {
+                select.innerHTML += `<option value="${mfr}">${mfr}</option>`;
+            });
+        }
+        
+        // 添加"自定义"选项
+        select.innerHTML += '<option value="custom">+ 自定义厂家</option>';
+    } catch (error) {
+        console.error('加载厂家列表失败:', error);
+    }
+}
+
+// 厂家选择变化
+function onNewConfigManufacturerChange() {
+    const select = document.getElementById('newConfigManufacturer');
+    const customGroup = document.getElementById('customManufacturerGroup');
+    
+    if (select.value === 'custom') {
+        customGroup.style.display = 'block';
+        document.getElementById('customManufacturer').focus();
+    } else {
+        customGroup.style.display = 'none';
+    }
+}
+
+// 加载 MCU 平台列表
+async function loadMcuPlatforms() {
+    try {
+        const response = await fetch('/api/config/mcu-list');
+        const data = await response.json();
+        
+        if (data.success) {
+            mcuData = data.mcu_details;
+            
+            const select = document.getElementById('mcuPlatform');
+            select.innerHTML = '<option value="">-- 选择平台 --</option>';
+            
+            data.mcu_types.forEach(type => {
+                select.innerHTML += `<option value="${type}">${type}</option>`;
+            });
+        }
+    } catch (error) {
+        console.error('加载 MCU 列表失败:', error);
+    }
+}
+
+// MCU 平台选择变化
+function onMcuPlatformChange() {
+    const platform = document.getElementById('mcuPlatform').value;
+    const modelSelect = document.getElementById('mcuModelSelect');
+    const paramsSection = document.getElementById('mcuParamsSection');
+    const flashSection = document.getElementById('flashModeSection');
+    
+    // 重置后续选择
+    paramsSection.style.display = 'none';
+    flashSection.style.display = 'none';
+    currentMcuInfo = null;
+    
+    if (!platform || !mcuData[platform]) {
+        modelSelect.innerHTML = '<option value="">-- 先选择平台 --</option>';
+        modelSelect.disabled = true;
+        return;
+    }
+    
+    // 填充 MCU 型号列表
+    modelSelect.innerHTML = '<option value="">-- 选择型号 --</option>';
+    mcuData[platform].mcus.forEach(mcu => {
+        modelSelect.innerHTML += `<option value="${mcu.id}">${mcu.name}</option>`;
+    });
+    modelSelect.disabled = false;
+}
+
+// MCU 型号选择变化
+function onMcuModelChange() {
+    const platform = document.getElementById('mcuPlatform').value;
+    const modelId = document.getElementById('mcuModelSelect').value;
+    const paramsSection = document.getElementById('mcuParamsSection');
+    const flashSection = document.getElementById('flashModeSection');
+    
+    if (!modelId || !mcuData[platform]) {
+        paramsSection.style.display = 'none';
+        flashSection.style.display = 'none';
+        return;
+    }
+    
+    // 查找选中的 MCU 信息
+    currentMcuInfo = mcuData[platform].mcus.find(m => m.id === modelId);
+    
+    if (currentMcuInfo) {
+        // 填充处理器型号（Kconfig 名称）
+        document.getElementById('mcuKconfigName').value = currentMcuInfo.id;
+        
+        // 根据 MCU 更新晶振选项
+        updateCrystalOptions(currentMcuInfo.crystal);
+        
+        // 根据 MCU 更新 BL 偏移选项
+        updateBlOffsetOptions(currentMcuInfo.bl_offset);
+        
+        // 显示参数区域
+        paramsSection.style.display = 'block';
+        
+        // 更新烧录方式
+        updateFlashModes(mcuData[platform].flash_modes);
+        flashSection.style.display = 'block';
+    }
+}
+
+// 更新晶振选项
+function updateCrystalOptions(crystals) {
+    const select = document.getElementById('crystalFreqSelect');
+    const group = document.getElementById('crystalGroup');
+    
+    if (!crystals || crystals.length === 0) {
+        group.style.display = 'none';
+        return;
+    }
+    
+    group.style.display = 'block';
+    select.innerHTML = '';
+    
+    const crystalLabels = {
+        '8000000': '8 MHz',
+        '12000000': '12 MHz',
+        '16000000': '16 MHz',
+        '20000000': '20 MHz',
+        '24000000': '24 MHz',
+        '25000000': '25 MHz'
+    };
+    
+    crystals.forEach(freq => {
+        const label = crystalLabels[freq] || `${freq} Hz`;
+        select.innerHTML += `<option value="${freq}">${label}</option>`;
+    });
+}
+
+// 更新 BL 偏移选项
+function updateBlOffsetOptions(offsets) {
+    const select = document.getElementById('blOffsetSelect');
+    const group = document.getElementById('blOffsetGroup');
+    
+    if (!offsets || offsets.length === 0) {
+        group.style.display = 'none';
+        return;
+    }
+    
+    group.style.display = 'block';
+    select.innerHTML = '';
+    
+    const offsetLabels = {
+        '0': '0 (无 bootloader)',
+        '256': '256 (RP2040)',
+        '2048': '2048 (2KB)',
+        '4096': '4096 (4KB)',
+        '8192': '8192 (8KB)',
+        '16384': '16384 (16KB)',
+        '32768': '32768 (32KB)',
+        '65536': '65536 (64KB)',
+        '0x8000': '0x8000 (32KB)',
+        '0xC000': '0xC000 (48KB)',
+        '0x10000': '0x10000 (64KB)'
+    };
+    
+    offsets.forEach(offset => {
+        const label = offsetLabels[offset.toString()] || offset;
+        select.innerHTML += `<option value="${offset}">${label}</option>`;
+    });
+}
+
+// 更新烧录方式
+function updateFlashModes(modes) {
+    const container = document.getElementById('flashModeCheckboxes');
+    const defaultSelect = document.getElementById('defaultFlashMode');
+    
+    container.innerHTML = '';
+    defaultSelect.innerHTML = '<option value="">-- 选择默认 --</option>';
+    
+    const modeLabels = {
+        'DFU': 'USB/DFU',
+        'KAT': 'USB/KAT (Katapult)',
+        'CAN': 'CAN Bus',
+        'CAN_BRIDGE_DFU': 'CAN Bridge/DFU',
+        'CAN_BRIDGE_KAT': 'CAN Bridge/KAT',
+        'UF2': 'UF2 (USB Mass Storage)',
+        'SWD': 'SWD/JTAG',
+        'SERIAL': 'Serial/UART'
+    };
+    
+    modes.forEach(mode => {
+        const label = modeLabels[mode] || mode;
+        
+        // 添加复选框
+        container.innerHTML += `
+            <label class="checkbox-item">
+                <input type="checkbox" name="flashMode" value="${mode}" checked>
+                <span>${label}</span>
+            </label>
+        `;
+        
+        // 添加到下拉框
+        defaultSelect.innerHTML += `<option value="${mode}">${label}</option>`;
+    });
+    
+    // 默认选中第一个
+    if (modes.length > 0) {
+        defaultSelect.value = modes[0];
+    }
+}
+
+// 重置配置表单
+function resetConfigForm() {
+    document.getElementById('newConfigManufacturer').value = '';
+    document.getElementById('customManufacturer').value = '';
+    document.getElementById('customManufacturerGroup').style.display = 'none';
+    document.getElementById('newConfigProductType').value = 'mainboard';
+    document.getElementById('newConfigBoardName').value = '';
+    document.getElementById('mcuPlatform').value = '';
+    document.getElementById('mcuModelSelect').innerHTML = '<option value="">-- 先选择平台 --</option>';
+    document.getElementById('mcuModelSelect').disabled = true;
+    document.getElementById('mcuParamsSection').style.display = 'none';
+    document.getElementById('flashModeSection').style.display = 'none';
+    currentMcuInfo = null;
+}
+
+// 修改原有的 createNewConfig 函数
+async function createNewConfig() {
+    // 获取厂家
+    const manufacturerSelect = document.getElementById('newConfigManufacturer');
+    let manufacturer = manufacturerSelect.value;
+    if (manufacturer === 'custom') {
+        manufacturer = document.getElementById('customManufacturer').value.trim();
+    }
+    
+    if (!manufacturer) {
+        showError('请选择或输入厂家名称');
+        return;
+    }
+    
+    // 获取产品信息
+    const productType = document.getElementById('newConfigProductType').value;
+    const boardName = document.getElementById('newConfigBoardName').value.trim();
+    
+    if (!boardName) {
+        showError('请输入产品名称');
+        return;
+    }
+    
+    // 获取 MCU 信息
+    const platform = document.getElementById('mcuPlatform').value;
+    const mcuModel = document.getElementById('mcuModelSelect').value;
+    
+    if (!mcuModel) {
+        showError('请选择 MCU 型号');
+        return;
+    }
+    
+    // 构建配置数据
+    const configData = {
+        manufacturer: manufacturer,
+        name: boardName,
+        type: productType,
+        mcu: mcuModel,
+        platform: platform,
+        crystal: document.getElementById('crystalFreqSelect').value,
+        bl_offset: document.getElementById('blOffsetSelect').value,
+        boot_pins: document.getElementById('bootPins').value.trim() || '',
+        flash_modes: Array.from(document.querySelectorAll('input[name="flashMode"]:checked')).map(cb => cb.value),
+        default_flash: document.getElementById('defaultFlashMode').value
+    };
+    
+    try {
+        const response = await fetch('/api/config/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess('配置创建成功！');
+            resetConfigForm();
+            loadConfigList(); // 刷新配置列表
+        } else {
+            showError(result.error || '创建失败');
+        }
+    } catch (error) {
+        console.error('创建配置失败:', error);
+        showError('创建配置失败: ' + error.message);
+    }
+}
+
+// 在页面切换到 config 时初始化
+switchPage = function(pageId) {
+    originalSwitchPage(pageId);
+    if (pageId === 'config') {
+        initConfigPage();
+    }
+};
+

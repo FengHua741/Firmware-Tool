@@ -1,0 +1,1062 @@
+{
+  "STM32": {
+    "platform": "stm32",
+    "mcus": {
+      "stm32f103": {
+        "id": "stm32f103",
+        "name": "STM32F103",
+        "config_name": "MACH_STM32F103",
+        "selects": [
+          "MACH_STM32F1"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192",
+          "20480",
+          "28672",
+          "32768",
+          "34816",
+          "36864",
+          "65536",
+          "2048",
+          "4096",
+          "16384"
+        ],
+        "connections": []
+      },
+      "stm32f207": {
+        "id": "stm32f207",
+        "name": "STM32F207",
+        "config_name": "MACH_STM32F207",
+        "selects": [
+          "MACH_STM32F2"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "32768",
+          "16384"
+        ],
+        "connections": []
+      },
+      "stm32f401": {
+        "id": "stm32f401",
+        "name": "STM32F401",
+        "config_name": "MACH_STM32F401",
+        "selects": [
+          "MACH_STM32F4"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "32768",
+          "49152",
+          "65536",
+          "16384"
+        ],
+        "connections": []
+      },
+      "stm32f405": {
+        "id": "stm32f405",
+        "name": "STM32F405",
+        "config_name": "MACH_STM32F405",
+        "selects": [
+          "MACH_STM32F4",
+          "MACH_STM32F4x5"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "32768",
+          "131584",
+          "49152",
+          "65536",
+          "16384"
+        ],
+        "connections": []
+      },
+      "stm32f407": {
+        "id": "stm32f407",
+        "name": "STM32F407",
+        "config_name": "MACH_STM32F407",
+        "selects": [
+          "MACH_STM32F4",
+          "MACH_STM32F4x5"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "32768",
+          "131584",
+          "49152",
+          "65536",
+          "16384"
+        ],
+        "connections": []
+      },
+      "stm32f429": {
+        "id": "stm32f429",
+        "name": "STM32F429",
+        "config_name": "MACH_STM32F429",
+        "selects": [
+          "MACH_STM32F4",
+          "MACH_STM32F4x5"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "32768",
+          "131584",
+          "49152",
+          "65536",
+          "16384"
+        ],
+        "connections": []
+      },
+      "stm32f446": {
+        "id": "stm32f446",
+        "name": "STM32F446",
+        "config_name": "MACH_STM32F446",
+        "selects": [
+          "MACH_STM32F4"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "32768",
+          "65536"
+        ],
+        "connections": []
+      },
+      "stm32f765": {
+        "id": "stm32f765",
+        "name": "STM32F765",
+        "config_name": "MACH_STM32F765",
+        "selects": [
+          "MACH_STM32F7"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "32768",
+          "131072"
+        ],
+        "connections": []
+      },
+      "stm32f031": {
+        "id": "stm32f031",
+        "name": "STM32F031",
+        "config_name": "MACH_STM32F031",
+        "selects": [
+          "MACH_STM32F0"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "4096"
+        ],
+        "connections": []
+      },
+      "stm32f042": {
+        "id": "stm32f042",
+        "name": "STM32F042",
+        "config_name": "MACH_STM32F042",
+        "selects": [
+          "MACH_STM32F0",
+          "MACH_STM32F0x2"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192",
+          "4096"
+        ],
+        "connections": []
+      },
+      "stm32f070": {
+        "id": "stm32f070",
+        "name": "STM32F070",
+        "config_name": "MACH_STM32F070",
+        "selects": [
+          "MACH_STM32F0"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192",
+          "4096"
+        ],
+        "connections": []
+      },
+      "stm32f072": {
+        "id": "stm32f072",
+        "name": "STM32F072",
+        "config_name": "MACH_STM32F072",
+        "selects": [
+          "MACH_STM32F0",
+          "MACH_STM32F0x2"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192",
+          "4096",
+          "16384"
+        ],
+        "connections": []
+      },
+      "stm32g070": {
+        "id": "stm32g070",
+        "name": "STM32G070",
+        "config_name": "MACH_STM32G070",
+        "selects": [
+          "MACH_STM32G0",
+          "MACH_STM32G07x"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192"
+        ],
+        "connections": []
+      },
+      "stm32g071": {
+        "id": "stm32g071",
+        "name": "STM32G071",
+        "config_name": "MACH_STM32G071",
+        "selects": [
+          "MACH_STM32G0",
+          "MACH_STM32G07x"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192"
+        ],
+        "connections": []
+      },
+      "stm32g0b0": {
+        "id": "stm32g0b0",
+        "name": "STM32G0B0",
+        "config_name": "MACH_STM32G0B0",
+        "selects": [
+          "MACH_STM32G0",
+          "MACH_STM32G0Bx"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192"
+        ],
+        "connections": []
+      },
+      "stm32g0b1": {
+        "id": "stm32g0b1",
+        "name": "STM32G0B1",
+        "config_name": "MACH_STM32G0B1",
+        "selects": [
+          "MACH_STM32G0",
+          "MACH_STM32G0Bx"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192"
+        ],
+        "connections": []
+      },
+      "stm32g431": {
+        "id": "stm32g431",
+        "name": "STM32G431",
+        "config_name": "MACH_STM32G431",
+        "selects": [
+          "MACH_STM32G4"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192"
+        ],
+        "connections": []
+      },
+      "stm32g474": {
+        "id": "stm32g474",
+        "name": "STM32G474",
+        "config_name": "MACH_STM32G474",
+        "selects": [
+          "MACH_STM32G4"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192"
+        ],
+        "connections": []
+      },
+      "stm32h723": {
+        "id": "stm32h723",
+        "name": "STM32H723",
+        "config_name": "MACH_STM32H723",
+        "selects": [
+          "MACH_STM32H7"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "131072"
+        ],
+        "connections": []
+      },
+      "stm32h743": {
+        "id": "stm32h743",
+        "name": "STM32H743",
+        "config_name": "MACH_STM32H743",
+        "selects": [
+          "MACH_STM32H7"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "131072"
+        ],
+        "connections": []
+      },
+      "stm32h750": {
+        "id": "stm32h750",
+        "name": "STM32H750",
+        "config_name": "MACH_STM32H750",
+        "selects": [
+          "MACH_STM32H7"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "stm32l412": {
+        "id": "stm32l412",
+        "name": "STM32L412",
+        "config_name": "MACH_STM32L412",
+        "selects": [
+          "MACH_STM32L4"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "n32g452": {
+        "id": "n32g452",
+        "name": "Nation N32G452",
+        "config_name": "MACH_N32G452",
+        "selects": [
+          "MACH_N32G45x",
+          "MACH_STM32F1"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192",
+          "28672",
+          "32768",
+          "36864",
+          "65536",
+          "4096"
+        ],
+        "connections": []
+      },
+      "n32g455": {
+        "id": "n32g455",
+        "name": "Nation N32G455",
+        "config_name": "MACH_N32G455",
+        "selects": [
+          "MACH_N32G45x",
+          "MACH_STM32F1"
+        ],
+        "crystals": [
+          "8000000",
+          "12000000",
+          "16000000",
+          "20000000",
+          "24000000",
+          "25000000"
+        ],
+        "bl_offsets": [
+          "8192",
+          "28672",
+          "32768",
+          "36864",
+          "65536",
+          "4096"
+        ],
+        "connections": []
+      }
+    },
+    "flash_modes": [
+      "DFU",
+      "KAT",
+      "CAN",
+      "CAN_BRIDGE_DFU",
+      "CAN_BRIDGE_KAT"
+    ],
+    "default_connections": [],
+    "connections": [
+      {
+        "type": "USB",
+        "name": "USB"
+      },
+      {
+        "type": "CAN",
+        "name": "CAN Bus"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART1 PA10/PA9)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART1 PB7/PB6)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART2 PA3/PA2)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART2 PA15/PA14)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART2 PB4/PB3)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART2 PD6/PD5)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART3 PB11/PB10)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART3 PD9/PD8)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART3 PC11/PC10)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on UART4 PA0/PA1)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART5 PD2/PD3)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART6 PA12/PA11)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on USART6 PC7/PC6)"
+      }
+    ]
+  },
+  "RP2040": {
+    "platform": "rp2040",
+    "mcus": {
+      "rp2040": {
+        "id": "rp2040",
+        "name": "rp2040",
+        "config_name": "MACH_RP2040",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "rp2350": {
+        "id": "rp2350",
+        "name": "rp2350",
+        "config_name": "MACH_RP2350",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      }
+    },
+    "flash_modes": [
+      "UF2",
+      "KAT",
+      "CAN"
+    ],
+    "default_connections": [],
+    "connections": [
+      {
+        "type": "USB",
+        "name": "USB"
+      },
+      {
+        "type": "CAN",
+        "name": "CAN Bus"
+      }
+    ]
+  },
+  "ATSAMD": {
+    "platform": "atsamd",
+    "mcus": {
+      "samc21g18": {
+        "id": "samc21g18",
+        "name": "SAMC21G18",
+        "config_name": "MACH_SAMC21G18",
+        "selects": [
+          "MACH_SAMC21"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "samd21g18": {
+        "id": "samd21g18",
+        "name": "SAMD21G18",
+        "config_name": "MACH_SAMD21G18",
+        "selects": [
+          "MACH_SAMD21"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "samd21e18": {
+        "id": "samd21e18",
+        "name": "SAMD21E18",
+        "config_name": "MACH_SAMD21E18",
+        "selects": [
+          "MACH_SAMD21"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "samd21j18": {
+        "id": "samd21j18",
+        "name": "SAMD21J18",
+        "config_name": "MACH_SAMD21J18",
+        "selects": [
+          "MACH_SAMD21"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "samd21e15": {
+        "id": "samd21e15",
+        "name": "SAMD21E15",
+        "config_name": "MACH_SAMD21E15",
+        "selects": [
+          "MACH_SAMD21"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "samd51g19": {
+        "id": "samd51g19",
+        "name": "SAMD51G19",
+        "config_name": "MACH_SAMD51G19",
+        "selects": [
+          "MACH_SAMD51"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "samd51j19": {
+        "id": "samd51j19",
+        "name": "SAMD51J19",
+        "config_name": "MACH_SAMD51J19",
+        "selects": [
+          "MACH_SAMD51"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "samd51n19": {
+        "id": "samd51n19",
+        "name": "SAMD51N19",
+        "config_name": "MACH_SAMD51N19",
+        "selects": [
+          "MACH_SAMD51"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "samd51p20": {
+        "id": "samd51p20",
+        "name": "SAMD51P20",
+        "config_name": "MACH_SAMD51P20",
+        "selects": [
+          "MACH_SAMD51"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "same51j19": {
+        "id": "same51j19",
+        "name": "SAME51J19",
+        "config_name": "MACH_SAME51J19",
+        "selects": [
+          "MACH_SAME51"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "same51n19": {
+        "id": "same51n19",
+        "name": "SAME51N19",
+        "config_name": "MACH_SAME51N19",
+        "selects": [
+          "MACH_SAME51"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "same54p20": {
+        "id": "same54p20",
+        "name": "SAME54P20",
+        "config_name": "MACH_SAME54P20",
+        "selects": [
+          "MACH_SAME54"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      }
+    },
+    "flash_modes": [
+      "UF2",
+      "KAT"
+    ],
+    "default_connections": [],
+    "connections": [
+      {
+        "type": "USB",
+        "name": "USB"
+      },
+      {
+        "type": "CAN",
+        "name": "CAN Bus"
+      }
+    ]
+  },
+  "LPC176x": {
+    "platform": "lpc176x",
+    "mcus": {
+      "lpc1768": {
+        "id": "lpc1768",
+        "name": "lpc1768 (100 MHz)",
+        "config_name": "MACH_LPC1768",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "lpc1769": {
+        "id": "lpc1769",
+        "name": "lpc1769 (120 MHz)",
+        "config_name": "MACH_LPC1769",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      }
+    },
+    "flash_modes": [
+      "DFU",
+      "KAT"
+    ],
+    "default_connections": [],
+    "connections": [
+      {
+        "type": "USB",
+        "name": "USB"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on UART0 P0.3/P0.2)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (on UART3 P4.29/P4.28)"
+      }
+    ]
+  },
+  "HC32F460": {
+    "platform": "hc32f460",
+    "mcus": {},
+    "flash_modes": [
+      "DFU",
+      "KAT"
+    ],
+    "default_connections": [],
+    "connections": [
+      {
+        "type": "SERIAL",
+        "name": "Serial (PA7 & PA8)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (PA13 & PA14)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (PA3 & PA2)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (PH2 & PB10)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (PA15 & PA09)"
+      },
+      {
+        "type": "SERIAL",
+        "name": "Serial (PC0 & PC1)"
+      }
+    ]
+  },
+  "ATSAM": {
+    "platform": "atsam",
+    "mcus": {
+      "sam3x8e": {
+        "id": "sam3x8e",
+        "name": "SAM3x8e",
+        "config_name": "MACH_SAM3X8E",
+        "selects": [
+          "MACH_SAM3X"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "sam3x8c": {
+        "id": "sam3x8c",
+        "name": "SAM3x8c",
+        "config_name": "MACH_SAM3X8C",
+        "selects": [
+          "MACH_SAM3X"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "sam4s8c": {
+        "id": "sam4s8c",
+        "name": "SAM4s8c",
+        "config_name": "MACH_SAM4S8C",
+        "selects": [
+          "MACH_SAM4S"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "sam4e8e": {
+        "id": "sam4e8e",
+        "name": "SAM4e8e",
+        "config_name": "MACH_SAM4E8E",
+        "selects": [
+          "MACH_SAM4E"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "same70q20b": {
+        "id": "same70q20b",
+        "name": "SAME70Q20B",
+        "config_name": "MACH_SAME70Q20B",
+        "selects": [
+          "MACH_SAME70"
+        ],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      }
+    },
+    "flash_modes": [
+      "DFU",
+      "KAT"
+    ],
+    "default_connections": [],
+    "connections": [
+      {
+        "type": "USB",
+        "name": "USB"
+      },
+      {
+        "type": "CAN",
+        "name": "CAN Bus"
+      }
+    ]
+  },
+  "AVR": {
+    "platform": "avr",
+    "mcus": {
+      "atmega2560": {
+        "id": "atmega2560",
+        "name": "atmega2560",
+        "config_name": "MACH_atmega2560",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "atmega1280": {
+        "id": "atmega1280",
+        "name": "atmega1280",
+        "config_name": "MACH_atmega1280",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "at90usb1286": {
+        "id": "at90usb1286",
+        "name": "at90usb1286",
+        "config_name": "MACH_at90usb1286",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "at90usb646": {
+        "id": "at90usb646",
+        "name": "at90usb646",
+        "config_name": "MACH_at90usb646",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "atmega32u4": {
+        "id": "atmega32u4",
+        "name": "atmega32u4",
+        "config_name": "MACH_atmega32u4",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "atmega1284p": {
+        "id": "atmega1284p",
+        "name": "atmega1284p",
+        "config_name": "MACH_atmega1284p",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "atmega644p": {
+        "id": "atmega644p",
+        "name": "atmega644p",
+        "config_name": "MACH_atmega644p",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "atmega328p": {
+        "id": "atmega328p",
+        "name": "atmega328p",
+        "config_name": "MACH_atmega328p",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "atmega328": {
+        "id": "atmega328",
+        "name": "atmega328",
+        "config_name": "MACH_atmega328",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "atmega168": {
+        "id": "atmega168",
+        "name": "atmega168",
+        "config_name": "MACH_atmega168",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      },
+      "lgt8f328p": {
+        "id": "lgt8f328p",
+        "name": "lgt8f328p",
+        "config_name": "MACH_lgt8f328p",
+        "selects": [],
+        "crystals": [],
+        "bl_offsets": [],
+        "connections": []
+      }
+    },
+    "flash_modes": [
+      "DFU"
+    ],
+    "default_connections": [],
+    "connections": [
+      {
+        "type": "USB",
+        "name": "USB"
+      }
+    ]
+  }
+}

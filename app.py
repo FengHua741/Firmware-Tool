@@ -23,6 +23,7 @@ import sys
 
 # 导入主板配置
 from board_config_loader import load_all_boards, load_board_config, get_manufacturers, get_board_types, get_bl_firmwares
+from firmware_compiler import FirmwareCompiler
 
 # 配置日志
 logging.basicConfig(
@@ -42,6 +43,7 @@ CORS(app)
 BASE_DIR = '/home/fenghua/Firmware-Tool'
 CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
 BOARD_CONFIGS_DIR = os.path.join(BASE_DIR, 'board_configs')
+CONFIGS_DIR = os.path.join(BASE_DIR, 'configs')  # 新增：用户配置目录
 
 # 默认配置
 DEFAULT_CONFIG = {
@@ -77,6 +79,7 @@ def save_config(config):
         return False
 
 config = load_config()
+compiler = FirmwareCompiler(config.get('klipper_path', '~/klipper'))
 PORT = config.get('port', 9999)
 
 # 历史数据存储
@@ -407,18 +410,62 @@ def get_all_rules():
 # ==================== 固件编译 API ====================
 @app.route('/api/firmware/compile', methods=['POST'])
 def compile_firmware():
-    """编译Klipper固件"""
+    """编译Klipper固件 - 支持预设配置和自定义MCU"""
     try:
         data = request.json
-        klipper_path = os.path.expanduser(data.get('klipper_path', config.get('klipper_path', '~/klipper')))
-        mcu_arch = data.get('mcu_arch', 'STMicroelectronics STM32')
-        processor = data.get('processor', 'STM32F072')
-        bootloader_offset = data.get('bootloader_offset', 'No bootloader')
-        communication = data.get('communication', 'USB (on PA11/PA12)')
-        can_bus_interface = data.get('can_bus_interface', 'CAN bus (on PB8/PB9)')
-        startup_pin = data.get('startup_pin', '')
-        rp2040_can_rx_gpio = data.get('rp2040_can_rx_gpio', '4')
-        rp2040_can_tx_gpio = data.get('rp2040_can_tx_gpio', '5')
+        
+        # 获取 Klipper 路径，优先使用用户传入的，其次是配置的，最后是默认值
+        # 修复 systemd root 运行时 ~ 被扩展为 /root 的问题
+        klipper_path = data.get('klipper_path', config.get('klipper_path', '~/klipper'))
+        # 手动替换 ~ 为 /home/fenghua（因为服务以 root 运行但 klipper 在用户目录）
+        if klipper_path.startswith('~'):
+            klipper_path = '/home/fenghua' + klipper_path[1:]
+        klipper_path = os.path.expanduser(klipper_path)
+        
+        # 检查是否是预设配置模式
+        config_data = data.get('config')
+        if config_data:
+            # 从预设配置提取参数
+            mcu_arch = config_data.get('platform', 'STM32')
+            processor = config_data.get('mcu', 'STM32F072').upper()
+            bootloader_offset = config_data.get('bl_offset', '0')
+            communication = config_data.get('default_connection', 'USB')
+            can_bus_interface = 'CAN bus (on PB8/PB9)'
+            startup_pin = config_data.get('boot_pins', '')
+            crystal = config_data.get('crystal', '8000000')
+            rp2040_can_rx_gpio = str(config_data.get('can_gpio', {}).get('rx', '4'))
+            rp2040_can_tx_gpio = str(config_data.get('can_gpio', {}).get('tx', '5'))
+        else:
+            # 自定义MCU模式
+            mcu_arch = data.get('platform', 'STM32')
+            processor = data.get('mcu', 'STM32F072').upper()
+            bootloader_offset = data.get('bl_offset', '0')
+            communication = data.get('connection', 'USB')
+            can_bus_interface = data.get('can_bus_interface', 'CAN bus (on PB8/PB9)')
+            startup_pin = data.get('startup_pin', '')
+            crystal = data.get('crystal', '8000000')
+            rp2040_can_rx_gpio = data.get('rp2040_can_rx_gpio', '4')
+            rp2040_can_tx_gpio = data.get('rp2040_can_tx_gpio', '5')
+        
+        # 转换 BL 偏移数值为文本格式
+        bl_offset_map = {
+            '0': 'No bootloader',
+            '256': '256',
+            '2048': '2KiB bootloader',
+            '4096': '4KiB bootloader',
+            '8192': '8KiB bootloader',
+            '16384': '16KiB bootloader',
+            '32768': '32KiB bootloader',
+            '49152': '48KiB bootloader',
+            '65536': '64KiB bootloader',
+            '131072': '128KiB bootloader'
+        }
+        if bootloader_offset in bl_offset_map:
+            bootloader_offset = bl_offset_map[bootloader_offset]
+        
+        # 预计算大写变量（避免重复计算）
+        mcu_arch_upper = mcu_arch.upper()
+        processor_upper = processor.upper()
         
         if not os.path.exists(klipper_path):
             return jsonify({'error': f'Klipper目录不存在: {klipper_path}'}), 400
@@ -430,15 +477,25 @@ def compile_firmware():
         # 生成配置文件
         config_lines = ['CONFIG_LOW_LEVEL_OPTIONS=y']
         
-        # MCU架构 (支持新的文档格式 "Raspberry Pi RP2040/RP235x")
-        if 'STM32' in mcu_arch:
+        # MCU架构 - 必须首先选择平台
+        if 'STM32' in mcu_arch_upper:
             config_lines.append('CONFIG_MACH_STM32=y')
-        elif 'RP2040' in mcu_arch or 'RP235x' in mcu_arch:
-            # RP2040/RP2350使用RPXXXX配置
+        elif 'RP2040' in mcu_arch_upper or 'RP235' in mcu_arch_upper:
             config_lines.append('CONFIG_MACH_RPXXXX=y')
+        elif 'ATSAMD' in mcu_arch_upper or processor_upper.startswith('SAMC21') or processor_upper.startswith('SAMD21') or processor_upper.startswith('SAMD51') or processor_upper.startswith('SAME51') or processor_upper.startswith('SAME54'):
+            config_lines.append('CONFIG_MACH_ATSAMD=y')
+        elif 'ATSAM' in mcu_arch_upper or processor_upper.startswith('SAM3X') or processor_upper.startswith('SAM4') or processor_upper.startswith('SAME70'):
+            config_lines.append('CONFIG_MACH_ATSAM=y')
+        elif 'LPC176' in mcu_arch_upper or processor_upper.startswith('LPC176'):
+            config_lines.append('CONFIG_MACH_LPC176X=y')
+        elif 'HC32F460' in mcu_arch_upper or 'HC32F460' in processor_upper:
+            config_lines.append('CONFIG_MACH_HC32F460=y')
+        elif 'AVR' in mcu_arch_upper or processor_upper.startswith('ATMEGA') or processor_upper.startswith('AT90USB') or processor_upper.startswith('ATMega'):
+            config_lines.append('CONFIG_MACH_AVR=y')
         
-        # 处理器
+        # 处理器映射（支持大小写）
         processor_map = {
+            # STM32
             'STM32F031': 'CONFIG_MACH_STM32F031=y',
             'STM32F042': 'CONFIG_MACH_STM32F042=y',
             'STM32F070': 'CONFIG_MACH_STM32F070=y',
@@ -459,11 +516,102 @@ def compile_firmware():
             'STM32G474': 'CONFIG_MACH_STM32G474=y',
             'STM32H723': 'CONFIG_MACH_STM32H723=y',
             'STM32H743': 'CONFIG_MACH_STM32H743=y',
+            'STM32H750': 'CONFIG_MACH_STM32H750=y',
+            'STM32L412': 'CONFIG_MACH_STM32L412=y',
+            # RP2040
             'RP2040': 'CONFIG_MACH_RP2040=y',
-            'RP2350': 'CONFIG_MACH_RP2350=y'
+            'RP2350': 'CONFIG_MACH_RP2350=y',
+            # ATSAMD
+            'SAMC21G18': 'CONFIG_MACH_SAMC21G18=y',
+            'SAMD21E15': 'CONFIG_MACH_SAMD21E15=y',
+            'SAMD21E18': 'CONFIG_MACH_SAMD21E18=y',
+            'SAMD21G18': 'CONFIG_MACH_SAMD21G18=y',
+            'SAMD21J18': 'CONFIG_MACH_SAMD21J18=y',
+            'SAMD51G19': 'CONFIG_MACH_SAMD51G19=y',
+            'SAMD51J19': 'CONFIG_MACH_SAMD51J19=y',
+            'SAMD51N19': 'CONFIG_MACH_SAMD51N19=y',
+            'SAMD51N20': 'CONFIG_MACH_SAMD51N20=y',
+            'SAMD51P20': 'CONFIG_MACH_SAMD51P20=y',
+            'SAME51J19': 'CONFIG_MACH_SAME51J19=y',
+            'SAME51N19': 'CONFIG_MACH_SAME51N19=y',
+            'SAME51N20': 'CONFIG_MACH_SAME51N20=y',
+            'SAME54P20': 'CONFIG_MACH_SAME54P20=y',
+            # ATSAM
+            'SAM3X8C': 'CONFIG_MACH_SAM3X8C=y',
+            'SAM3X8E': 'CONFIG_MACH_SAM3X8E=y',
+            'SAM4E8E': 'CONFIG_MACH_SAM4E8E=y',
+            'SAM4E16E': 'CONFIG_MACH_SAM4E16E=y',
+            'SAM4S8C': 'CONFIG_MACH_SAM4S8C=y',
+            'SAM4S8B': 'CONFIG_MACH_SAM4S8B=y',
+            'SAME70N20': 'CONFIG_MACH_SAME70N20=y',
+            'SAME70J19': 'CONFIG_MACH_SAME70J19=y',
+            'SAME70J20': 'CONFIG_MACH_SAME70J20=y',
+            'SAME70Q20': 'CONFIG_MACH_SAME70Q20=y',
+            # LPC176x
+            'LPC1768': 'CONFIG_MACH_LPC1768=y',
+            'LPC1769': 'CONFIG_MACH_LPC1769=y',
+            # HC32F460
+            'HC32F460': 'CONFIG_MACH_HC32F460=y',
+            # AVR (小写也支持)
+            'AT90USB1286': 'CONFIG_MACH_at90usb1286=y',
+            'AT90USB646': 'CONFIG_MACH_at90usb646=y',
+            'ATMEGA1280': 'CONFIG_MACH_atmega1280=y',
+            'ATMEGA2560': 'CONFIG_MACH_atmega2560=y',
+            'ATMEGA328P': 'CONFIG_MACH_atmega328p=y',
+            'ATMEGA328': 'CONFIG_MACH_atmega328=y',
+            'ATMEGA32U4': 'CONFIG_MACH_atmega32u4=y',
+            'ATMEGA168': 'CONFIG_MACH_atmega168=y',
+            'ATMEGA328PB': 'CONFIG_MACH_atmega328pb=y',
+            'LGT8F328P': 'CONFIG_MACH_lgt8f328p=y',
+            # 小写版本
+            'at90usb1286': 'CONFIG_MACH_at90usb1286=y',
+            'at90usb646': 'CONFIG_MACH_at90usb646=y',
+            'atmega1280': 'CONFIG_MACH_atmega1280=y',
+            'atmega2560': 'CONFIG_MACH_atmega2560=y',
+            'atmega328p': 'CONFIG_MACH_atmega328p=y',
+            'atmega328': 'CONFIG_MACH_atmega328=y',
+            'atmega32u4': 'CONFIG_MACH_atmega32u4=y',
+            'atmega168': 'CONFIG_MACH_atmega168=y',
+            'atmega328pb': 'CONFIG_MACH_atmega328pb=y',
+            'lgt8f328p': 'CONFIG_MACH_lgt8f328p=y'
         }
-        if processor in processor_map:
-            config_lines.append(processor_map[processor])
+        
+        # 尝试匹配处理器（processor_upper 已在前面定义）
+        if processor_upper in processor_map:
+            config_lines.append(processor_map[processor_upper])
+        elif processor_upper.startswith('STM32'):
+            # 尝试提取型号
+            import re
+            match = re.match(r'(STM32\w+)', processor_upper)
+            if match and match.group(1) in processor_map:
+                config_lines.append(processor_map[match.group(1)])
+            else:
+                # 默认使用 F072
+                config_lines.append('CONFIG_MACH_STM32F072=y')
+        elif 'RP2040' in processor_upper:
+            config_lines.append('CONFIG_MACH_RP2040=y')
+        else:
+            config_lines.append('CONFIG_MACH_STM32F072=y')
+        
+        # 晶振配置
+        crystal_map = {
+            '8000000': 'CONFIG_CLOCK_REF_8=y',
+            '12000000': 'CONFIG_CLOCK_REF_12=y',
+            '16000000': 'CONFIG_CLOCK_REF_16=y',
+            '20000000': 'CONFIG_CLOCK_REF_20=y',
+            '24000000': 'CONFIG_CLOCK_REF_24=y',
+            '25000000': 'CONFIG_CLOCK_REF_25=y',
+            '8000000': 'CONFIG_CLOCK_REF_8=y',
+            '12000000': 'CONFIG_CLOCK_REF_12=y',
+            '16000000': 'CONFIG_CLOCK_REF_16=y',
+            '20000000': 'CONFIG_CLOCK_REF_20=y',
+            '24000000': 'CONFIG_CLOCK_REF_24=y',
+            '25000000': 'CONFIG_CLOCK_REF_25=y'
+        }
+        if crystal in crystal_map:
+            config_lines.append(crystal_map[crystal])
+        elif str(crystal) in crystal_map:
+            config_lines.append(crystal_map[str(crystal)])
         
         # Bootloader偏移 (区分STM32和RP2040/RP2350)
         if 'RP2040' in processor:
@@ -513,7 +661,7 @@ def compile_firmware():
                 config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_TX={rp2040_can_tx_gpio}')
             elif 'UART' in communication:
                 config_lines.append('CONFIG_RPXXXX_SERIAL_UART0_PINS_0_1=y')
-        else:
+        elif processor_upper.startswith('STM32'):
             # STM32通信接口
             if 'USB to CAN bus bridge' in communication:
                 config_lines.append('CONFIG_USBCANBUS=y')
@@ -541,6 +689,31 @@ def compile_firmware():
             elif 'Serial' in communication:
                 config_lines.append('CONFIG_SERIAL=y')
                 config_lines.append('CONFIG_STM32_SERIAL_USART1=y')
+        elif processor_upper.startswith('SAM') or 'ATSAMD' in mcu_arch_upper:
+            # ATSAMD 通信接口
+            if 'USB' in communication:
+                config_lines.append('CONFIG_USB=y')
+            elif 'CAN' in communication:
+                config_lines.append('CONFIG_SAMD_CANBUS=y')
+                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
+            elif 'Serial' in communication or 'UART' in communication:
+                config_lines.append('CONFIG_SERIAL=y')
+        elif processor_upper.startswith('LPC176'):
+            # LPC176x 通信接口
+            if 'USB' in communication:
+                config_lines.append('CONFIG_USB=y')
+            elif 'Serial' in communication or 'UART' in communication:
+                config_lines.append('CONFIG_SERIAL=y')
+        elif 'HC32F460' in processor_upper:
+            # HC32F460 通信接口
+            if 'Serial' in communication or 'UART' in communication:
+                config_lines.append('CONFIG_HC32F460_SERIAL_PA7_PA8=y')
+        elif processor_upper.startswith('ATMEGA') or processor_upper.startswith('AT90USB') or processor_upper.startswith('ATMega'):
+            # AVR 通信接口
+            if 'USB' in communication:
+                config_lines.append('CONFIG_USB=y')
+            elif 'Serial' in communication or 'UART' in communication:
+                config_lines.append('CONFIG_SERIAL=y')
         
         # 启动引脚（验证格式）
         if startup_pin:
@@ -564,6 +737,14 @@ def compile_firmware():
         with open(config_path, 'w') as f:
             f.write(config_content)
         
+        # 确保 out 目录存在且权限正确
+        out_dir = os.path.join(klipper_path, 'out')
+        os.makedirs(out_dir, exist_ok=True)
+        try:
+            os.chmod(out_dir, 0o755)
+        except:
+            pass
+        
         # 使用make olddefconfig补全配置
         olddefconfig_result = subprocess.run(
             f'cd {klipper_path} && make olddefconfig',
@@ -584,14 +765,44 @@ def compile_firmware():
         )
         
         output = compile_result.stdout + compile_result.stderr
-        firmware_path = os.path.join(klipper_path, 'out', 'klipper.bin')
         
-        if compile_result.returncode == 0 and os.path.exists(firmware_path):
+        # 检查编译是否成功 - 支持多种固件格式
+        out_dir = os.path.join(klipper_path, 'out')
+        firmware_files = ['klipper.bin', 'klipper.uf2']
+        firmware_path = None
+        
+        for fw_file in firmware_files:
+            fw_path = os.path.join(out_dir, fw_file)
+            if os.path.exists(fw_path):
+                firmware_path = fw_path
+                break
+        
+        if compile_result.returncode == 0 and firmware_path:
+            # 修改文件权限为普通用户可读写 (666)
+            try:
+                os.chmod(firmware_path, 0o666)
+                # 也修改 out 目录权限
+                os.chmod(out_dir, 0o755)
+            except Exception as e:
+                logger.warning(f"修改文件权限失败: {e}")
+            
+            # 获取固件大小
+            firmware_size = os.path.getsize(firmware_path)
+            # 格式化为人类可读
+            if firmware_size < 1024:
+                size_str = f'{firmware_size} bytes'
+            elif firmware_size < 1024 * 1024:
+                size_str = f'{firmware_size / 1024:.1f} KB'
+            else:
+                size_str = f'{firmware_size / (1024 * 1024):.2f} MB'
+            
             return jsonify({
                 'success': True,
                 'message': '编译成功',
                 'output': output,
-                'firmware_path': firmware_path
+                'firmware_path': firmware_path,
+                'firmware_size': size_str,
+                'firmware_size_bytes': firmware_size
             })
         else:
             return jsonify({
@@ -1651,9 +1862,504 @@ def auto_update_json():
     except Exception as e:
         logger.error(f'自动更新JSON出错: {e}')
 
-if __name__ == '__main__':
-    # 启动时自动更新JSON
-    auto_update_json()
+# ==================== 配置管理 API ====================
+
+@app.route('/api/config/list/<manufacturer>', methods=['GET'])
+def list_configs(manufacturer):
+    """获取指定厂家的所有配置"""
+    try:
+        # 优先从 BOARD_CONFIGS_DIR 读取预设配置
+        configs_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+        
+        # 如果不存在，尝试从用户配置目录读取
+        if not os.path.exists(configs_dir):
+            configs_dir = os.path.join(CONFIGS_DIR, manufacturer)
+        
+        if not os.path.exists(configs_dir):
+            return jsonify({'configs': []})
+        
+        configs = []
+        # 遍历所有子目录（mainboard, toolboard, expansion）
+        for board_type in os.listdir(configs_dir):
+            type_dir = os.path.join(configs_dir, board_type)
+            if os.path.isdir(type_dir) and not board_type.startswith('.'):
+                for filename in os.listdir(type_dir):
+                    if filename.endswith('.json') and not filename.endswith('.bak'):
+                        filepath = os.path.join(type_dir, filename)
+                        try:
+                            with open(filepath, 'r', encoding='utf-8') as f:
+                                config = json.load(f)
+                                config['id'] = filename.replace('.json', '')
+                                config['type'] = board_type
+                                configs.append(config)
+                        except Exception as e:
+                            logger.error(f"读取配置失败 {filename}: {e}")
+        
+        # 按名称排序
+        configs.sort(key=lambda x: x.get('name', ''))
+        
+        return jsonify({'configs': configs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/get/<manufacturer>/<config_id>', methods=['GET'])
+def get_config(manufacturer, config_id):
+    """获取单个配置详情"""
+    try:
+        configs_dir = os.path.join(CONFIGS_DIR, manufacturer)
+        
+        # 在所有类型目录中查找
+        for board_type in ['mainboard', 'toolboard', 'expansion']:
+            filepath = os.path.join(configs_dir, board_type, f"{config_id}.json")
+            if os.path.exists(filepath):
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                return jsonify(config)
+        
+        return jsonify({'error': '配置不存在'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/create/<manufacturer>', methods=['POST'])
+def create_config(manufacturer):
+    """创建新配置"""
+    try:
+        data = request.get_json()
+        
+        if not data or 'name' not in data:
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        # 确定产品类型
+        product_type = data.get('type', 'mainboard')
+        if product_type not in ['mainboard', 'toolboard', 'expansion']:
+            product_type = 'mainboard'
+        
+        # 生成 ID
+        config_id = data.get('id', generate_id_from_name(data['name']))
+        
+        # 确保目录存在
+        type_dir = os.path.join(CONFIGS_DIR, manufacturer, product_type)
+        os.makedirs(type_dir, exist_ok=True)
+        
+        # 保存配置
+        filepath = os.path.join(type_dir, f"{config_id}.json")
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        
+        logger.info(f"创建配置：{manufacturer}/{product_type}/{config_id}.json")
+        
+        return jsonify({
+            'success': True,
+            'id': config_id,
+            'path': filepath
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/delete/<manufacturer>/<config_id>', methods=['DELETE'])
+def delete_config(manufacturer, config_id):
+    """删除配置"""
+    try:
+        configs_dir = os.path.join(CONFIGS_DIR, manufacturer)
+        
+        # 在所有类型目录中查找
+        for board_type in ['mainboard', 'toolboard', 'expansion']:
+            filepath = os.path.join(configs_dir, board_type, f"{config_id}.json")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                logger.info(f"删除配置：{filepath}")
+                return jsonify({'success': True})
+        
+        return jsonify({'error': '配置不存在'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/upload', methods=['POST'])
+def upload_config():
+    """上传配置文件"""
+    try:
+        manufacturer = request.form.get('manufacturer', 'FLY')
+        files = request.files.getlist('files[]')
+        
+        if not files:
+            return jsonify({'error': '没有文件'}), 400
+        
+        uploaded_count = 0
+        
+        for file in files:
+            if file.filename:
+                # 处理路径：configs/{manufacturer}/...
+                save_path = os.path.join(CONFIGS_DIR, manufacturer, file.filename)
+                
+                # 确保目录存在
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                
+                file.save(save_path)
+                uploaded_count += 1
+                logger.info(f"上传文件：{save_path}")
+        
+        return jsonify({
+            'success': True,
+            'uploaded_count': uploaded_count
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def generate_id_from_name(name):
+    """从名称生成 ID"""
+    import re
+    # 转换为小写，替换非字母数字字符为连字符
+    config_id = name.lower()
+    config_id = re.sub(r'[^a-z0-9]', '-', config_id)
+    config_id = re.sub(r'-+', '-', config_id)
+    config_id = config_id.strip('-')
+    return config_id
+
+KLIPPER_MCU_LIST = {
+    "STM32": {
+        "platform": "stm32",
+        "mcus": [
+            {"id": "stm32f103", "name": "STM32F103", "crystal": ["8000000", "12000000"], "bl_offset": ["0", "8192", "16384"]},
+            {"id": "stm32f207", "name": "STM32F207", "crystal": ["8000000", "12000000", "25000000"], "bl_offset": ["0", "16384"]},
+            {"id": "stm32f401", "name": "STM32F401", "crystal": ["8000000", "12000000", "25000000"], "bl_offset": ["0", "16384"]},
+            {"id": "stm32f405", "name": "STM32F405", "crystal": ["8000000", "12000000", "25000000"], "bl_offset": ["0", "16384", "32768"]},
+            {"id": "stm32f407", "name": "STM32F407", "crystal": ["8000000", "12000000", "25000000"], "bl_offset": ["0", "16384", "32768"]},
+            {"id": "stm32f429", "name": "STM32F429", "crystal": ["8000000", "12000000", "25000000"], "bl_offset": ["0", "16384"]},
+            {"id": "stm32f446", "name": "STM32F446", "crystal": ["8000000", "12000000", "25000000"], "bl_offset": ["0", "16384"]},
+            {"id": "stm32f765", "name": "STM32F765", "crystal": ["8000000", "12000000", "25000000"], "bl_offset": ["0", "16384"]},
+            {"id": "stm32f031", "name": "STM32F031", "crystal": ["8000000"], "bl_offset": ["0"]},
+            {"id": "stm32f042", "name": "STM32F042", "crystal": ["8000000"], "bl_offset": ["0", "4096"]},
+            {"id": "stm32f070", "name": "STM32F070", "crystal": ["8000000"], "bl_offset": ["0"]},
+            {"id": "stm32f072", "name": "STM32F072", "crystal": ["8000000"], "bl_offset": ["0", "4096"]},
+            {"id": "stm32g070", "name": "STM32G070", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "2048"]},
+            {"id": "stm32g071", "name": "STM32G071", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "2048"]},
+            {"id": "stm32g0b0", "name": "STM32G0B0", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "2048"]},
+            {"id": "stm32g0b1", "name": "STM32G0B1", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "2048"]},
+            {"id": "stm32g431", "name": "STM32G431", "crystal": ["8000000", "16000000", "24000000"], "bl_offset": ["0", "2048"]},
+            {"id": "stm32g474", "name": "STM32G474", "crystal": ["8000000", "16000000", "24000000"], "bl_offset": ["0", "2048"]},
+            {"id": "stm32h723", "name": "STM32H723", "crystal": ["8000000", "25000000"], "bl_offset": ["0", "16384", "32768"]},
+            {"id": "stm32h743", "name": "STM32H743", "crystal": ["8000000", "25000000"], "bl_offset": ["0", "16384", "32768"]},
+            {"id": "stm32h750", "name": "STM32H750", "crystal": ["8000000", "25000000"], "bl_offset": ["0", "16384"]},
+        ],
+        "flash_modes": ["DFU", "KAT", "CAN", "CAN_BRIDGE_DFU", "CAN_BRIDGE_KAT"]
+    },
+    "RP2040": {
+        "platform": "rp2040",
+        "mcus": [
+            {"id": "rp2040", "name": "RP2040", "crystal": ["12000000"], "bl_offset": ["0", "256", "16384"]},
+            {"id": "rp2350", "name": "RP2350", "crystal": ["12000000"], "bl_offset": ["0", "256", "16384"]},
+        ],
+        "flash_modes": ["UF2", "KAT", "CAN"]
+    },
+    "ATSAMD": {
+        "platform": "atsamd",
+        "mcus": [
+            {"id": "samc21g18", "name": "SAMC21G18", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "8192"]},
+            {"id": "samd21g18", "name": "SAMD21G18", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "8192"]},
+            {"id": "samd21e18", "name": "SAMD21E18", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "8192"]},
+            {"id": "samd51g19", "name": "SAMD51G19", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "16384"]},
+            {"id": "samd51j19", "name": "SAMD51J19", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "16384"]},
+            {"id": "same51j19", "name": "SAME51J19", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "16384"]},
+        ],
+        "flash_modes": ["UF2", "KAT"]
+    },
+    "LPC176x": {
+        "platform": "lpc176x",
+        "mcus": [
+            {"id": "lpc1768", "name": "LPC1768 (100MHz)", "crystal": ["8000000", "12000000"], "bl_offset": ["0", "16384"]},
+            {"id": "lpc1769", "name": "LPC1769 (120MHz)", "crystal": ["8000000", "12000000"], "bl_offset": ["0", "16384"]},
+        ],
+        "flash_modes": ["DFU", "KAT"]
+    },
+    "HC32F460": {
+        "platform": "hc32f460",
+        "mcus": [
+            {"id": "hc32f460", "name": "HC32F460", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "0x8000", "0xC000", "0x10000"]},
+        ],
+        "flash_modes": ["DFU", "KAT"]
+    },
+    "ATSAM": {
+        "platform": "atsam",
+        "mcus": [
+            {"id": "sam3x8e", "name": "SAM3X8E", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "8192"]},
+            {"id": "sam4s8c", "name": "SAM4S8C", "crystal": ["8000000", "16000000"], "bl_offset": ["0", "8192"]},
+            {"id": "same70q20b", "name": "SAME70Q20B", "crystal": ["8000000", "12000000"], "bl_offset": ["0", "8192"]},
+        ],
+        "flash_modes": ["DFU", "KAT"]
+    },
+    "AVR": {
+        "platform": "avr",
+        "mcus": [
+            {"id": "atmega2560", "name": "ATmega2560", "crystal": ["8000000", "16000000"], "bl_offset": ["0"]},
+            {"id": "atmega328p", "name": "ATmega328P", "crystal": ["8000000", "16000000"], "bl_offset": ["0"]},
+            {"id": "at90usb1286", "name": "AT90USB1286", "crystal": ["8000000", "16000000"], "bl_offset": ["0"]},
+        ],
+        "flash_modes": ["DFU"]
+    }
+}
+
+# 预设厂家列表（可扩展）
+PRESET_MANUFACTURERS = ["FLY", "BTT", "MKS", "Creality", "Prusa", "Voron", "自定义"]
+
+@app.route('/api/config/mcu-list', methods=['GET'])
+def get_mcu_list():
+    """获取 Klipper 支持的 MCU 列表"""
+    return jsonify({
+        'success': True,
+        'mcu_types': list(KLIPPER_MCU_LIST.keys()),
+        'mcu_details': KLIPPER_MCU_LIST
+    })
+
+@app.route('/api/config/manufacturers', methods=['GET'])
+def get_preset_manufacturers():
+    """获取预设厂家列表"""
+    return jsonify({
+        'success': True,
+        'manufacturers': PRESET_MANUFACTURERS
+    })
+
+@app.route('/api/config/mcu-info/<mcu_id>', methods=['GET'])
+def get_mcu_info(mcu_id):
+    """获取特定 MCU 的详细信息"""
+    mcu_id = mcu_id.lower()
     
-    logger.info(f'启动 Firmware-Tool 服务，端口: {PORT}')
-    app.run(host='0.0.0.0', port=PORT, debug=False)
+    for mcu_type, data in KLIPPER_MCU_LIST.items():
+        for mcu in data['mcus']:
+            if mcu['id'] == mcu_id:
+                return jsonify({
+                    'success': True,
+                    'mcu': mcu,
+                    'type': mcu_type,
+                    'flash_modes': data['flash_modes']
+                })
+    
+    return jsonify({
+        'success': False,
+        'error': f'未找到 MCU: {mcu_id}'
+    }), 404
+
+
+# ==================== Klipper Kconfig 解析器集成 ====================
+
+from klipper_kconfig_parser import KlipperKconfigParser
+
+# 初始化解析器（启动时解析一次）
+klipper_parser = KlipperKconfigParser(config.get('klipper_path', '~/klipper'))
+klipper_mcu_db = {}
+
+def init_klipper_mcu_db():
+    """初始化 Klipper MCU 数据库"""
+    global klipper_mcu_db
+    try:
+        klipper_mcu_db = klipper_parser.parse_all_platforms()
+        logger.info(f"✓ Klipper MCU 数据库已加载: {len(klipper_mcu_db)} 个平台")
+        for platform, data in klipper_mcu_db.items():
+            logger.info(f"  - {platform}: {len(data['mcus'])} 个 MCU")
+    except Exception as e:
+        logger.error(f"加载 Klipper MCU 数据库失败: {e}")
+        klipper_mcu_db = {}
+
+# 启动时初始化
+init_klipper_mcu_db()
+
+@app.route('/api/klipper/mcu-database', methods=['GET'])
+def get_klipper_mcu_database():
+    """获取完整的 Klipper MCU 数据库"""
+    return jsonify({
+        'success': True,
+        'platforms': list(klipper_mcu_db.keys()),
+        'database': klipper_mcu_db
+    })
+
+@app.route('/api/klipper/platforms', methods=['GET'])
+def get_klipper_platforms():
+    """获取所有 MCU 平台列表"""
+    platforms = []
+    for platform_name, data in klipper_mcu_db.items():
+        platforms.append({
+            'name': platform_name,
+            'mcu_count': len(data['mcus']),
+            'flash_modes': data.get('flash_modes', [])
+        })
+    
+    return jsonify({
+        'success': True,
+        'platforms': platforms
+    })
+
+@app.route('/api/klipper/mcus/<platform>', methods=['GET'])
+def get_klipper_mcus(platform):
+    """获取指定平台的所有 MCU"""
+    # 尝试直接匹配，如果不匹配则尝试大小写转换
+    if platform in klipper_mcu_db:
+        platform_key = platform
+    else:
+        # 尝试大写
+        platform_upper = platform.upper()
+        if platform_upper in klipper_mcu_db:
+            platform_key = platform_upper
+        else:
+            # 尝试查找匹配（不区分大小写）
+            for key in klipper_mcu_db.keys():
+                if key.upper() == platform_upper:
+                    platform_key = key
+                    break
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'未找到平台: {platform}'
+                }), 404
+    
+    platform = platform_key
+    if platform not in klipper_mcu_db:
+        return jsonify({
+            'success': False,
+            'error': f'未找到平台: {platform}'
+        }), 404
+    
+    data = klipper_mcu_db[platform]
+    mcus = []
+    for mcu_id, mcu_info in data['mcus'].items():
+        mcus.append({
+            'id': mcu_id,
+            'name': mcu_info['name'],
+            'crystals': mcu_info.get('crystals', []),
+            'bl_offsets': mcu_info.get('bl_offsets', []),
+            'connections': mcu_info.get('connections', [])
+        })
+    
+    return jsonify({
+        'success': True,
+        'platform': platform,
+        'mcus': mcus,
+        'flash_modes': data.get('flash_modes', []),
+        'connections': data.get('connections', [])
+    })
+
+@app.route('/api/klipper/mcu-info/<mcu_id>', methods=['GET'])
+def get_klipper_mcu_info(mcu_id):
+    """获取特定 MCU 的详细信息"""
+    mcu_id = mcu_id.lower()
+    
+    for platform, data in klipper_mcu_db.items():
+        if mcu_id in data['mcus']:
+            mcu = data['mcus'][mcu_id]
+            return jsonify({
+                'success': True,
+                'platform': platform,
+                'mcu': mcu,
+                'flash_modes': data.get('flash_modes', []),
+                'connections': data.get('connections', [])
+            })
+    
+    return jsonify({
+        'success': False,
+        'error': f'未找到 MCU: {mcu_id}'
+    }), 404
+
+@app.route('/api/klipper/refresh-database', methods=['POST'])
+def refresh_klipper_database():
+    """强制刷新 Klipper MCU 数据库"""
+    try:
+        init_klipper_mcu_db()
+        return jsonify({
+            'success': True,
+            'message': 'MCU 数据库已刷新',
+            'platforms': list(klipper_mcu_db.keys()),
+            'total_mcus': sum(len(d['mcus']) for d in klipper_mcu_db.values())
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+# ==================== 新增 API ====================
+
+@app.route('/api/config/all', methods=['GET'])
+def get_all_configs():
+    """获取所有配置（不分厂家）"""
+    all_configs = []
+    
+    try:
+        for manufacturer in os.listdir(BOARD_CONFIGS_DIR):
+            manufacturer_path = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+            if not os.path.isdir(manufacturer_path):
+                continue
+                
+            for board_type in ['mainboard', 'toolboard', 'expansion']:
+                type_path = os.path.join(manufacturer_path, board_type)
+                if not os.path.exists(type_path):
+                    continue
+                    
+                for filename in os.listdir(type_path):
+                    if not filename.endswith('.json'):
+                        continue
+                        
+                    config_path = os.path.join(type_path, filename)
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            config = json.load(f)
+                            config['manufacturer'] = manufacturer
+                            all_configs.append(config)
+                    except Exception as e:
+                        logger.error(f"读取配置失败 {config_path}: {e}")
+        
+        return jsonify({
+            'success': True,
+            'configs': all_configs,
+            'count': len(all_configs)
+        })
+    except Exception as e:
+        logger.error(f"获取所有配置失败: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/config/save', methods=['POST'])
+def save_config():
+    """保存配置（支持更新）"""
+    try:
+        config_data = request.json
+        
+        manufacturer = config_data.get('manufacturer', 'FLY')
+        board_type = config_data.get('type', 'mainboard')
+        config_id = config_data.get('id')
+        
+        if not config_id:
+            return jsonify({
+                'success': False,
+                'error': '缺少配置 ID'
+            }), 400
+        
+        # 确保目录存在
+        config_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer, board_type)
+        os.makedirs(config_dir, exist_ok=True)
+        
+        # 保存配置
+        config_path = os.path.join(config_dir, f"{config_id}.json")
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=2)
+        
+        return jsonify({
+            'success': True,
+            'message': '配置已保存',
+            'path': config_path
+        })
+        
+    except Exception as e:
+        logger.error(f"保存配置失败: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+if __name__ == '__main__':
+    import os
+    os.chdir(BASE_DIR)
+    app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
+

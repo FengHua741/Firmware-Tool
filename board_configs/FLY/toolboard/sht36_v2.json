@@ -1,21 +1,30 @@
 {
-  "产品类型": "toolboard",
-  "名称": "FLY-SHT36 V2",
-  "处理器": "STM32F103",
-  "BL偏移": "32KiB bootloader",
-  "通讯方式": [
+  "type": "toolboard",
+  "name": "FLY-SHT36 V2",
+  "platform": "STM32",
+  "mcu": "stm32f103",
+  "bl_offset": "2048",
+  "connections": [
     "CANBUS",
     "USB",
     "串口"
   ],
-  "默认通讯": "CAN bus (on PB8/PB9)",
-  "烧录方法": [
+  "default_connection": "CAN bus (on PB8/PB9)",
+  "flash_modes": [
     "DFU"
   ],
-  "默认烧录": "KAT",
-  "启动引脚": "!PC13",
-  "晶振": "8 MHz crystal",
-  "BL烧录": "支持",
-  "BL默认方式": "DFU",
-  "id": "sht36_v2"
+  "default_flash": "KAT",
+  "boot_pins": "!PC13",
+  "crystal": "8000000",
+  "bl_flash_support": "支持",
+  "bl_default_flash": "DFU",
+  "id": "sht36_v2",
+  "firmware_update": {
+    "enabled": false,
+    "katapult_mode": "USB",
+    "device_id": "",
+    "flash_mode": "KAT",
+    "custom_config": ""
+  },
+  "manufacturer": "FLY"
 }

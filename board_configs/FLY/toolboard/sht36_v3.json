@@ -1,23 +1,32 @@
 {
-  "产品类型": "toolboard",
-  "名称": "FLY-SHT36 V3",
-  "处理器": "Raspberry Pi RP2040",
-  "BL偏移": "16KiB bootloader",
-  "通讯方式": [
+  "type": "toolboard",
+  "name": "FLY-SHT36 V3",
+  "platform": "RP2040",
+  "mcu": "rp2040",
+  "bl_offset": "16384",
+  "connections": [
     "CANBUS",
     "USB"
   ],
-  "默认通讯": "CAN bus",
-  "烧录方法": [
+  "default_connection": "CAN bus",
+  "flash_modes": [
     "UF2"
   ],
-  "默认烧录": "KAT",
-  "启动引脚": "!gpio5",
+  "default_flash": "KAT",
+  "boot_pins": "!gpio5",
+  "bl_flash_support": "支持",
+  "bl_default_flash": "UF2",
+  "id": "sht36_v3",
   "can_gpio": {
     "rx": 1,
     "tx": 0
   },
-  "BL烧录": "支持",
-  "BL默认方式": "UF2",
-  "id": "sht36_v3"
+  "firmware_update": {
+    "enabled": false,
+    "katapult_mode": "USB",
+    "device_id": "",
+    "flash_mode": "KAT",
+    "custom_config": ""
+  },
+  "manufacturer": "FLY"
 }
