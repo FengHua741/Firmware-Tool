@@ -43,7 +43,8 @@ CORS(app)
 BASE_DIR = '/home/fenghua/Firmware-Tool'
 CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
 BOARD_CONFIGS_DIR = os.path.join(BASE_DIR, 'board_configs')
-CONFIGS_DIR = os.path.join(BASE_DIR, 'configs')  # 新增：用户配置目录
+# CONFIGS_DIR 已弃用，统一使用 BOARD_CONFIGS_DIR
+CONFIGS_DIR = BOARD_CONFIGS_DIR
 
 # 默认配置
 DEFAULT_CONFIG = {
@@ -425,14 +426,14 @@ def compile_firmware():
         # 检查是否是预设配置模式
         config_data = data.get('config')
         if config_data:
-            # 从预设配置提取参数
-            mcu_arch = config_data.get('platform', 'STM32')
-            processor = config_data.get('mcu', 'STM32F072').upper()
-            bootloader_offset = config_data.get('bl_offset', '0')
-            communication = config_data.get('default_connection', 'USB')
+            # 从预设配置提取参数 - 支持中英文字段
+            mcu_arch = config_data.get('platform', config_data.get('平台', 'STM32'))
+            processor = config_data.get('mcu', config_data.get('处理器', 'STM32F072')).upper()
+            bootloader_offset = config_data.get('bl_offset', config_data.get('BL 偏移', '0'))
+            communication = config_data.get('default_connection', config_data.get('默认连接', 'USB'))
             can_bus_interface = 'CAN bus (on PB8/PB9)'
-            startup_pin = config_data.get('boot_pins', '')
-            crystal = config_data.get('crystal', '8000000')
+            startup_pin = config_data.get('boot_pins', config_data.get('启动引脚', ''))
+            crystal = config_data.get('crystal', config_data.get('晶振', '8000000'))
             rp2040_can_rx_gpio = str(config_data.get('can_gpio', {}).get('rx', '4'))
             rp2040_can_tx_gpio = str(config_data.get('can_gpio', {}).get('tx', '5'))
         else:
