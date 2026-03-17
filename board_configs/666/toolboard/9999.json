@@ -1,0 +1,24 @@
+{
+    "name": "9999",
+    "type": "toolboard",
+    "manufacturer": "666",
+    "mcu": "stm32g431",
+    "platform": "STM32",
+    "crystal": "16000000",
+    "bl_offset": "8192",
+    "boot_pins": "",
+    "connections": [
+        "USB"
+    ],
+    "flash_modes": [
+        "DFU"
+    ],
+    "default_flash": "DFU",
+    "firmware_update": {
+        "enabled": false,
+        "katapult_mode": "USB",
+        "device_id": "",
+        "flash_mode": "KAT",
+        "custom_config": ""
+    }
+}

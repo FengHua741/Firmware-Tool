@@ -42,11 +42,11 @@ CORS(app)
 # 配置路径
 BASE_DIR = '/home/fenghua/Firmware-Tool'
 CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
+# 统一使用 board_configs 目录存放所有配置（预设和用户配置）
 BOARD_CONFIGS_DIR = os.path.join(BASE_DIR, 'board_configs')
-# 用户自定义配置目录（用于添加新配置）
-USER_CONFIGS_DIR = os.path.join(BASE_DIR, 'user_configs')
-# CONFIGS_DIR 用于兼容旧代码，指向用户配置目录
-CONFIGS_DIR = USER_CONFIGS_DIR
+# 保留 USER_CONFIGS_DIR 和 CONFIGS_DIR 指向同一目录，用于兼容旧代码
+USER_CONFIGS_DIR = BOARD_CONFIGS_DIR
+CONFIGS_DIR = BOARD_CONFIGS_DIR
 
 # 默认配置
 DEFAULT_CONFIG = {
@@ -1909,16 +1909,15 @@ def auto_update_json():
 
 @app.route('/api/config/list/<manufacturer>', methods=['GET'])
 def list_configs(manufacturer):
-    """获取指定厂家的所有配置（合并预设配置和用户配置）"""
+    """获取指定厂家的所有配置"""
     try:
         configs = []
-        config_ids = set()  # 用于去重
         
-        # 1. 从 BOARD_CONFIGS_DIR 读取预设配置
-        preset_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
-        if os.path.exists(preset_dir):
-            for board_type in os.listdir(preset_dir):
-                type_dir = os.path.join(preset_dir, board_type)
+        # 从 BOARD_CONFIGS_DIR 读取配置
+        mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+        if os.path.exists(mfr_dir):
+            for board_type in os.listdir(mfr_dir):
+                type_dir = os.path.join(mfr_dir, board_type)
                 if os.path.isdir(type_dir) and not board_type.startswith('.'):
                     for filename in os.listdir(type_dir):
                         if filename.endswith('.json') and not filename.endswith('.bak'):
@@ -1929,35 +1928,9 @@ def list_configs(manufacturer):
                                     config_id = filename.replace('.json', '')
                                     config['id'] = config_id
                                     config['type'] = board_type
-                                    config['is_preset'] = True  # 标记为预设配置
                                     configs.append(config)
-                                    config_ids.add(config_id)
                             except Exception as e:
-                                logger.error(f"读取预设配置失败 {filename}: {e}")
-        
-        # 2. 从 USER_CONFIGS_DIR 读取用户自定义配置
-        user_dir = os.path.join(USER_CONFIGS_DIR, manufacturer)
-        if os.path.exists(user_dir):
-            for board_type in os.listdir(user_dir):
-                type_dir = os.path.join(user_dir, board_type)
-                if os.path.isdir(type_dir) and not board_type.startswith('.'):
-                    for filename in os.listdir(type_dir):
-                        if filename.endswith('.json') and not filename.endswith('.bak'):
-                            config_id = filename.replace('.json', '')
-                            # 跳过已存在的预设配置（用户配置覆盖预设）
-                            if config_id in config_ids:
-                                continue
-                            filepath = os.path.join(type_dir, filename)
-                            try:
-                                with open(filepath, 'r', encoding='utf-8') as f:
-                                    config = json.load(f)
-                                    config['id'] = config_id
-                                    config['type'] = board_type
-                                    config['is_preset'] = False  # 标记为用户配置
-                                    configs.append(config)
-                                    config_ids.add(config_id)
-                            except Exception as e:
-                                logger.error(f"读取用户配置失败 {filename}: {e}")
+                                logger.error(f"读取配置失败 {filename}: {e}")
         
         # 按名称排序
         configs.sort(key=lambda x: x.get('name', ''))
@@ -1968,26 +1941,14 @@ def list_configs(manufacturer):
 
 @app.route('/api/config/get/<manufacturer>/<config_id>', methods=['GET'])
 def get_config(manufacturer, config_id):
-    """获取单个配置详情（优先从用户配置读取，其次从预设配置）"""
+    """获取单个配置详情"""
     try:
-        # 1. 优先从用户配置目录查找
-        user_dir = os.path.join(USER_CONFIGS_DIR, manufacturer)
+        mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
         for board_type in ['mainboard', 'toolboard', 'expansion']:
-            filepath = os.path.join(user_dir, board_type, f"{config_id}.json")
+            filepath = os.path.join(mfr_dir, board_type, f"{config_id}.json")
             if os.path.exists(filepath):
                 with open(filepath, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                    config['is_preset'] = False
-                return jsonify(config)
-        
-        # 2. 从预设配置目录查找
-        preset_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
-        for board_type in ['mainboard', 'toolboard', 'expansion']:
-            filepath = os.path.join(preset_dir, board_type, f"{config_id}.json")
-            if os.path.exists(filepath):
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                    config['is_preset'] = True
                 return jsonify(config)
         
         return jsonify({'error': '配置不存在'}), 404
@@ -2032,25 +1993,17 @@ def create_config(manufacturer):
 
 @app.route('/api/config/delete/<manufacturer>/<config_id>', methods=['DELETE'])
 def delete_config(manufacturer, config_id):
-    """删除配置（只能删除用户自定义配置，不能删除预设配置）"""
+    """删除配置"""
     try:
-        # 只能从用户配置目录删除
-        user_dir = os.path.join(USER_CONFIGS_DIR, manufacturer)
+        mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
         
         # 在所有类型目录中查找
         for board_type in ['mainboard', 'toolboard', 'expansion']:
-            filepath = os.path.join(user_dir, board_type, f"{config_id}.json")
+            filepath = os.path.join(mfr_dir, board_type, f"{config_id}.json")
             if os.path.exists(filepath):
                 os.remove(filepath)
-                logger.info(f"删除用户配置：{filepath}")
+                logger.info(f"删除配置：{filepath}")
                 return jsonify({'success': True})
-        
-        # 检查是否是预设配置
-        preset_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
-        for board_type in ['mainboard', 'toolboard', 'expansion']:
-            filepath = os.path.join(preset_dir, board_type, f"{config_id}.json")
-            if os.path.exists(filepath):
-                return jsonify({'error': '预设配置不能删除'}), 403
         
         return jsonify({'error': '配置不存在'}), 404
     except Exception as e:
@@ -2448,27 +2401,28 @@ def list_firmware_update_configs():
     try:
         configs = []
         
-        # 扫描所有厂家的 firmware_update 目录
-        for manufacturer in os.listdir(BOARD_CONFIGS_DIR):
-            mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
-            if not os.path.isdir(mfr_dir):
-                continue
+        # 从 BOARD_CONFIGS_DIR 读取固件更新配置
+        if os.path.exists(BOARD_CONFIGS_DIR):
+            for manufacturer in os.listdir(BOARD_CONFIGS_DIR):
+                mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+                if not os.path.isdir(mfr_dir) or manufacturer.startswith('.'):
+                    continue
+                    
+                update_dir = os.path.join(mfr_dir, 'firmware_update')
+                if not os.path.exists(update_dir):
+                    continue
                 
-            update_dir = os.path.join(mfr_dir, 'firmware_update')
-            if not os.path.exists(update_dir):
-                continue
-            
-            for filename in os.listdir(update_dir):
-                if filename.endswith('.json'):
-                    filepath = os.path.join(update_dir, filename)
-                    try:
-                        with open(filepath, 'r', encoding='utf-8') as f:
-                            config = json.load(f)
-                            config['_filepath'] = filepath
-                            config['_manufacturer'] = manufacturer
-                            configs.append(config)
-                    except Exception as e:
-                        logger.warning(f"读取固件更新配置失败 {filepath}: {e}")
+                for filename in os.listdir(update_dir):
+                    if filename.endswith('.json'):
+                        filepath = os.path.join(update_dir, filename)
+                        try:
+                            with open(filepath, 'r', encoding='utf-8') as f:
+                                config = json.load(f)
+                                config['_filepath'] = filepath
+                                config['_manufacturer'] = manufacturer
+                                configs.append(config)
+                        except Exception as e:
+                            logger.warning(f"读取固件更新配置失败 {filepath}: {e}")
         
         return jsonify({
             'success': True,
