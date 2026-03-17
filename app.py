@@ -39,10 +39,10 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
-# 配置路径
-BASE_DIR = '/home/fenghua/Firmware-Tool'
+# 配置路径 - 使用动态路径，不硬编码
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
-# 统一使用 board_configs 目录存放所有配置（预设和用户配置）
+# 统一使用 board_configs 目录存放所有配置
 BOARD_CONFIGS_DIR = os.path.join(BASE_DIR, 'board_configs')
 # 保留 USER_CONFIGS_DIR 和 CONFIGS_DIR 指向同一目录，用于兼容旧代码
 USER_CONFIGS_DIR = BOARD_CONFIGS_DIR
@@ -2147,11 +2147,31 @@ def get_mcu_list():
 
 @app.route('/api/config/manufacturers', methods=['GET'])
 def get_preset_manufacturers():
-    """获取预设厂家列表"""
-    return jsonify({
-        'success': True,
-        'manufacturers': PRESET_MANUFACTURERS
-    })
+    """获取厂家列表（从board_configs目录动态读取）"""
+    try:
+        manufacturers = set()
+        
+        # 从 board_configs 目录读取所有厂家
+        if os.path.exists(BOARD_CONFIGS_DIR):
+            for item in os.listdir(BOARD_CONFIGS_DIR):
+                item_path = os.path.join(BOARD_CONFIGS_DIR, item)
+                if os.path.isdir(item_path) and not item.startswith('.'):
+                    manufacturers.add(item)
+        
+        # 如果没有找到任何厂家，返回默认列表
+        if not manufacturers:
+            manufacturers = set(PRESET_MANUFACTURERS)
+        
+        return jsonify({
+            'success': True,
+            'manufacturers': sorted(list(manufacturers))
+        })
+    except Exception as e:
+        logger.error(f"获取厂家列表失败: {e}")
+        return jsonify({
+            'success': True,
+            'manufacturers': PRESET_MANUFACTURERS
+        })
 
 @app.route('/api/config/mcu-info/<mcu_id>', methods=['GET'])
 def get_mcu_info(mcu_id):
