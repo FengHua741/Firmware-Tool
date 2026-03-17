@@ -4,7 +4,7 @@ Firmware-Tool
 Port: 9999 (可配置)
 """
 
-from flask import Flask, jsonify, request, send_from_directory, send_file
+from flask import Flask, jsonify, request, send_from_directory, send_file, Response
 from flask_cors import CORS
 import subprocess
 import os
@@ -43,8 +43,10 @@ CORS(app)
 BASE_DIR = '/home/fenghua/Firmware-Tool'
 CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
 BOARD_CONFIGS_DIR = os.path.join(BASE_DIR, 'board_configs')
-# CONFIGS_DIR 已弃用，统一使用 BOARD_CONFIGS_DIR
-CONFIGS_DIR = BOARD_CONFIGS_DIR
+# 用户自定义配置目录（用于添加新配置）
+USER_CONFIGS_DIR = os.path.join(BASE_DIR, 'user_configs')
+# CONFIGS_DIR 用于兼容旧代码，指向用户配置目录
+CONFIGS_DIR = USER_CONFIGS_DIR
 
 # 默认配置
 DEFAULT_CONFIG = {
@@ -835,7 +837,8 @@ def download_firmware():
         allowed_paths = [
             os.path.expanduser('~/klipper/out'),
             '/data/klipper/out',
-            os.path.join(BASE_DIR, 'board_configs')
+            os.path.join(BASE_DIR, 'board_configs'),
+            os.path.join(BASE_DIR, 'out')  # 编译输出目录
         ]
         
         is_allowed = any(firmware_path.startswith(p) for p in allowed_paths)
@@ -1042,6 +1045,45 @@ def flash_firmware():
             
     except subprocess.TimeoutExpired:
         return jsonify({'error': '烧录超时'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ==================== HOST固件安装 API ====================
+@app.route('/api/firmware/install-host', methods=['POST'])
+def install_host_firmware():
+    """安装固件到上位机（Linux进程）"""
+    try:
+        data = request.json
+        firmware_path = data.get('firmware_path', '')
+        
+        if not firmware_path:
+            return jsonify({'error': '固件路径不能为空'}), 400
+        
+        firmware_path = os.path.expanduser(firmware_path)
+        
+        if not os.path.exists(firmware_path):
+            return jsonify({'error': f'固件文件不存在: {firmware_path}'}), 400
+        
+        # 复制到 klipper/out/klipper.elf
+        klipper_path = os.path.expanduser(config.get('klipper_path', '~/klipper'))
+        target_path = os.path.join(klipper_path, 'out', 'klipper.elf')
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        
+        # 复制文件
+        import shutil
+        shutil.copy2(firmware_path, target_path)
+        
+        # 设置权限
+        os.chmod(target_path, 0o755)
+        
+        return jsonify({
+            'success': True,
+            'message': f'固件已安装到 {target_path}，请重启Klipper服务',
+            'target_path': target_path
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1867,34 +1909,55 @@ def auto_update_json():
 
 @app.route('/api/config/list/<manufacturer>', methods=['GET'])
 def list_configs(manufacturer):
-    """获取指定厂家的所有配置"""
+    """获取指定厂家的所有配置（合并预设配置和用户配置）"""
     try:
-        # 优先从 BOARD_CONFIGS_DIR 读取预设配置
-        configs_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
-        
-        # 如果不存在，尝试从用户配置目录读取
-        if not os.path.exists(configs_dir):
-            configs_dir = os.path.join(CONFIGS_DIR, manufacturer)
-        
-        if not os.path.exists(configs_dir):
-            return jsonify({'configs': []})
-        
         configs = []
-        # 遍历所有子目录（mainboard, toolboard, expansion）
-        for board_type in os.listdir(configs_dir):
-            type_dir = os.path.join(configs_dir, board_type)
-            if os.path.isdir(type_dir) and not board_type.startswith('.'):
-                for filename in os.listdir(type_dir):
-                    if filename.endswith('.json') and not filename.endswith('.bak'):
-                        filepath = os.path.join(type_dir, filename)
-                        try:
-                            with open(filepath, 'r', encoding='utf-8') as f:
-                                config = json.load(f)
-                                config['id'] = filename.replace('.json', '')
-                                config['type'] = board_type
-                                configs.append(config)
-                        except Exception as e:
-                            logger.error(f"读取配置失败 {filename}: {e}")
+        config_ids = set()  # 用于去重
+        
+        # 1. 从 BOARD_CONFIGS_DIR 读取预设配置
+        preset_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+        if os.path.exists(preset_dir):
+            for board_type in os.listdir(preset_dir):
+                type_dir = os.path.join(preset_dir, board_type)
+                if os.path.isdir(type_dir) and not board_type.startswith('.'):
+                    for filename in os.listdir(type_dir):
+                        if filename.endswith('.json') and not filename.endswith('.bak'):
+                            filepath = os.path.join(type_dir, filename)
+                            try:
+                                with open(filepath, 'r', encoding='utf-8') as f:
+                                    config = json.load(f)
+                                    config_id = filename.replace('.json', '')
+                                    config['id'] = config_id
+                                    config['type'] = board_type
+                                    config['is_preset'] = True  # 标记为预设配置
+                                    configs.append(config)
+                                    config_ids.add(config_id)
+                            except Exception as e:
+                                logger.error(f"读取预设配置失败 {filename}: {e}")
+        
+        # 2. 从 USER_CONFIGS_DIR 读取用户自定义配置
+        user_dir = os.path.join(USER_CONFIGS_DIR, manufacturer)
+        if os.path.exists(user_dir):
+            for board_type in os.listdir(user_dir):
+                type_dir = os.path.join(user_dir, board_type)
+                if os.path.isdir(type_dir) and not board_type.startswith('.'):
+                    for filename in os.listdir(type_dir):
+                        if filename.endswith('.json') and not filename.endswith('.bak'):
+                            config_id = filename.replace('.json', '')
+                            # 跳过已存在的预设配置（用户配置覆盖预设）
+                            if config_id in config_ids:
+                                continue
+                            filepath = os.path.join(type_dir, filename)
+                            try:
+                                with open(filepath, 'r', encoding='utf-8') as f:
+                                    config = json.load(f)
+                                    config['id'] = config_id
+                                    config['type'] = board_type
+                                    config['is_preset'] = False  # 标记为用户配置
+                                    configs.append(config)
+                                    config_ids.add(config_id)
+                            except Exception as e:
+                                logger.error(f"读取用户配置失败 {filename}: {e}")
         
         # 按名称排序
         configs.sort(key=lambda x: x.get('name', ''))
@@ -1905,16 +1968,26 @@ def list_configs(manufacturer):
 
 @app.route('/api/config/get/<manufacturer>/<config_id>', methods=['GET'])
 def get_config(manufacturer, config_id):
-    """获取单个配置详情"""
+    """获取单个配置详情（优先从用户配置读取，其次从预设配置）"""
     try:
-        configs_dir = os.path.join(CONFIGS_DIR, manufacturer)
-        
-        # 在所有类型目录中查找
+        # 1. 优先从用户配置目录查找
+        user_dir = os.path.join(USER_CONFIGS_DIR, manufacturer)
         for board_type in ['mainboard', 'toolboard', 'expansion']:
-            filepath = os.path.join(configs_dir, board_type, f"{config_id}.json")
+            filepath = os.path.join(user_dir, board_type, f"{config_id}.json")
             if os.path.exists(filepath):
                 with open(filepath, 'r', encoding='utf-8') as f:
                     config = json.load(f)
+                    config['is_preset'] = False
+                return jsonify(config)
+        
+        # 2. 从预设配置目录查找
+        preset_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+        for board_type in ['mainboard', 'toolboard', 'expansion']:
+            filepath = os.path.join(preset_dir, board_type, f"{config_id}.json")
+            if os.path.exists(filepath):
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    config['is_preset'] = True
                 return jsonify(config)
         
         return jsonify({'error': '配置不存在'}), 404
@@ -1959,17 +2032,25 @@ def create_config(manufacturer):
 
 @app.route('/api/config/delete/<manufacturer>/<config_id>', methods=['DELETE'])
 def delete_config(manufacturer, config_id):
-    """删除配置"""
+    """删除配置（只能删除用户自定义配置，不能删除预设配置）"""
     try:
-        configs_dir = os.path.join(CONFIGS_DIR, manufacturer)
+        # 只能从用户配置目录删除
+        user_dir = os.path.join(USER_CONFIGS_DIR, manufacturer)
         
         # 在所有类型目录中查找
         for board_type in ['mainboard', 'toolboard', 'expansion']:
-            filepath = os.path.join(configs_dir, board_type, f"{config_id}.json")
+            filepath = os.path.join(user_dir, board_type, f"{config_id}.json")
             if os.path.exists(filepath):
                 os.remove(filepath)
-                logger.info(f"删除配置：{filepath}")
+                logger.info(f"删除用户配置：{filepath}")
                 return jsonify({'success': True})
+        
+        # 检查是否是预设配置
+        preset_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+        for board_type in ['mainboard', 'toolboard', 'expansion']:
+            filepath = os.path.join(preset_dir, board_type, f"{config_id}.json")
+            if os.path.exists(filepath):
+                return jsonify({'error': '预设配置不能删除'}), 403
         
         return jsonify({'error': '配置不存在'}), 404
     except Exception as e:
@@ -2358,6 +2439,289 @@ def save_config():
             'error': str(e)
         }), 500
 
+
+# ==================== 固件更新配置 API ====================
+
+@app.route('/api/firmware-update/configs', methods=['GET'])
+def list_firmware_update_configs():
+    """列出所有固件更新配置"""
+    try:
+        configs = []
+        
+        # 扫描所有厂家的 firmware_update 目录
+        for manufacturer in os.listdir(BOARD_CONFIGS_DIR):
+            mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+            if not os.path.isdir(mfr_dir):
+                continue
+                
+            update_dir = os.path.join(mfr_dir, 'firmware_update')
+            if not os.path.exists(update_dir):
+                continue
+            
+            for filename in os.listdir(update_dir):
+                if filename.endswith('.json'):
+                    filepath = os.path.join(update_dir, filename)
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            config = json.load(f)
+                            config['_filepath'] = filepath
+                            config['_manufacturer'] = manufacturer
+                            configs.append(config)
+                    except Exception as e:
+                        logger.warning(f"读取固件更新配置失败 {filepath}: {e}")
+        
+        return jsonify({
+            'success': True,
+            'configs': configs
+        })
+        
+    except Exception as e:
+        logger.error(f"列出固件更新配置失败: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/firmware-update/config/<manufacturer>/<config_id>', methods=['GET'])
+def get_firmware_update_config(manufacturer, config_id):
+    """获取固件更新配置"""
+    try:
+        filepath = os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'firmware_update', f"{config_id}.json")
+        
+        if not os.path.exists(filepath):
+            return jsonify({
+                'success': False,
+                'error': '配置不存在'
+            }), 404
+        
+        with open(filepath, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        return jsonify({
+            'success': True,
+            'config': config
+        })
+        
+    except Exception as e:
+        logger.error(f"获取固件更新配置失败: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/firmware-update/config/<manufacturer>/<config_id>', methods=['POST', 'PUT'])
+def save_firmware_update_config(manufacturer, config_id):
+    """保存固件更新配置"""
+    try:
+        config_data = request.json
+        
+        # 确保目录存在
+        update_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'firmware_update')
+        os.makedirs(update_dir, exist_ok=True)
+        
+        # 保存配置
+        filepath = os.path.join(update_dir, f"{config_id}.json")
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=2)
+        
+        return jsonify({
+            'success': True,
+            'message': '固件更新配置已保存',
+            'path': filepath
+        })
+        
+    except Exception as e:
+        logger.error(f"保存固件更新配置失败: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/firmware-update/config/<manufacturer>/<config_id>', methods=['DELETE'])
+def delete_firmware_update_config(manufacturer, config_id):
+    """删除固件更新配置"""
+    try:
+        filepath = os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'firmware_update', f"{config_id}.json")
+        
+        if not os.path.exists(filepath):
+            return jsonify({
+                'success': False,
+                'error': '配置不存在'
+            }), 404
+        
+        os.remove(filepath)
+        
+        return jsonify({
+            'success': True,
+            'message': '固件更新配置已删除'
+        })
+        
+    except Exception as e:
+        logger.error(f"删除固件更新配置失败: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+# ==================== 系统设置 API ====================
+
+@app.route('/api/system/versions', methods=['GET'])
+def get_versions():
+    """获取Klipper版本信息"""
+    result = {
+        'klipper_version': None
+    }
+    
+    # 获取 Klipper 版本 - 使用绝对路径避免systemd的~扩展问题
+    try:
+        klipper_path = '/home/fenghua/klipper'
+        if os.path.exists(os.path.join(klipper_path, '.git')):
+            output = subprocess.run(
+                ['git', '-C', klipper_path, 'describe', '--tags', '--always'],
+                capture_output=True, text=True, timeout=5
+            )
+            if output.returncode == 0:
+                result['klipper_version'] = output.stdout.strip()
+        else:
+            result['klipper_version'] = '未安装'
+    except Exception as e:
+        logger.warning(f"获取Klipper版本失败: {e}")
+        result['klipper_version'] = '获取失败'
+    
+    return jsonify(result)
+
+@app.route('/api/system/service', methods=['POST'])
+def control_service():
+    """控制服务（启动/停止/重启）"""
+    data = request.json
+    service_name = data.get('service')
+    action = data.get('action')
+    
+    if not service_name or not action:
+        return jsonify({'success': False, 'error': '缺少服务名或操作'}), 400
+    
+    if action not in ['start', 'stop', 'restart']:
+        return jsonify({'success': False, 'error': '无效的操作'}), 400
+    
+    try:
+        # 使用 sudo systemctl 控制服务
+        cmd = ['sudo', 'systemctl', action, service_name]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode == 0:
+            return jsonify({'success': True, 'message': f'{service_name} {action} 成功'})
+        else:
+            return jsonify({'success': False, 'error': result.stderr or '命令执行失败'}), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'error': '服务操作超时'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/system/check-update', methods=['GET'])
+def check_update():
+    """检查项目更新"""
+    try:
+        # 获取当前版本（git commit hash）
+        current_output = subprocess.run(
+            ['git', '-C', BASE_DIR, 'rev-parse', '--short', 'HEAD'],
+            capture_output=True, text=True, timeout=10
+        )
+        current_version = current_output.stdout.strip() if current_output.returncode == 0 else 'unknown'
+        
+        # 获取远程最新版本
+        # 先获取远程信息
+        subprocess.run(
+            ['git', '-C', BASE_DIR, 'fetch', 'origin'],
+            capture_output=True, timeout=30
+        )
+        
+        # 获取远程最新commit
+        remote_output = subprocess.run(
+            ['git', '-C', BASE_DIR, 'rev-parse', '--short', 'origin/main'],
+            capture_output=True, text=True, timeout=10
+        )
+        latest_version = remote_output.stdout.strip() if remote_output.returncode == 0 else current_version
+        
+        # 检查是否有更新
+        has_update = current_version != latest_version
+        
+        # 获取最新提交时间
+        update_time = None
+        if has_update:
+            time_output = subprocess.run(
+                ['git', '-C', BASE_DIR, 'log', '-1', '--format=%cd', '--date=iso', 'origin/main'],
+                capture_output=True, text=True, timeout=10
+            )
+            update_time = time_output.stdout.strip() if time_output.returncode == 0 else None
+        
+        return jsonify({
+            'has_update': has_update,
+            'current_version': current_version,
+            'latest_version': latest_version,
+            'update_time': update_time
+        })
+    except Exception as e:
+        logger.error(f"检查更新失败: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system/update', methods=['POST'])
+def update_project():
+    """执行项目更新"""
+    def generate():
+        try:
+            yield "开始更新 Firmware-Tool...\n"
+            
+            # 1. 保存当前配置
+            yield "保存当前配置...\n"
+            config_backup = None
+            if os.path.exists(CONFIG_PATH):
+                with open(CONFIG_PATH, 'r') as f:
+                    config_backup = f.read()
+            
+            # 2. 执行 git pull
+            yield "拉取最新代码...\n"
+            result = subprocess.run(
+                ['git', '-C', BASE_DIR, 'pull', 'origin', 'main'],
+                capture_output=True, text=True, timeout=60
+            )
+            yield result.stdout
+            if result.stderr:
+                yield f"警告: {result.stderr}\n"
+            
+            if result.returncode != 0:
+                yield f"错误: git pull 失败\n"
+                return
+            
+            # 3. 恢复配置
+            if config_backup:
+                yield "恢复配置...\n"
+                with open(CONFIG_PATH, 'w') as f:
+                    f.write(config_backup)
+            
+            # 4. 重启服务
+            yield "重启服务...\n"
+            restart_result = subprocess.run(
+                ['sudo', 'systemctl', 'restart', 'firmware-tool'],
+                capture_output=True, text=True, timeout=30
+            )
+            
+            if restart_result.returncode == 0:
+                yield "服务重启成功！\n"
+            else:
+                yield f"服务重启失败: {restart_result.stderr}\n"
+            
+            yield "更新完成！\n"
+            
+        except subprocess.TimeoutExpired:
+            yield "错误: 操作超时\n"
+        except Exception as e:
+            yield f"错误: {str(e)}\n"
+    
+    return Response(generate(), mimetype='text/plain')
 
 if __name__ == '__main__':
     import os

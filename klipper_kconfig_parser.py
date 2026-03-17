@@ -132,10 +132,8 @@ class KlipperKconfigParser:
         if not crystals:
             # 为每个 MCU 单独设置晶振
             for mcu_id, mcu in mcus.items():
-                if mcu_id == 'rp2040':
-                    mcu['crystals'] = ['12000000']  # 12MHz
-                elif mcu_id == 'rp2350':
-                    mcu['crystals'] = ['150000000']  # 150MHz
+                if mcu_id == 'rp2040' or mcu_id == 'rp2350':
+                    mcu['crystals'] = ['12000000']  # 12MHz (RP系列都是12MHz)
                 else:
                     mcu['crystals'] = ['8000000', '12000000', '16000000', '20000000', '24000000', '25000000']
         else:
@@ -230,6 +228,7 @@ class KlipperKconfigParser:
         # 简单的条件匹配
         config_name = mcu['config_name']
         base_name = config_name.replace('MACH_', '')
+        mcu_id = mcu.get('id', '').lower()
         
         # 处理条件中的 || 和 &&
         conditions = [c.strip() for c in condition.split('||')]
@@ -257,6 +256,21 @@ class KlipperKconfigParser:
                 return True
             if 'MACH_STM32F2' in cond and base_name.startswith('stm32f2'):
                 return True
+            # 特殊系列匹配
+            # MACH_STM32F4x5 匹配 F405, F407, F429 等
+            if 'MACH_STM32F4x5' in cond:
+                if base_name.startswith('stm32f405') or base_name.startswith('stm32f407') or \
+                   base_name.startswith('stm32f415') or base_name.startswith('stm32f417') or \
+                   base_name.startswith('stm32f427') or base_name.startswith('stm32f429') or \
+                   base_name.startswith('stm32f437') or base_name.startswith('stm32f439') or \
+                   mcu_id in ['stm32f405', 'stm32f407', 'stm32f415', 'stm32f417', 
+                             'stm32f427', 'stm32f429', 'stm32f437', 'stm32f439']:
+                    return True
+            # MACH_STM32F0x2 匹配 F042, F072 等
+            if 'MACH_STM32F0x2' in cond:
+                if base_name.startswith('stm32f042') or base_name.startswith('stm32f072') or \
+                   mcu_id in ['stm32f042', 'stm32f072']:
+                    return True
         
         return False
     

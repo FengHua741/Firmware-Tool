@@ -300,31 +300,27 @@
                             </div>
                             <div class="form-group">
                                 <label class="form-label">💾 烧录模式</label>
-                                <select class="form-control form-select" id="flashMode">
+                                <select class="form-control form-select" id="flashMode" onchange="onFlashModeChange()">
                                     <option value="DFU">USB/DFU</option>
                                     <option value="KAT">USB/KAT (Katapult)</option>
                                     <option value="CAN">CAN Bus</option>
                                     <option value="UF2">UF2 (Mass Storage)</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">📂 固件来源</label>
-                                <select class="form-control form-select" id="firmwareSource" onchange="onFirmwareSourceChange()">
-                                    <option value="compiled">刚编译的固件</option>
-                                    <option value="upload">上传本地文件</option>
-                                    <option value="klipper">Klipper 目录中的固件</option>
+                                    <option value="TF">TF卡 (下载firmware.bin)</option>
                                 </select>
                             </div>
                         </div>
                         
-                        <!-- 上传区域 -->
-                        <div id="firmwareUploadArea" class="upload-area" style="display:none; margin-top: 10px;">
-                            <p>拖拽固件文件 (.bin/.uf2) 到此处，或点击选择</p>
-                            <input type="file" id="firmwareFileInput" accept=".bin,.uf2" style="display:none;">
+                        <!-- TF卡烧录提示 -->
+                        <div id="tfCardSection" class="tf-card-info" style="display:none; margin: 15px 0; padding: 15px; background: #e3f2fd; border-radius: 8px; border-left: 4px solid #2196f3;">
+                            <h4 style="margin: 0 0 10px 0; color: #1976d2;">💾 TF卡烧录说明</h4>
+                            <p style="margin: 5px 0; color: #424242;">1. 点击下方按钮下载 firmware.bin</p>
+                            <p style="margin: 5px 0; color: #424242;">2. 将 firmware.bin 复制到 TF 卡根目录</p>
+                            <p style="margin: 5px 0; color: #424242;">3. 将 TF 卡插入主板，重新上电即可自动烧录</p>
+                            <button class="btn btn-primary" onclick="downloadFirmwareForTF()" style="margin-top: 10px;">📥 下载 firmware.bin</button>
                         </div>
                         
                         <div class="form-row" style="margin-top: 15px;">
-                            <button class="btn btn-primary btn-lg" onclick="flashFirmware()">⚡ 烧录固件</button>
+                            <button class="btn btn-primary btn-lg" onclick="flashFirmware()" id="flashFirmwareBtn">⚡ 烧录固件</button>
                         </div>
                         
                         <div id="flashResult" class="flash-result" style="display:none; margin-top: 15px;">
@@ -385,32 +381,45 @@
                     <h2>🔄 固件批量更新</h2>
                 </div>
                 
-                <!-- 可更新配置列表 -->
+                <!-- 主板配置选择 -->
                 <div class="card">
                     <div class="card-header">
-                        <h3>📋 可更新配置列表</h3>
-                        <span class="badge" id="updateableCount">0</span>
+                        <h3>📋 选择主板配置</h3>
                     </div>
                     <div class="card-body">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">🏭 厂家筛选</label>
-                                <select class="form-control form-select" id="updateManufacturerFilter" onchange="loadUpdateableConfigs()">
-                                    <option value="">全部厂家</option>
-                                    <option value="FLY">FLY</option>
+                                <label class="form-label">🏭 厂家</label>
+                                <select class="form-control form-select" id="updateBoardManufacturer" onchange="onUpdateBoardManufacturerChange()">
+                                    <option value="">-- 选择厂家 --</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">📦 类型筛选</label>
-                                <select class="form-control form-select" id="updateTypeFilter" onchange="loadUpdateableConfigs()">
-                                    <option value="">全部类型</option>
-                                    <option value="mainboard">主板</option>
-                                    <option value="toolboard">工具板</option>
-                                    <option value="expansion">扩展板</option>
+                                <label class="form-label">📦 类型</label>
+                                <select class="form-control form-select" id="updateBoardType" onchange="onUpdateBoardTypeChange()" disabled>
+                                    <option value="">-- 先选择厂家 --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">🔹 主板型号</label>
+                                <select class="form-control form-select" id="updateBoardModel" onchange="onUpdateBoardModelChange()" disabled>
+                                    <option value="">-- 先选择类型 --</option>
                                 </select>
                             </div>
                         </div>
-                        
+                        <div class="form-row">
+                            <button class="btn btn-primary" onclick="createFirmwareUpdateConfig()">➕ 创建固件更新配置</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 可更新配置列表 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>📋 固件更新配置列表</h3>
+                        <span class="badge" id="updateableCount">0</span>
+                    </div>
+                    <div class="card-body">
                         <div id="updateableConfigsList" class="config-list">
                             <p class="empty">加载中...</p>
                         </div>
@@ -463,7 +472,7 @@
                     </div>
                 </div>
 
-                <!-- 单个配置更新设置弹窗（隐藏） -->
+                <!-- 单个配置更新设置弹窗（隐藏） - 简化版 -->
                 <div id="updateSettingsModal" class="modal" style="display:none;">
                     <div class="modal-content">
                         <div class="modal-header">
@@ -472,11 +481,16 @@
                         </div>
                         <div class="modal-body">
                             <input type="hidden" id="updateSettingConfigId">
+                            <input type="hidden" id="updateSettingBoardConfigId">
+                            <input type="hidden" id="updateSettingManufacturer">
+                            
+                            <!-- 关联的主板配置信息 -->
+                            <div id="linkedBoardConfigInfo"></div>
                             
                             <div class="form-row">
                                 <div class="form-group">
                                     <label class="form-label">启用固件更新</label>
-                                    <select class="form-control form-select" id="updateSettingEnabled">
+                                    <select class="form-control form-select" id="updateSettingEnabled" onchange="toggleUpdateModeOptions()">
                                         <option value="true">是</option>
                                         <option value="false">否</option>
                                     </select>
@@ -485,31 +499,42 @@
                             
                             <div id="updateSettingOptions">
                                 <div class="form-row">
-                                    <div class="form-group">
-                                        <label class="form-label">Katapult 模式</label>
-                                        <select class="form-control form-select" id="updateSettingKatMode">
-                                            <option value="USB">USB</option>
-                                            <option value="CAN">CAN</option>
+                                    <div class="form-group" style="flex: 2;">
+                                        <label class="form-label">更新模式</label>
+                                        <select class="form-control form-select" id="updateSettingMode" onchange="onUpdateModeChange()">
+                                            <option value="CAN">CAN - CAN总线连接，使用Katapult</option>
+                                            <option value="USB_DFU">USB_DFU - USB连接，官方Bootloader</option>
+                                            <option value="USB_KATAPULT">USB_KATAPULT - USB连接，Katapult引导</option>
+                                            <option value="USB_SERIAL">USB_SERIAL - USB转串口芯片</option>
+                                            <option value="CAN_BRIDGE_DFU">CAN_BRIDGE_DFU - USB转CAN桥接，官方Bootloader</option>
+                                            <option value="CAN_BRIDGE_KATAPULT">CAN_BRIDGE_KATAPULT - USB转CAN桥接，Katapult</option>
+                                            <option value="TF">TF - TF卡烧录（下载firmware.bin）</option>
+                                            <option value="HOST">HOST - 上位机（Linux进程）</option>
                                         </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">设备 ID</label>
-                                        <input type="text" class="form-control" id="updateSettingDeviceId" placeholder="例如: c5360983cdc4">
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">烧录模式</label>
-                                        <select class="form-control form-select" id="updateSettingFlashMode">
-                                            <option value="KAT">KAT (Katapult)</option>
-                                            <option value="DFU">DFU</option>
-                                            <option value="CAN">CAN</option>
-                                            <option value="UF2">UF2</option>
-                                        </select>
+                                        <p class="help-text" id="modeHelpText" style="margin-top:5px;font-size:12px;color:#6c757d;"></p>
                                     </div>
                                 </div>
-                                <div class="form-row">
+                                
+                                <div class="form-row" id="deviceIdRow">
                                     <div class="form-group" style="flex: 2;">
-                                        <label class="form-label">自定义编译参数</label>
-                                        <textarea class="form-control" id="updateSettingCustomConfig" rows="3" placeholder="例如: CONFIG_LOW_LEVEL_OPTIONS=y"></textarea>
+                                        <label class="form-label">设备 ID / 路径</label>
+                                        <div class="input-with-button">
+                                            <input type="text" class="form-control" id="updateSettingDeviceId" placeholder="例如: c5360983cdc4 或 /dev/serial/by-id/...">
+                                            <button class="btn btn-secondary" onclick="scanDeviceIdForUpdate()" title="扫描设备">🔍</button>
+                                        </div>
+                                        <p class="help-text" style="margin-top:5px;font-size:12px;color:#6c757d;">
+                                            CAN模式填UUID，USB模式填/dev/serial/by-id路径
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row" id="katapultSerialRow" style="display:none;">
+                                    <div class="form-group" style="flex: 2;">
+                                        <label class="form-label">Katapult 串口路径</label>
+                                        <input type="text" class="form-control" id="updateSettingKatapultSerial" placeholder="例如: /dev/serial/by-id/usb-katapult_...">
+                                        <p class="help-text" style="margin-top:5px;font-size:12px;color:#6c757d;">
+                                            双击Reset后使用 ls /dev/serial/by-id/* 获取
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -552,75 +577,23 @@
                 </div>
 
                 <div class="card">
-                    <div class="card-header"><h3>➕ 添加/编辑配置</h3></div>
+                    <div class="card-header">
+                        <h3>➕ 添加/编辑配置</h3>
+                        <button class="btn btn-secondary btn-sm" onclick="openPresetSelector()">📋 从预设修改</button>
+                    </div>
                     <div class="card-body">
-                        <!-- 模式切换 -->
+                        <!-- 基本信息 -->
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">🔄 配置模式</label>
-                                <div class="radio-group">
-                                    <label class="radio-item">
-                                        <input type="radio" name="configMode" value="preset" checked onchange="onConfigModeChange()">
-                                        <span>📋 预设模板</span>
-                                    </label>
-                                    <label class="radio-item">
-                                        <input type="radio" name="configMode" value="custom" onchange="onConfigModeChange()">
-                                        <span>🔧 自定义MCU</span>
-                                    </label>
+                                <label class="form-label">🏭 厂家 <span style="color:red">*</span></label>
+                                <div class="input-with-button">
+                                    <input type="text" class="form-control" id="configManufacturerInput" placeholder="输入或选择厂家" list="manufacturerList">
+                                    <button class="btn btn-secondary" onclick="refreshManufacturerList()" title="刷新厂家列表">🔄</button>
                                 </div>
-                            </div>
-                        </div>
-
-                        <!-- 预设模板模式 -->
-                        <div id="presetModeSection">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label">🏭 厂家</label>
-                                    <select class="form-control form-select" id="presetManufacturer" onchange="onPresetManufacturerChange()">
-                                        <option value="">-- 选择厂家 --</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">📦 类型</label>
-                                    <select class="form-control form-select" id="presetBoardType" onchange="onPresetBoardTypeChange()" disabled>
-                                        <option value="">-- 先选择厂家 --</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">🔹 型号</label>
-                                    <select class="form-control form-select" id="presetBoardModel" onchange="onPresetBoardModelChange()" disabled>
-                                        <option value="">-- 先选择类型 --</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 自定义MCU模式 -->
-                        <div id="customModeSection" style="display:none;">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label">🔧 MCU 平台</label>
-                                    <select class="form-control form-select" id="mcuPlatform" onchange="onMcuPlatformChange()">
-                                        <option value="">-- 选择平台 --</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">🔹 MCU 型号</label>
-                                    <select class="form-control form-select" id="mcuModelSelect" onchange="onMcuModelChange()" disabled>
-                                        <option value="">-- 先选择平台 --</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 通用配置信息 -->
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">🏷️ 产品名称</label>
-                                <input type="text" class="form-control" id="configBoardName" placeholder="例如: FLY-SB2040-V3">
+                                <datalist id="manufacturerList"></datalist>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">📦 产品类型</label>
+                                <label class="form-label">📦 产品类型 <span style="color:red">*</span></label>
                                 <select class="form-control form-select" id="configProductType">
                                     <option value="mainboard">主板 (Mainboard)</option>
                                     <option value="toolboard">工具板 (Toolboard)</option>
@@ -628,8 +601,26 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">🏭 厂家</label>
-                                <input type="text" class="form-control" id="configManufacturerInput" placeholder="例如: FLY">
+                                <label class="form-label">🔹 型号（产品名称） <span style="color:red">*</span></label>
+                                <input type="text" class="form-control" id="configBoardName" placeholder="例如: SB2040-V3">
+                            </div>
+                        </div>
+
+                        <!-- MCU配置 -->
+                        <div class="section-divider" style="margin: 20px 0;">🔧 MCU 配置</div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">🔧 MCU 平台</label>
+                                <select class="form-control form-select" id="mcuPlatform" onchange="onMcuPlatformChange()">
+                                    <option value="">-- 选择平台 --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">🔹 MCU 型号</label>
+                                <select class="form-control form-select" id="mcuModelSelect" onchange="onMcuModelChange()" disabled>
+                                    <option value="">-- 先选择平台 --</option>
+                                </select>
                             </div>
                         </div>
 
@@ -666,9 +657,9 @@
                             <!-- 连接方式 -->
                             <div class="form-row">
                                 <div class="form-group" style="flex: 2;">
-                                    <label class="form-label">🔌 连接方式（从 Klipper 读取）</label>
+                                    <label class="form-label">🔌 连接方式 <small style="color:#6c757d;font-weight:normal;">（请勾选支持的连接方式）</small></label>
                                     <div id="connectionCheckboxes" class="checkbox-group">
-                                        <!-- 动态生成 -->
+                                        <!-- 动态生成，默认不选中 -->
                                     </div>
                                 </div>
                             </div>
@@ -676,9 +667,9 @@
                             <!-- 烧录方式 -->
                             <div class="form-row">
                                 <div class="form-group" style="flex: 2;">
-                                    <label class="form-label">💾 支持的烧录方式</label>
+                                    <label class="form-label">💾 支持的烧录方式 <small style="color:#6c757d;font-weight:normal;">（请勾选支持的烧录方式）</small></label>
                                     <div id="flashModeCheckboxes" class="checkbox-group">
-                                        <!-- 动态生成 -->
+                                        <!-- 动态生成，默认不选中 -->
                                     </div>
                                 </div>
                                 <div class="form-group">
@@ -747,11 +738,58 @@
                     </div>
                 </div>
 
+                <!-- 预设选择弹窗 -->
+                <div id="presetSelectorModal" class="modal" style="display:none;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3>📋 从预设配置修改</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="closePresetSelector()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">🏭 厂家</label>
+                                    <select class="form-control form-select" id="modalPresetManufacturer" onchange="onModalPresetManufacturerChange()">
+                                        <option value="">-- 选择厂家 --</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">📦 类型</label>
+                                    <select class="form-control form-select" id="modalPresetBoardType" onchange="onModalPresetBoardTypeChange()" disabled>
+                                        <option value="">-- 先选择厂家 --</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">🔹 型号</label>
+                                    <select class="form-control form-select" id="modalPresetBoardModel" disabled>
+                                        <option value="">-- 先选择类型 --</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-row" style="margin-top: 20px;">
+                                <button class="btn btn-primary" onclick="loadPresetToForm()">📥 加载到表单</button>
+                                <button class="btn btn-secondary" onclick="closePresetSelector()">取消</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header"><h3>📤 上传配置</h3></div>
                     <div class="card-body">
+                        <div class="upload-info" style="background:#e3f2fd;padding:15px;border-radius:8px;margin-bottom:15px;">
+                            <h4 style="margin-top:0;color:#1976d2;">📖 使用说明</h4>
+                            <p style="margin:5px 0;"><strong>用途：</strong>批量上传配置文件到指定厂家目录</p>
+                            <p style="margin:5px 0;"><strong>文件夹结构要求：</strong></p>
+                            <ul style="margin:5px 0;padding-left:20px;">
+                                <li>主板配置: <code>厂家名/mainboard/配置名.json</code></li>
+                                <li>工具板配置: <code>厂家名/toolboard/配置名.json</code></li>
+                                <li>扩展板配置: <code>厂家名/expansion/配置名.json</code></li>
+                            </ul>
+                            <p style="margin:5px 0;color:#666;font-size:13px;">💡 提示：选择包含上述结构的文件夹，系统会自动上传到对应位置</p>
+                        </div>
                         <div class="upload-area" id="uploadArea">
-                            <p>拖拽文件夹到此处，或点击选择文件夹</p>
+                            <p>📁 拖拽文件夹到此处，或点击选择文件夹</p>
                             <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none;">
                         </div>
                         <div id="uploadProgress" class="upload-progress" style="display:none;">
@@ -809,6 +847,38 @@
                                     <button class="btn btn-sm btn-warning" onclick="controlService('moonraker', 'restart')">重启</button>
                                 </div>
                             </div>
+                            <div class="service-item">
+                                <span>KlipperScreen 服务</span>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-success" onclick="controlService('KlipperScreen', 'start')">启动</button>
+                                    <button class="btn btn-sm btn-danger" onclick="controlService('KlipperScreen', 'stop')">停止</button>
+                                    <button class="btn btn-sm btn-warning" onclick="controlService('KlipperScreen', 'restart')">重启</button>
+                                </div>
+                            </div>
+                            <div class="service-item">
+                                <span> crowsnest 服务</span>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-success" onclick="controlService('crowsnest', 'start')">启动</button>
+                                    <button class="btn btn-sm btn-danger" onclick="controlService('crowsnest', 'stop')">停止</button>
+                                    <button class="btn btn-sm btn-warning" onclick="controlService('crowsnest', 'restart')">重启</button>
+                                </div>
+                            </div>
+                            <div class="service-item">
+                                <span> mainsail 服务</span>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-success" onclick="controlService('mainsail', 'start')">启动</button>
+                                    <button class="btn btn-sm btn-danger" onclick="controlService('mainsail', 'stop')">停止</button>
+                                    <button class="btn btn-sm btn-warning" onclick="controlService('mainsail', 'restart')">重启</button>
+                                </div>
+                            </div>
+                            <div class="service-item">
+                                <span> fluidd 服务</span>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-success" onclick="controlService('fluidd', 'start')">启动</button>
+                                    <button class="btn btn-sm btn-danger" onclick="controlService('fluidd', 'stop')">停止</button>
+                                    <button class="btn btn-sm btn-warning" onclick="controlService('fluidd', 'restart')">重启</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -818,9 +888,30 @@
                     <div class="card-body">
                         <div id="systemInfo" class="info-grid">
                             <div class="info-item">
-                                <span class="info-label">版本</span>
-                                <span class="info-value" id="appVersion">1.0.0</span>
+                                <span class="info-label">Firmware-Tool 版本</span>
+                                <span class="info-value" id="appVersion">2.0.0</span>
                             </div>
+                            <div class="info-item">
+                                <span class="info-label">Klipper 版本</span>
+                                <span class="info-value" id="klipperVersion">加载中...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3>🔄 项目更新</h3></div>
+                    <div class="card-body">
+                        <div class="form-row">
+                            <div class="form-group" style="flex:1">
+                                <label class="form-label">Firmware-Tool 更新</label>
+                                <div id="updateStatus" class="info-value">点击检查更新</div>
+                            </div>
+                            <button class="btn btn-primary" onclick="checkForUpdates()">🔍 检查更新</button>
+                            <button class="btn btn-success" onclick="updateProject()" id="updateBtn" style="display:none;margin-left:10px;">🔄 立即更新</button>
+                        </div>
+                        <div id="updateLog" style="margin-top:15px;display:none;">
+                            <pre style="background:#f8f9fa;padding:15px;border-radius:8px;font-size:13px;max-height:200px;overflow:auto;"></pre>
                         </div>
                     </div>
                 </div>

@@ -386,29 +386,80 @@ function onFirmwareSourceChange() {
     }
 }
 
+// 烧录模式变化处理
+function onFlashModeChange() {
+    const flashMode = document.getElementById('flashMode').value;
+    const tfCardSection = document.getElementById('tfCardSection');
+    const flashBtn = document.getElementById('flashFirmwareBtn');
+    const deviceIdGroup = document.getElementById('flashDeviceId').closest('.form-group');
+    
+    if (flashMode === 'TF') {
+        // TF卡模式：显示下载区域，隐藏烧录按钮和设备选择
+        tfCardSection.style.display = 'block';
+        flashBtn.style.display = 'none';
+        deviceIdGroup.style.display = 'none';
+    } else {
+        // 其他模式：正常显示
+        tfCardSection.style.display = 'none';
+        flashBtn.style.display = 'inline-block';
+        deviceIdGroup.style.display = 'block';
+    }
+}
+
+// 下载 firmware.bin 用于 TF 卡烧录
+async function downloadFirmwareForTF() {
+    if (!compiledFirmwarePath) {
+        showError('请先编译固件');
+        return;
+    }
+    
+    try {
+        // 调用 API 获取固件文件
+        const response = await fetch(`/api/firmware/download?path=${encodeURIComponent(compiledFirmwarePath)}`);
+        if (!response.ok) {
+            throw new Error('下载失败');
+        }
+        
+        const blob = await response.blob();
+        
+        // 创建下载链接
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'firmware.bin';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        showSuccess('firmware.bin 下载成功！请复制到TF卡中。');
+    } catch (error) {
+        console.error('下载失败:', error);
+        showError('下载失败: ' + error.message);
+    }
+}
+
 // 烧录固件
 async function flashFirmware() {
     const deviceId = document.getElementById('flashDeviceId').value;
     const flashMode = document.getElementById('flashMode').value;
-    const source = document.getElementById('firmwareSource').value;
+    
+    if (flashMode === 'TF') {
+        // TF卡模式不需要烧录
+        return;
+    }
     
     if (!deviceId) {
         showError('请选择设备 ID');
         return;
     }
     
-    let firmwarePath = null;
+    let firmwarePath = compiledFirmwarePath;
     
-    if (source === 'compiled') {
-        if (!compiledFirmwarePath) {
-            showError('请先编译固件');
-            return;
-        }
-        firmwarePath = compiledFirmwarePath;
-    } else if (source === 'klipper') {
+    if (!firmwarePath) {
+        // 如果没有编译过，尝试使用默认路径
         firmwarePath = '~/klipper/out/klipper.bin';
     }
-    // upload 模式由后端处理文件
     
     const resultDiv = document.getElementById('flashResult');
     resultDiv.style.display = 'block';
