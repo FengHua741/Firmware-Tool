@@ -147,6 +147,39 @@ body {
     gap: 20px;
 }
 
+/* 资源页面响应式网格 - FlyTools风格 */
+.resource-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+}
+
+@media screen and (max-width: 1920px) {
+    .resource-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media screen and (max-width: 1200px) {
+    .resource-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media screen and (max-width: 768px) {
+    .resource-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 卡片头部操作区 */
+.card-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
 /* 表单 */
 .form-row {
     display: flex;
@@ -354,46 +387,52 @@ body {
     color: var(--primary-color);
 }
 
-/* ID搜索 */
-.id-search-container {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
-    margin-bottom: 20px;
-}
-
-.id-column {
-    background: var(--bg-color);
-    border-radius: 6px;
-    padding: 15px;
-}
-
-.id-column h4 {
-    font-size: 14px;
-    color: var(--text-secondary);
+/* 设备搜索卡片操作栏 */
+.device-card-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
     margin-bottom: 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-color);
+}
+
+.device-card-actions .form-control {
+    max-width: 160px;
+    padding: 6px 10px;
+    font-size: 13px;
 }
 
 .id-list {
-    max-height: 200px;
+    min-height: 120px;
+    max-height: 300px;
     overflow-y: auto;
+    background: var(--bg-color);
+    border-radius: 6px;
+    padding: 10px;
 }
 
 .id-item {
-    padding: 8px;
+    padding: 8px 10px;
     margin-bottom: 5px;
     background: var(--card-bg);
     border-radius: 4px;
     font-size: 12px;
     word-break: break-all;
-    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
     transition: background 0.2s;
 }
 
 .id-item:hover {
     background: rgba(33, 150, 243, 0.1);
+}
+
+.id-item .id-text {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: break-word;
 }
 
 .id-item.selected {
@@ -520,8 +559,13 @@ body {
         grid-template-columns: 1fr;
     }
     
-    .id-search-container {
-        grid-template-columns: 1fr;
+    .id-search-tabs {
+        flex-wrap: wrap;
+    }
+    
+    .id-tab {
+        padding: 6px 12px;
+        font-size: 12px;
     }
     
     .form-row {
@@ -1011,52 +1055,48 @@ body {
     }
 }
 
-/* ==================== 圆形仪表盘样式 ==================== */
+/* ==================== 资源监控行式布局 ==================== */
 
-.gauge-container {
-    display: flex;
-    justify-content: space-around;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 20px;
-    padding: 20px 0;
-}
-
-.gauge-item {
+.resource-values-large {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    text-align: center;
+    gap: 15px;
+    padding: 5px;
 }
 
-.gauge-label {
-    margin-top: 10px;
-    font-size: 0.9em;
+.resource-item-large {
+    display: flex;
+    align-items: center;
+    padding: 16px 20px;
+    background-color: var(--bg-color);
+    border-radius: 8px;
+    transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.resource-item-large:hover {
+    background-color: #eef2f7;
+    box-shadow: var(--shadow);
+}
+
+.resource-item-large .resource-label {
+    font-size: 1rem;
     color: var(--text-secondary);
+    width: 60px;
     font-weight: 500;
 }
 
-.gauge-value {
-    font-size: 1.2em;
-    font-weight: bold;
-    color: var(--primary-color);
-    margin-top: 5px;
+.resource-item-large .resource-percent {
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 15px;
+    min-width: 90px;
 }
 
-canvas {
-    max-width: 100%;
-    height: auto;
-}
-
-/* 响应式 */
-@media (max-width: 768px) {
-    .gauge-container {
-        flex-direction: column;
-    }
-    
-    .gauge-item {
-        margin-bottom: 20px;
-    }
+.resource-item-large .resource-detail {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    margin-left: auto;
 }
 
 /* ==================== 固件编译功能样式 ==================== */

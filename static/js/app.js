@@ -34,7 +34,9 @@ function switchPage(pageId) {
     if (pageId === 'resources') {
         startResourceMonitoring();
     } else if (pageId === 'firmware') {
-        loadManufacturers();
+        if (typeof initFirmwarePage === 'function') {
+            initFirmwarePage();
+        }
     } else if (pageId === 'firmware-update') {
         // 固件更新页面初始化
         console.log('固件更新页面已加载');
@@ -84,53 +86,152 @@ function updateNetworkDisplay(network) {
     }
 }
 
-// ==================== ID搜索 ====================
-async function refreshIds() {
+// ==================== 设备搜索 ====================
+
+// 串口设备搜索
+async function searchSerial() {
+    const container = document.getElementById('serialDevices');
+    container.innerHTML = '<p class="empty">搜索中...</p>';
     try {
-        const response = await fetch('/api/system/ids');
+        const response = await fetch('/api/system/serial');
         const data = await response.json();
-        
-        // USB设备 - 显示formatted格式
-        const usbContainer = document.getElementById('usbDevices');
-        if (data.usb && data.usb.length > 0) {
-            usbContainer.innerHTML = data.usb.map(device => `
-                <div class="id-item">
-                    <span class="id-text">${device.formatted}</span>
-                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${device.formatted}')">复制</button>
-                </div>
-            `).join('');
+        if (data.devices && data.devices.length > 0) {
+            container.innerHTML = data.devices.map(d => {
+                const info = [d.model, d.vendor].filter(Boolean).join(' - ');
+                const ids = [d.vid, d.pid].filter(Boolean).join(':');
+                const copyVal = (d.link || d.devname || d.path).replace(/'/g, "\\'");
+                return `
+                    <div class="id-item" style="flex-direction:column;align-items:flex-start;">
+                        <div style="display:flex;justify-content:space-between;width:100%;align-items:center;">
+                            <span class="id-text" style="font-weight:600;">${d.link || d.devname || d.path}</span>
+                            <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${copyVal}')">复制</button>
+                        </div>
+                        <div style="font-size:11px;color:#888;margin-top:3px;">
+                            ${info ? info : ''}${ids ? ' [' + ids + ']' : ''}${d.driver ? ' (' + d.driver + ')' : ''}
+                        </div>
+                    </div>`;
+            }).join('');
         } else {
-            usbContainer.innerHTML = '<p class="empty">未找到USB设备</p>';
-        }
-        
-        // CAN设备 - 显示formatted格式
-        const canContainer = document.getElementById('canDevices');
-        if (data.can && data.can.length > 0) {
-            canContainer.innerHTML = data.can.map(device => `
-                <div class="id-item">
-                    <span class="id-text">${device.formatted}</span>
-                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${device.formatted}')">复制</button>
-                </div>
-            `).join('');
-        } else {
-            canContainer.innerHTML = '<p class="empty">未找到CAN设备</p>';
-        }
-        
-        // 摄像头设备
-        const cameraContainer = document.getElementById('cameraDevices');
-        if (data.camera && data.camera.length > 0) {
-            cameraContainer.innerHTML = data.camera.map(device => `
-                <div class="id-item">
-                    <span class="id-text">${device}</span>
-                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${device}')">复制</button>
-                </div>
-            `).join('');
-        } else {
-            cameraContainer.innerHTML = '<p class="empty">未找到摄像头</p>';
+            container.innerHTML = '<p class="empty">未找到串口设备</p>';
         }
     } catch (error) {
-        console.error('获取ID失败:', error);
-        showError('获取ID失败: ' + error.message);
+        container.innerHTML = `<p class="empty">搜索失败: ${error.message}</p>`;
+    }
+}
+
+// CAN接口刷新
+async function refreshCanIfaces() {
+    const select = document.getElementById('canIfaceSelect');
+    select.innerHTML = '<option value="">加载中...</option>';
+    try {
+        const response = await fetch('/api/system/can-iface');
+        const data = await response.json();
+        select.innerHTML = '<option value="">选择CAN接口</option>';
+        if (data.ifaces && data.ifaces.length > 0) {
+            data.ifaces.forEach(iface => {
+                const state = iface.operstate === 'UP' ? '✅' : '⚠️';
+                select.innerHTML += `<option value="${iface.ifname}">${state} ${iface.ifname} (${iface.operstate})</option>`;
+            });
+            if (data.ifaces.length === 1) select.selectedIndex = 1;
+        } else {
+            select.innerHTML += '<option value="" disabled>未找到CAN接口</option>';
+        }
+    } catch (error) {
+        select.innerHTML = '<option value="">加载失败</option>';
+    }
+}
+
+// CAN UUID搜索
+async function searchCanUuid() {
+    const select = document.getElementById('canIfaceSelect');
+    const container = document.getElementById('canDevices');
+    const errDiv = document.getElementById('canSearchError');
+    if (errDiv) errDiv.style.display = 'none';
+
+    if (!select.value) {
+        await refreshCanIfaces();
+        if (!select.value) {
+            container.innerHTML = '<p class="empty">请先选择CAN接口</p>';
+            return;
+        }
+    }
+    container.innerHTML = '<p class="empty">搜索中（约2.5秒）...</p>';
+    try {
+        const response = await fetch('/api/system/can-uuid', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ iface: select.value })
+        });
+        const data = await response.json();
+        if (data.uuids && data.uuids.length > 0) {
+            container.innerHTML = data.uuids.map(d => `
+                <div class="id-item">
+                    <span class="id-text">
+                        <span style="font-weight:600;">${d.uuid}</span>
+                        <span style="font-size:11px;color:${d.app === 'Klipper' ? '#4caf50' : d.app === 'Katapult' ? '#ff9800' : '#999'};margin-left:8px;">[${d.app}]</span>
+                    </span>
+                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${d.uuid}')">复制</button>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<p class="empty">未找到CAN设备</p>';
+            if (data.error && errDiv) {
+                errDiv.style.display = 'block';
+                errDiv.innerHTML = `<div style="background:#fff3cd;padding:10px;border-radius:6px;border-left:4px solid #ffc107;margin-top:8px;font-size:13px;color:#856404;">⚠️ ${data.error}</div>`;
+            }
+        }
+    } catch (error) {
+        container.innerHTML = `<p class="empty">搜索失败: ${error.message}</p>`;
+    }
+}
+
+// 摄像头搜索
+async function searchCamera() {
+    const container = document.getElementById('cameraDevices');
+    container.innerHTML = '<p class="empty">搜索中...</p>';
+    try {
+        const response = await fetch('/api/system/video');
+        const data = await response.json();
+        if (data.videos && data.videos.length > 0) {
+            container.innerHTML = data.videos.map(d => {
+                const copyVal = d.path.replace(/'/g, "\\'");
+                return `
+                    <div class="id-item">
+                        <span class="id-text">
+                            <span style="font-weight:600;">${d.path}</span>
+                            <span style="font-size:11px;color:#666;margin-left:8px;">${d.name}${d.index ? ' (index:' + d.index + ')' : ''}</span>
+                        </span>
+                        <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${copyVal}')">复制</button>
+                    </div>`;
+            }).join('');
+        } else {
+            container.innerHTML = '<p class="empty">未找到摄像头</p>';
+        }
+    } catch (error) {
+        container.innerHTML = `<p class="empty">搜索失败: ${error.message}</p>`;
+    }
+}
+
+async function searchLsusb() {
+    const filter = document.getElementById('lsusbFilter').value.trim();
+    const container = document.getElementById('lsusbDevices');
+    container.innerHTML = '<p class="empty">搜索中...</p>';
+    try {
+        const url = filter ? `/api/system/lsusb?search=${encodeURIComponent(filter)}` : '/api/system/lsusb';
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.devices && data.devices.length > 0) {
+            container.innerHTML = data.devices.map(d => `
+                <div class="id-item">
+                    <span class="id-text" style="font-size:12px;">${d.formatted || d.name}</span>
+                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${(d.formatted || d.name).replace(/'/g, "\\'")}')">复制</button>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<p class="empty">未找到设备</p>';
+        }
+    } catch (error) {
+        container.innerHTML = `<p class="empty">搜索失败: ${error.message}</p>`;
     }
 }
 
@@ -176,598 +277,6 @@ function fallbackCopyToClipboard(text) {
     } catch (err) {
         showError('复制失败，请手动复制');
         console.error('降级复制失败:', err);
-    }
-}
-
-// ==================== 主板选择（三级结构） ====================
-async function loadManufacturers() {
-    try {
-        const response = await fetch('/api/firmware/manufacturers');
-        const data = await response.json();
-        
-        const select = document.getElementById('compileManufacturer');
-        select.innerHTML = '<option value="">请选择...</option>';
-        
-        if (data.manufacturers) {
-            data.manufacturers.forEach(mfr => {
-                select.innerHTML += `<option value="${mfr}">${mfr}</option>`;
-            });
-        }
-        
-        // 如果有保存的选择，恢复
-        if (compileParams.manufacturer) {
-            select.value = compileParams.manufacturer;
-            onCompileManufacturerChange();
-        }
-    } catch (error) {
-        console.error('加载厂家失败:', error);
-    }
-}
-
-function onBoardTypeChange() {
-    const manufacturer = document.getElementById('compileManufacturer').value;
-    const boardType = document.getElementById('boardTypeSelect').value;
-    compileParams.boardType = boardType;
-    
-    const modelSelect = document.getElementById('boardModelSelect');
-    
-    if (!boardType) {
-        modelSelect.innerHTML = '<option value="">请先选择类型</option>';
-        modelSelect.disabled = true;
-        return;
-    }
-    
-    // 加载主板列表
-    loadBoardModels(manufacturer, boardType);
-}
-
-async function loadBoardModels(manufacturer, boardType) {
-    try {
-        const response = await fetch('/api/firmware/boards');
-        const data = await response.json();
-        
-        const modelSelect = document.getElementById('boardModelSelect');
-        modelSelect.innerHTML = '<option value="">请选择...</option>';
-        
-        if (data.boards && data.boards[manufacturer] && data.boards[manufacturer][boardType]) {
-            const boards = data.boards[manufacturer][boardType];
-            for (const [id, config] of Object.entries(boards)) {
-                const name = config.name || id;
-                modelSelect.innerHTML += `<option value="${id}">${name}</option>`;
-            }
-        }
-        
-        modelSelect.disabled = false;
-        
-        // 恢复选择
-        if (compileParams.boardModel) {
-            modelSelect.value = compileParams.boardModel;
-            onBoardModelChange();
-        }
-    } catch (error) {
-        console.error('加载主板列表失败:', error);
-    }
-}
-
-function onBoardModelChange() {
-    const manufacturer = document.getElementById('compileManufacturer').value;
-    const boardType = document.getElementById('boardTypeSelect').value;
-    const boardModel = document.getElementById('boardModelSelect').value;
-    
-    compileParams.boardModel = boardModel;
-    
-    if (boardModel) {
-        loadBoardConfig(manufacturer, boardType, boardModel);
-    }
-}
-
-async function loadBoardConfig(manufacturer, boardType, boardId) {
-    try {
-        const response = await fetch('/api/firmware/boards');
-        const data = await response.json();
-        
-        if (data.boards && data.boards[manufacturer] && data.boards[manufacturer][boardType]) {
-            const config = data.boards[manufacturer][boardType][boardId];
-            if (config) {
-                selectedBoard = config;
-                applyBoardConfig(config);
-            }
-        }
-    } catch (error) {
-        console.error('加载主板配置失败:', error);
-    }
-}
-
-function applyBoardConfig(config) {
-    // 应用配置到表单
-    if (config.mcu) {
-        document.getElementById('mcuArch').value = config.mcu;
-        onMcuArchChange();
-    }
-    
-    if (config.processor) {
-        document.getElementById('processorModel').value = config.processor;
-        onProcessorChange();
-    }
-    
-    if (config.bootloader_offset) {
-        document.getElementById('bootloaderOffset').value = config.bootloader_offset;
-        onBootloaderOffsetChange();
-    }
-    
-    // 更新通信方式下拉框为产品支持的所有选项
-    if (config.communication && Array.isArray(config.communication)) {
-        updateCommunicationOptionsFromProduct(config.communication, config.default_comm);
-    }
-    
-    if (config.startup_pin) {
-        document.getElementById('startupPin').value = config.startup_pin;
-    }
-    
-    // 保存 can_gpio 配置到全局变量，供 onCommunicationChange 使用
-    window.boardCanGpio = config.can_gpio || null;
-}
-
-// 根据产品配置更新通信方式选项
-function updateCommunicationOptionsFromProduct(communicationList, defaultComm) {
-    const commSelect = document.getElementById('communication');
-    
-    // 生成选项HTML
-    commSelect.innerHTML = communicationList.map(comm => 
-        `<option value="${comm}">${comm}</option>`
-    ).join('');
-    
-    // 设置默认值
-    if (defaultComm && communicationList.includes(defaultComm)) {
-        commSelect.value = defaultComm;
-    } else if (communicationList.length > 0) {
-        commSelect.value = communicationList[0];
-    }
-    
-    // 触发通信接口改变事件
-    onCommunicationChange();
-}
-
-// Klipper规则缓存
-let klipperRules = {};
-
-// 加载Klipper规则
-async function loadKlipperRules() {
-    try {
-        const response = await fetch('/api/firmware/rules');
-        if (response.ok) {
-            klipperRules = await response.json();
-        }
-    } catch (error) {
-        console.error('加载Klipper规则失败:', error);
-    }
-}
-
-// 页面加载时初始化
-loadKlipperRules();
-
-function onMcuArchChange() {
-    const mcuArch = document.getElementById('mcuArch').value;
-    const processorSelect = document.getElementById('processorModel');
-    
-    if (mcuArch === 'Raspberry Pi RP2040/RP235x') {
-        processorSelect.innerHTML = `
-            <option value="RP2040">RP2040</option>
-            <option value="RP2350">RP2350</option>
-        `;
-    } else {
-        processorSelect.innerHTML = `
-            <option value="STM32F031">STM32F031</option>
-            <option value="STM32F042">STM32F042</option>
-            <option value="STM32F070">STM32F070</option>
-            <option value="STM32F072">STM32F072</option>
-            <option value="STM32F103">STM32F103</option>
-            <option value="STM32F207">STM32F207</option>
-            <option value="STM32F401">STM32F401</option>
-            <option value="STM32F405">STM32F405</option>
-            <option value="STM32F407">STM32F407</option>
-            <option value="STM32F429">STM32F429</option>
-            <option value="STM32F446">STM32F446</option>
-            <option value="STM32F765">STM32F765</option>
-            <option value="STM32G070">STM32G070</option>
-            <option value="STM32G071">STM32G071</option>
-            <option value="STM32G0B0">STM32G0B0</option>
-            <option value="STM32G0B1">STM32G0B1</option>
-            <option value="STM32G431">STM32G431</option>
-            <option value="STM32G474">STM32G474</option>
-            <option value="STM32H723">STM32H723</option>
-            <option value="STM32H743">STM32H743</option>
-        `;
-    }
-    
-    // 更新处理器相关选项
-    onProcessorChange();
-}
-
-// 处理器型号改变时更新选项
-function onProcessorChange() {
-    const processor = document.getElementById('processorModel').value;
-    
-    // 更新Bootloader偏移选项
-    updateBootloaderOptions(processor);
-    
-    // 更新通信接口选项
-    updateCommunicationOptions(processor);
-    
-    // 更新BL烧录方式
-    updateBLFlashMethods(processor);
-    
-    // 清空启动引脚，避免不同MCU架构的引脚格式混淆
-    document.getElementById('startupPin').value = '';
-    
-    // 隐藏/显示CAN总线接口（RP2040使用GPIO配置，不需要此选项）
-    const isRP2040 = processor === 'RP2040' || processor === 'RP2350';
-    const canBusInterfaceRow = document.getElementById('canBusInterfaceRow');
-    if (isRP2040) {
-        canBusInterfaceRow.style.display = 'none';
-    }
-}
-
-// 更新Bootloader偏移选项
-function updateBootloaderOptions(processor) {
-    const blSelect = document.getElementById('bootloaderOffset');
-    const rules = klipperRules[processor];
-    
-    if (rules && rules.bootloader_offsets) {
-        blSelect.innerHTML = rules.bootloader_offsets.map(bl => 
-            `<option value="${bl.name}">${bl.name}</option>`
-        ).join('');
-    }
-    
-    // 触发bootloader偏移改变事件，更新烧录方式
-    onBootloaderOffsetChange();
-}
-
-// Bootloader偏移改变时自动切换烧录方式
-function onBootloaderOffsetChange() {
-    const processor = document.getElementById('processorModel').value;
-    const bootloaderOffset = document.getElementById('bootloaderOffset').value;
-    const flashModeSelect = document.getElementById('flashMode');
-    
-    // RP2040/RP2350 根据 bootloader 偏移自动选择烧录方式
-    if (processor === 'RP2040' || processor === 'RP2350') {
-        if (bootloaderOffset === 'No bootloader' || bootloaderOffset.includes('No ')) {
-            // 无bootloader -> UF2烧录
-            flashModeSelect.value = 'UF2';
-        } else if (bootloaderOffset.includes('16KiB') || bootloaderOffset.includes('16K')) {
-            // 16KiB bootloader -> Katapult (USB)
-            flashModeSelect.value = 'KAT';
-        }
-        // 触发烧录模式改变事件
-        onFlashModeChange();
-    }
-}
-
-// 更新通信接口选项
-function updateCommunicationOptions(processor) {
-    const commSelect = document.getElementById('communication');
-    const rules = klipperRules[processor];
-    
-    if (rules && rules.communication_interfaces) {
-        commSelect.innerHTML = rules.communication_interfaces.map(comm => 
-            `<option value="${comm}">${comm}</option>`
-        ).join('');
-    }
-    
-    // 触发通信接口改变事件
-    onCommunicationChange();
-}
-
-// 更新BL烧录方式
-function updateBLFlashMethods(processor) {
-    const rules = klipperRules[processor];
-    
-    // 更新主板配置中的flash_methods
-    if (rules && rules.flash_methods) {
-        // 保存到全局变量供后续使用
-        window.currentFlashMethods = rules.flash_methods;
-    }
-}
-
-function onCommunicationChange() {
-    const communication = document.getElementById('communication').value;
-    const canRow = document.getElementById('canBusInterfaceRow');
-    const bitrateRow = document.getElementById('canBitrateRow');
-    const rp2040CanGpioRow = document.getElementById('rp2040CanGpioRow');
-    const rp2040CanGpioTxRow = document.getElementById('rp2040CanGpioTxRow');
-    const processor = document.getElementById('processorModel').value;
-    const isRP2040 = processor === 'RP2040' || processor === 'RP2350';
-    
-    // USB to CAN桥接显示CAN总线接口选择（仅STM32，RP2040使用GPIO配置）
-    if (communication.includes('CAN bus bridge') && !isRP2040) {
-        canRow.style.display = 'flex';
-    } else {
-        canRow.style.display = 'none';
-    }
-    
-    // CAN或USB to CAN显示CAN速率选择
-    if (communication.includes('CAN')) {
-        bitrateRow.style.display = 'block';
-    } else {
-        bitrateRow.style.display = 'none';
-    }
-    
-    // RP2040/RP2350选择CAN bus或USB桥接CAN时显示GPIO配置
-    if (isRP2040 && (communication === 'CAN bus' || communication.includes('CAN bus bridge'))) {
-        rp2040CanGpioRow.style.display = 'block';
-        rp2040CanGpioTxRow.style.display = 'block';
-        
-        // 如果主板配置了特殊的 can_gpio，自动填充
-        if (window.boardCanGpio) {
-            document.getElementById('rp2040CanRxGpio').value = window.boardCanGpio.rx;
-            document.getElementById('rp2040CanTxGpio').value = window.boardCanGpio.tx;
-        } else {
-            // 使用默认值
-            document.getElementById('rp2040CanRxGpio').value = 4;
-            document.getElementById('rp2040CanTxGpio').value = 5;
-        }
-    } else {
-        rp2040CanGpioRow.style.display = 'none';
-        rp2040CanGpioTxRow.style.display = 'none';
-    }
-}
-
-function onStartupPinInput(input) {
-    const value = input.value;
-    const mcuArch = document.getElementById('mcuArch').value;
-    
-    if (mcuArch === 'Raspberry Pi RP2040') {
-        // RP2040引脚小写
-        input.value = value.toLowerCase();
-    } else {
-        // STM32引脚大写
-        input.value = value.toUpperCase();
-    }
-}
-
-// ==================== 固件编译 ====================
-async function compileFirmware() {
-    if (compileInProgress) return;
-    
-    const processor = document.getElementById('processorModel').value;
-    const isRP2040 = processor === 'RP2040' || processor === 'RP2350';
-    
-    const config = {
-        mcu_arch: document.getElementById('mcuArch').value,
-        processor: processor,
-        bootloader_offset: document.getElementById('bootloaderOffset').value,
-        communication: document.getElementById('communication').value
-    };
-    
-    // STM32专用参数（CAN总线接口选择）
-    if (!isRP2040) {
-        config.can_bus_interface = document.getElementById('canBusInterface').value;
-    }
-    
-    // 启动引脚（需验证格式）
-    const startupPin = document.getElementById('startupPin').value.trim();
-    if (startupPin) {
-        // 验证引脚格式与处理器匹配
-        const hasSTM32Pin = /P[A-K]\d+/i.test(startupPin);  // PA0, PB9等
-        const hasRP2040Pin = /gpio\d+/i.test(startupPin);   // gpio4, gpio5等
-        
-        if (isRP2040 && hasSTM32Pin && !hasRP2040Pin) {
-            alert('RP2040/RP2350启动引脚格式应为gpio开头（如gpio5），当前包含STM32引脚格式');
-            return;
-        }
-        if (!isRP2040 && hasRP2040Pin && !hasSTM32Pin) {
-            alert('STM32启动引脚格式应为大写字母+数字（如PA2, PB9），当前包含RP2040引脚格式');
-            return;
-        }
-        config.startup_pin = startupPin;
-    }
-    
-    // RP2040/RP2350 CAN GPIO配置
-    if (isRP2040 && (config.communication === 'CAN bus' || config.communication.includes('CAN bus bridge'))) {
-        config.rp2040_can_rx_gpio = document.getElementById('rp2040CanRxGpio').value || '4';
-        config.rp2040_can_tx_gpio = document.getElementById('rp2040CanTxGpio').value || '5';
-    }
-    
-    compileInProgress = true;
-    const statusDiv = document.getElementById('compileStatus');
-    const logContainer = document.getElementById('compileLog');
-    
-    statusDiv.innerHTML = '<span class="status-info">正在编译...</span>';
-    logContainer.style.display = 'block';
-    logContainer.querySelector('pre').textContent = '开始编译...\n';
-    
-    try {
-        const response = await fetch('/api/firmware/compile', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config)
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusDiv.innerHTML = '<span class="status-success">✅ 编译成功</span>';
-            logContainer.querySelector('pre').textContent += '\n编译完成!';
-        } else {
-            statusDiv.innerHTML = `<span class="status-error">❌ 编译失败: ${data.error}</span>`;
-            logContainer.querySelector('pre').textContent += '\n编译失败: ' + data.error;
-        }
-    } catch (error) {
-        statusDiv.innerHTML = `<span class="status-error">❌ 错误: ${error.message}</span>`;
-    } finally {
-        compileInProgress = false;
-    }
-}
-
-// ==================== 固件烧录 ====================
-function onFlashModeChange() {
-    const flashMode = document.getElementById('flashMode').value;
-    const dfuGroup = document.getElementById('dfuAddressGroup');
-    const scanCanBtn = document.getElementById('scanCanBtn');
-    const flashBtn = document.getElementById('flashBtn');
-    const downloadBtn = document.getElementById('downloadBtn');
-    
-    // DFU地址显示
-    dfuGroup.style.display = flashMode === 'DFU' ? 'block' : 'none';
-    
-    // CAN扫描按钮显示
-    scanCanBtn.style.display = flashMode === 'CAN' ? 'inline-flex' : 'none';
-    
-    // TF卡模式显示下载按钮，隐藏烧录按钮
-    if (flashMode === 'TF') {
-        flashBtn.style.display = 'none';
-        downloadBtn.style.display = 'inline-flex';
-    } else {
-        flashBtn.style.display = 'inline-flex';
-        downloadBtn.style.display = 'none';
-    }
-}
-
-async function detectDevicesForFlash() {
-    try {
-        const response = await fetch('/api/system/ids');
-        const data = await response.json();
-        
-        const container = document.getElementById('flashDeviceList');
-        const flashMode = document.getElementById('flashMode').value;
-        
-        let devices = [];
-        let modeText = '设备';
-        
-        if (flashMode === 'CAN') {
-            devices = data.can || [];
-            modeText = 'CAN设备';
-        } else if (flashMode === 'DFU') {
-            devices = data.dfu || [];
-            modeText = 'DFU 设备';
-        } else if (flashMode === 'UF2') {
-            devices = data.rp_boot || [];
-            modeText = 'RP2040 BOOT 设备';
-        } else if (flashMode === 'KAT') {
-            // KAT 模式显示所有可用设备（USB 串口 + CAN ID）
-            const usbDevices = data.usb || [];
-            const canDevices = data.can || [];
-            devices = [...usbDevices, ...canDevices];
-            modeText = 'USB/CAN设备';
-            
-            if (devices.length === 0) {
-                container.innerHTML = '<p class="empty">未找到 USB 串口或 CAN设备。请连接设备并确保已安装驱动。</p>';
-                return;
-            }
-        } else {
-            devices = data.usb || [];
-            modeText = 'USB 设备';
-        }
-        
-        if (devices.length > 0) {
-            container.innerHTML = devices.map((device, index) => {
-                const displayText = device.formatted || device.raw || device;
-                return `
-                    <div class="device-item">
-                        <span>${displayText}</span>
-                        <button class="btn btn-sm btn-primary" onclick="selectDevice('${device.raw || device}')">选择</button>
-                    </div>
-                `;
-            }).join('');
-        } else {
-            container.innerHTML = `<p class="empty">未找到${modeText}</p>`;
-        }
-    } catch (error) {
-        console.error('检测设备失败:', error);
-    }
-}
-
-async function scanCanDevices() {
-    try {
-        const response = await fetch('/api/system/ids');
-        const data = await response.json();
-        
-        const container = document.getElementById('canDeviceList');
-        container.style.display = 'block';
-        
-        if (data.can && data.can.length > 0) {
-            container.innerHTML = data.can.map(device => `
-                <div class="device-item">
-                    <span>${device.formatted}</span>
-                    <button class="btn btn-sm btn-primary" onclick="selectDevice('${device.raw}')">选择</button>
-                </div>
-            `).join('');
-        } else {
-            container.innerHTML = '<p class="empty">未找到CAN设备</p>';
-        }
-    } catch (error) {
-        console.error('扫描CAN设备失败:', error);
-    }
-}
-
-function selectDevice(deviceId) {
-    document.getElementById('targetDevice').value = deviceId;
-}
-
-async function flashFirmware() {
-    if (flashInProgress) return;
-    
-    const flashMode = document.getElementById('flashMode').value;
-    const device = document.getElementById('targetDevice').value;
-    const dfuAddress = document.getElementById('dfuAddress').value;
-    
-    if (!device && flashMode !== 'TF') {
-        showError('请选择或输入设备 ID');
-        return;
-    }
-    
-    flashInProgress = true;
-    const statusDiv = document.getElementById('flashStatus');
-    const logContainer = document.getElementById('flashLog');
-    
-    statusDiv.innerHTML = '<span class="status-info">正在烧录...</span>';
-    logContainer.style.display = 'block';
-    logContainer.querySelector('pre').textContent = '开始烧录...\n';
-    
-    try {
-        const response = await fetch('/api/firmware/flash', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                flash_mode: flashMode,
-                device: device,
-                dfu_address: dfuAddress
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusDiv.innerHTML = '<span class="status-success">✅ 烧录成功</span>';
-            logContainer.querySelector('pre').textContent += '\n烧录完成!';
-        } else {
-            statusDiv.innerHTML = `<span class="status-error">❌ 烧录失败: ${data.error}</span>`;
-            logContainer.querySelector('pre').textContent += '\n烧录失败: ' + data.error;
-        }
-    } catch (error) {
-        statusDiv.innerHTML = `<span class="status-error">❌ 错误: ${error.message}</span>`;
-    } finally {
-        flashInProgress = false;
-    }
-}
-
-async function downloadFirmware() {
-    try {
-        const response = await fetch('/api/firmware/download');
-        const blob = await response.blob();
-        
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'firmware.bin';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-        
-        showSuccess('固件下载成功');
-    } catch (error) {
-        showError('下载失败: ' + error.message);
     }
 }
 
@@ -1171,310 +680,6 @@ function showError(message) {
     setTimeout(() => div.remove(), 3000);
 }
 
-// ==================== CAN配置 ====================
-// 自动诊断CAN网络（当未检测到设备时调用）
-async function autoDiagnoseCan() {
-    const diagnoseDiv = document.getElementById('canAutoDiagnose');
-    if (!diagnoseDiv) return;
-    
-    diagnoseDiv.innerHTML = '<span class="status-info">🔍 正在自动诊断CAN网络...</span>';
-    
-    try {
-        const response = await fetch('/api/system/can-diagnose');
-        const data = await response.json();
-        
-        let html = '<div style="background: #fff3cd; padding: 10px; border-radius: 8px; border-left: 4px solid #ffc107;">';
-        html += '<h4 style="margin: 0 0 10px 0; color: #856404;">⚠️ 自动诊断结果</h4>';
-        
-        // 检查问题
-        const issues = [];
-        
-        if (!data.kernel_support) {
-            issues.push('内核不支持CAN');
-        }
-        
-        if (!data.can_device_exists) {
-            issues.push('未检测到USB CAN设备，请检查硬件连接');
-        }
-        
-        if (!data.can0_exists) {
-            issues.push('can0接口不存在');
-        } else if (data.can0_state !== 'UP') {
-            issues.push(`can0接口状态: ${data.can0_state}`);
-        }
-        
-        // 显示问题
-        if (issues.length > 0) {
-            html += '<ul style="margin: 5px 0; color: #856404;">';
-            issues.forEach(issue => {
-                html += `<li>${issue}</li>`;
-            });
-            html += '</ul>';
-        } else {
-            html += '<p style="color: #856404;">CAN网络配置正常，请检查硬件连接</p>';
-        }
-        
-        html += '<p style="margin: 10px 0 0 0; font-size: 12px;">💡 点击"诊断网络"按钮查看详细信息</p>';
-        html += '</div>';
-        
-        diagnoseDiv.innerHTML = html;
-        
-    } catch (error) {
-        diagnoseDiv.innerHTML = '<span class="status-error">❌ 自动诊断失败</span>';
-    }
-}
-
-async function loadCanConfig() {
-    try {
-        const response = await fetch('/api/system/can-config');
-        const data = await response.json();
-        
-        const statusDiv = document.getElementById('canConfigStatus');
-        const formDiv = document.getElementById('canConfigForm');
-        const saveBtn = document.getElementById('saveCanBtn');
-        
-        if (data.exists) {
-            // 后端返回的bitrate已经是完整数值（1000000, 500000, 250000）
-            let bitrateStr;
-            if (data.bitrate >= 1000000) {
-                bitrateStr = (data.bitrate / 1000000) + 'M';
-            } else if (data.bitrate >= 1000) {
-                bitrateStr = (data.bitrate / 1000) + 'K';
-            } else {
-                bitrateStr = data.bitrate + 'bps';
-            }
-            const type = data.type === 'systemd' ? 'systemd-networkd' : '传统interfaces';
-            
-            // 获取txqueuelen显示值
-            const txqueuelen = data.txqueuelen || 1024;
-            
-            // USB CAN设备数量
-            const usbCanCount = data.usb_can_count || 0;
-                        
-            // 判断 CAN0 接口是否存在
-            const can0Exists = data.status && !data.status.includes('not found');
-                        
-            // CAN检查状态：优先显示 CAN 接口状态
-            let canCheckText;
-            if (can0Exists) {
-                canCheckText = '<span style="color: green;">✅ CAN 接口正常</span>';
-            } else if (usbCanCount > 0) {
-                canCheckText = `<span style="color: orange;">⚠️ 检测到 ${usbCanCount} 个USB CAN设备，但 CAN 接口未启用</span>`;
-            } else {
-                canCheckText = '<span style="color: red;">❌ 未检测到 CAN设备</span>';
-            }
-            
-            statusDiv.innerHTML = `
-                <div class="info-grid">
-                    <div class="info-item">
-                        <span class="info-label">CAN 检查</span>
-                        <span class="info-value">${canCheckText}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">当前速率</span>
-                        <span class="info-value">${bitrateStr}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">CAN缓存</span>
-                        <span class="info-value">${txqueuelen}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">配置类型</span>
-                        <span class="info-value">${type}</span>
-                    </div>
-                </div>
-                <div id="canAutoDiagnose" style="margin-top: 10px;"></div>
-            `;
-            
-            // 不再自动诊断，只在用户点击按钮时诊断
-            
-            // 设置当前速率
-            if (data.bitrate) {
-                document.getElementById('canBitrate').value = data.bitrate.toString();
-            }
-            // 设置当前txqueuelen
-            document.getElementById('canTxqueuelen').value = txqueuelen.toString();
-            
-            formDiv.style.display = 'block';
-            saveBtn.style.display = 'inline-flex';
-        } else {
-            statusDiv.innerHTML = '<p class="empty">未检测到CAN配置</p>';
-            formDiv.style.display = 'block';
-            saveBtn.style.display = 'inline-flex';
-        }
-    } catch (error) {
-        console.error('加载CAN配置失败:', error);
-        document.getElementById('canConfigStatus').innerHTML = 
-            '<p class="empty">加载失败: ' + error.message + '</p>';
-    }
-}
-
-async function saveCanConfig() {
-    const bitrate = parseInt(document.getElementById('canBitrate').value);
-    const txqueuelen = parseInt(document.getElementById('canTxqueuelen').value) || 1024;
-    const messageDiv = document.getElementById('canConfigMessage');
-    
-    // 隐藏诊断结果，避免重叠
-    document.getElementById('canDiagnoseResult').style.display = 'none';
-    
-    messageDiv.innerHTML = '<span class="status-info">正在保存...</span>';
-    
-    try {
-        const response = await fetch('/api/system/can-config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                bitrate: bitrate,
-                txqueuelen: txqueuelen,
-                type: 'systemd'
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            messageDiv.innerHTML = '<span class="status-success">✅ ' + data.message + '</span>';
-            loadCanConfig(); // 刷新状态
-        } else {
-            messageDiv.innerHTML = `<span class="status-error">❌ ${data.error || data.message}</span>`;
-        }
-    } catch (error) {
-        messageDiv.innerHTML = `<span class="status-error">❌ 保存失败: ${error.message}</span>`;
-    }
-}
-
-// ==================== CAN网络诊断与修复 ====================
-async function diagnoseCanNetwork() {
-    const resultDiv = document.getElementById('canDiagnoseResult');
-    const messageDiv = document.getElementById('canConfigMessage');
-    
-    // 隐藏配置消息，避免重叠
-    messageDiv.innerHTML = '';
-    
-    resultDiv.style.display = 'block';
-    resultDiv.innerHTML = '<span class="status-info">🔍 正在诊断CAN网络...</span>';
-    
-    try {
-        const response = await fetch('/api/system/can-diagnose');
-        const data = await response.json();
-        
-        let html = '<div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-top: 10px;">';
-        html += '<h4>📊 CAN网络诊断结果</h4>';
-        
-        // 内核支持
-        html += `<div style="margin: 8px 0;">
-            <span class="info-label">内核CAN支持:</span>
-            <span class="info-value" style="color: ${data.kernel_support ? 'green' : 'red'};">
-                ${data.kernel_support ? '✅ 支持' : '❌ 不支持'}
-            </span>
-        </div>`;
-        
-        // USB CAN设备
-        html += `<div style="margin: 8px 0;">
-            <span class="info-label">USB CAN设备:</span>
-            <span class="info-value" style="color: ${data.can_device_exists ? 'green' : 'red'};">
-                ${data.can_device_exists ? '✅ 已连接' : '❌ 未连接'}
-            </span>
-            ${data.can_device_info ? `<br><small>${data.can_device_info}</small>` : ''}
-        </div>`;
-        
-        // can0接口
-        html += `<div style="margin: 8px 0;">
-            <span class="info-label">can0接口:</span>
-            <span class="info-value" style="color: ${data.can0_exists ? (data.can0_state === 'UP' ? 'green' : 'orange') : 'red'};">
-                ${data.can0_exists ? (data.can0_state === 'UP' ? '✅ 正常' : '⚠️ 已停止') : '❌ 不存在'}
-            </span>
-            ${data.can0_bitrate ? `<br><small>${data.can0_bitrate}</small>` : ''}
-        </div>`;
-        
-        // 错误信息
-        if (data.errors && data.errors.length > 0) {
-            html += '<div style="margin: 8px 0; color: red;"><strong>⚠️ 检测到的问题:</strong><ul>';
-            data.errors.forEach(err => {
-                html += `<li>${err}</li>`;
-            });
-            html += '</ul></div>';
-        }
-        
-        // 建议
-        if (!data.can_device_exists) {
-            html += '<div style="margin: 8px 0; color: orange;">💡 请检查USB CAN设备（UTOC或刷了CAN桥接固件的主板）是否连接</div>';
-        } else if (!data.can0_exists || data.can0_state !== 'UP') {
-            html += '<div style="margin: 8px 0; color: orange;">💡 点击"修复网络"按钮尝试修复</div>';
-        } else {
-            html += '<div style="margin: 8px 0; color: green;">✅ CAN网络正常</div>';
-        }
-        
-        html += '</div>';
-        resultDiv.innerHTML = html;
-        
-    } catch (error) {
-        resultDiv.innerHTML = `<span class="status-error">❌ 诊断失败: ${error.message}</span>`;
-    }
-}
-
-async function repairCanNetwork() {
-    const resultDiv = document.getElementById('canDiagnoseResult');
-    const messageDiv = document.getElementById('canConfigMessage');
-    const bitrate = parseInt(document.getElementById('canBitrate').value) || 1000000;
-    const txqueuelen = parseInt(document.getElementById('canTxqueuelen').value) || 1024;
-    
-    // 隐藏配置消息，避免重叠
-    messageDiv.innerHTML = '';
-    
-    resultDiv.style.display = 'block';
-    resultDiv.innerHTML = '<span class="status-info">🔧 正在修复CAN网络...</span>';
-    
-    try {
-        const response = await fetch('/api/system/can-repair', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                bitrate: bitrate,
-                txqueuelen: txqueuelen
-            })
-        });
-        
-        const data = await response.json();
-        
-        let html = '<div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-top: 10px;">';
-        
-        if (data.success) {
-            html += '<h4>✅ CAN网络修复完成</h4>';
-        } else {
-            html += '<h4>❌ CAN网络修复失败</h4>';
-        }
-        
-        // 显示操作日志
-        if (data.messages && data.messages.length > 0) {
-            html += '<div style="margin: 10px 0;"><strong>操作日志:</strong><ul>';
-            data.messages.forEach(msg => {
-                html += `<li>${msg}</li>`;
-            });
-            html += '</ul></div>';
-        }
-        
-        // 错误信息
-        if (data.error) {
-            html += `<div style="color: red; margin: 10px 0;"><strong>错误:</strong> ${data.error}</div>`;
-        }
-        
-        // 备注
-        if (data.note) {
-            html += `<div style="color: blue; margin: 10px 0;">💡 ${data.note}</div>`;
-        }
-        
-        html += '</div>';
-        resultDiv.innerHTML = html;
-        
-        // 刷新CAN配置状态
-        setTimeout(() => loadCanConfig(), 2000);
-        
-    } catch (error) {
-        resultDiv.innerHTML = `<span class="status-error">❌ 修复失败: ${error.message}</span>`;
-    }
-}
-
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', () => {
     // 加载初始页面
@@ -1482,10 +687,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // 初始化 BL 厂家选择
     initBLManufacturers();
-    
-    // 启动 CAN配置自动刷新（每 5 秒）
-    loadCanConfig(); // 立即加载一次
-    setInterval(loadCanConfig, 5000); // 之后每 5 秒刷新一次
 });
 
 // ==================== 配置管理功能 ====================
@@ -1883,104 +1084,47 @@ document.addEventListener('DOMContentLoaded', () => {
     // MCU 预设配置已在 mcu-presets.js 中定义
 });
 
-// ==================== 圆形仪表盘功能 ====================
-
-// 仪表盘图表实例
-let cpuGaugeChart = null;
-let memGaugeChart = null;
-let diskGaugeChart = null;
-
-// 创建圆形仪表盘
-function createGaugeChart(ctx, label, color) {
-    return new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            datasets: [{
-                data: [0, 100], // 初始值：0%
-                backgroundColor: [color, '#e0e0e0'],
-                borderWidth: 0,
-                circumference: 360,
-                rotation: 0,
-                cutout: '75%'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    enabled: true,
-                    callbacks: {
-                        label: function(context) {
-                            return label + ': ' + context.parsed + '%';
-                        }
-                    }
-                }
-            },
-            animation: {
-                animateScale: true,
-                animateRotate: true
-            }
-        }
-    });
-}
-
-// 更新仪表盘数据
-function updateGauge(chart, value) {
-    if (chart && chart.data) {
-        chart.data.datasets[0].data = [value, 100 - value];
-        chart.update();
-    }
-}
-
-// 初始化仪表盘
-function initGauges() {
-    const cpuCtx = document.getElementById('cpuGauge');
-    const memCtx = document.getElementById('memGauge');
-    const diskCtx = document.getElementById('diskGauge');
-    
-    if (cpuCtx) {
-        cpuGaugeChart = createGaugeChart(cpuCtx, 'CPU', '#2196F3');
-    }
-    if (memCtx) {
-        memGaugeChart = createGaugeChart(memCtx, '内存', '#4CAF50');
-    }
-    if (diskCtx) {
-        diskGaugeChart = createGaugeChart(diskCtx, '磁盘', '#FF9800');
-    }
-}
-
-// 更新资源显示（替换原有的 updateResources 函数）
+// 更新资源显示
 async function updateResources() {
     try {
         const response = await fetch('/api/system/resources');
         const data = await response.json();
         
-        // API 返回的数据结构：data.current.cpu.percent
-        const cpuPercent = data.current ? data.current.cpu.percent : (data.cpu || 0);
-        const memPercent = data.current ? data.current.memory.percent : (data.memory || 0);
-        const diskPercent = data.current ? data.current.disk.percent : (data.disk || 0);
+        const current = data.current || data;
+        const cpu = current.cpu || {};
+        const memory = current.memory || {};
+        const disk = current.disk || {};
         
-        // 更新仪表盘
-        if (cpuGaugeChart) {
-            updateGauge(cpuGaugeChart, cpuPercent);
-            document.getElementById('cpuPercentText').textContent = cpuPercent.toFixed(1) + '%';
+        const cpuPercent = cpu.percent || 0;
+        const memPercent = memory.percent || 0;
+        const diskPercent = disk.percent || 0;
+        
+        // 更新 CPU
+        document.getElementById('cpuPercentText').textContent = cpuPercent.toFixed(1) + '%';
+        const cpuDetail = document.getElementById('cpuDetailText');
+        if (cpuDetail) {
+            const cores = cpu.count || '--';
+            const freq = cpu.freq ? cpu.freq.toFixed(2) + ' GHz' : '--';
+            cpuDetail.textContent = cores + ' 核 @ ' + freq;
         }
-        if (memGaugeChart) {
-            updateGauge(memGaugeChart, memPercent);
-            document.getElementById('memPercentText').textContent = memPercent.toFixed(1) + '%';
+        
+        // 更新内存
+        document.getElementById('memPercentText').textContent = memPercent.toFixed(1) + '%';
+        const memDetail = document.getElementById('memDetailText');
+        if (memDetail && memory.used !== undefined && memory.total !== undefined) {
+            memDetail.textContent = memory.used.toFixed(1) + ' / ' + memory.total.toFixed(1) + ' GB';
         }
-        if (diskGaugeChart) {
-            updateGauge(diskGaugeChart, diskPercent);
-            document.getElementById('diskPercentText').textContent = diskPercent.toFixed(1) + '%';
+        
+        // 更新磁盘
+        document.getElementById('diskPercentText').textContent = diskPercent.toFixed(1) + '%';
+        const diskDetail = document.getElementById('diskDetailText');
+        if (diskDetail && disk.used !== undefined && disk.total !== undefined) {
+            diskDetail.textContent = disk.used.toFixed(1) + ' / ' + disk.total.toFixed(1) + ' GB';
         }
         
         // 更新网络状态
-        if (data.current && data.current.network) {
-            updateNetworkDisplay(data.current.network);
+        if (current.network) {
+            updateNetworkDisplay(current.network);
         }
         
     } catch (error) {
@@ -1997,10 +1141,9 @@ async function updateResources() {
         // 调用原始函数
         _originalSwitchPage(page);
         
-        // 切换到资源页面时初始化仪表盘
+        // 切换到资源页面时更新资源数据
         if (page === 'resources') {
             setTimeout(() => {
-                initGauges();
                 updateResources();
             }, 100);
         }
@@ -2011,460 +1154,6 @@ async function updateResources() {
         }
     };
 })();
-
-// 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', () => {
-    // 如果当前就是资源页面，立即初始化
-    const resourcePage = document.getElementById('page-resources');
-    if (resourcePage && resourcePage.classList.contains('active')) {
-        setTimeout(initGauges, 500);
-    }
-});
-
-// ==================== 固件编译功能 ====================
-
-// 加载编译配置列表
-async function loadCompileConfigs() {
-    const manufacturer = document.getElementById('compileManufacturer').value;
-    const boardType = document.getElementById('compileBoardType').value;
-    const configSelect = document.getElementById('compileConfig');
-    
-    if (!boardType) {
-        configSelect.innerHTML = '<option value="">-- 先选择产品类型 --</option>';
-        return;
-    }
-    
-    try {
-        configSelect.innerHTML = '<option value="">加载中...</option>';
-        
-        const response = await fetch(`/api/config/list/${manufacturer}`);
-        const data = await response.json();
-        
-        const configs = data.configs.filter(c => c.type === boardType);
-        
-        if (configs.length > 0) {
-            configSelect.innerHTML = '<option value="">-- 请选择配置 --</option>';
-            configs.forEach(config => {
-                const option = document.createElement('option');
-                option.value = config.id || '';
-                option.textContent = config['名称'] || config['name'] || config.id;
-                configSelect.appendChild(option);
-            });
-        } else {
-            configSelect.innerHTML = '<option value="">-- 暂无配置 --</option>';
-        }
-    } catch (error) {
-        configSelect.innerHTML = '<option value="">-- 加载失败 --</option>';
-        console.error('加载配置列表失败:', error);
-    }
-}
-
-// 编译固件
-async function compileFirmware() {
-    const manufacturer = document.getElementById('compileManufacturer').value;
-    const configId = document.getElementById('compileConfig').value;
-    const flashMode = document.getElementById('flashMode').value;
-    const progressDiv = document.getElementById('compileProgress');
-    const statusSpan = document.getElementById('compileStatus');
-    
-    if (!configId) {
-        showError('请选择配置');
-        return;
-    }
-    
-    try {
-        progressDiv.style.display = 'block';
-        statusSpan.textContent = '开始编译...';
-        
-        const response = await fetch('/api/firmware/compile', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                manufacturer,
-                config_id: configId,
-                flash_mode: flashMode
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            statusSpan.textContent = '✅ 编译成功！';
-            showSuccess(`编译成功：${result.firmware_path || '固件已生成'}`);
-            
-            // 5 秒后隐藏进度条
-            setTimeout(() => {
-                progressDiv.style.display = 'none';
-            }, 5000);
-        } else {
-            statusSpan.textContent = '❌ 编译失败';
-            showError(result.error || '编译失败');
-        }
-        
-    } catch (error) {
-        statusSpan.textContent = '❌ 编译错误';
-        showError('编译错误：' + error.message);
-    }
-}
-
-// BL 固件上传初始化
-function initBLUpload() {
-    const uploadArea = document.getElementById('blUploadArea');
-    const fileInput = document.getElementById('blFileInput');
-    
-    if (!uploadArea) return;
-    
-    // 点击上传
-    uploadArea.addEventListener('click', () => {
-        fileInput.click();
-    });
-    
-    // 文件选择
-    fileInput.addEventListener('change', handleBLFileSelect);
-    
-    // 拖拽事件
-    uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadArea.classList.add('drag-over');
-    });
-    
-    uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('drag-over');
-    });
-    
-    uploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        uploadArea.classList.remove('drag-over');
-        
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            uploadBLFile(files[0]);
-        }
-    });
-}
-
-// 处理 BL 文件选择
-function handleBLFileSelect(event) {
-    const files = event.target.files;
-    if (files.length > 0) {
-        uploadBLFile(files[0]);
-    }
-}
-
-// 上传 BL 固件
-async function uploadBLFile(file) {
-    const manufacturer = document.getElementById('blManufacturer').value;
-    
-    try {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('manufacturer', manufacturer);
-        
-        const response = await fetch('/api/firmware/bl-upload', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            showSuccess('BL 固件上传成功！');
-            loadBLFirmwares();
-        } else {
-            showError(result.error || '上传失败');
-        }
-    } catch (error) {
-        showError('上传失败：' + error.message);
-    }
-}
-
-// 加载 BL 固件列表
-async function loadBLFirmwares() {
-    const manufacturer = document.getElementById('blManufacturer').value;
-    const listDiv = document.getElementById('blFirmwareList');
-    
-    try {
-        const response = await fetch(`/api/firmware/bl-firmwares/${manufacturer}`);
-        const data = await response.json();
-        
-        if (data.firmwares && data.firmwares.length > 0) {
-            let html = '<div class="bl-list">';
-            data.firmwares.forEach((fw, index) => {
-                html += `
-                    <div class="bl-item">
-                        <span>${fw.name || fw.file}</span>
-                        <button class="btn btn-sm btn-secondary" onclick="flashBL('${manufacturer}', '${fw.file}')">
-                            📥 烧录
-                        </button>
-                    </div>
-                `;
-            });
-            html += '</div>';
-            listDiv.innerHTML = html;
-        } else {
-            listDiv.innerHTML = '<p class="empty">暂无 BL 固件</p>';
-        }
-    } catch (error) {
-        listDiv.innerHTML = '<p class="empty">加载失败</p>';
-    }
-}
-
-// 烧录 BL 固件
-async function flashBL(manufacturer, file) {
-    if (!confirm(`确定要烧录 ${file} 吗？`)) return;
-    
-    showSuccess('开始烧录 BL 固件...（具体烧录流程请参考文档）');
-}
-
-// 初始化：加载数据
-document.addEventListener('DOMContentLoaded', () => {
-    initBLUpload();
-    
-    // 监听厂家选择变化，加载 BL 固件列表
-    const blManufacturerSelect = document.getElementById('blManufacturer');
-    if (blManufacturerSelect) {
-        blManufacturerSelect.addEventListener('change', loadBLFirmwares);
-    }
-});
-
-// ==================== 固件编译与烧录功能（重构版） ====================
-
-// 编译区域：厂家改变
-async function onCompileManufacturerChange() {
-    const manufacturer = document.getElementById('compileManufacturer').value;
-    const typeSelect = document.getElementById('compileBoardType');
-    const modelSelect = document.getElementById('compileBoardModel');
-    
-    typeSelect.innerHTML = '';
-    modelSelect.innerHTML = '';
-    modelSelect.disabled = true;
-    
-    if (!manufacturer) {
-        typeSelect.disabled = true;
-        typeSelect.innerHTML = '<option value="">Select manufacturer first</option>';
-        return;
-    }
-    
-    // 加载类型列表
-    typeSelect.innerHTML = '<option value="">Loading...</option>';
-    try {
-        const response = await fetch(`/api/config/list/${manufacturer}`);
-        const data = await response.json();
-        
-        // 获取所有类型
-        const types = [...new Set(data.configs.map(c => c.type))];
-        
-        typeSelect.innerHTML = '<option value="">Select type</option>';
-        types.forEach(type => {
-            const option = document.createElement('option');
-            option.value = type;
-            option.textContent = type;
-            typeSelect.appendChild(option);
-        });
-        
-        typeSelect.disabled = false;
-    } catch (error) {
-        typeSelect.innerHTML = '<option value="">Load failed</option>';
-    }
-}
-
-// 编译区域：类型改变
-async function onCompileBoardTypeChange() {
-    const manufacturer = document.getElementById('compileManufacturer').value;
-    const boardType = document.getElementById('compileBoardType').value;
-    const modelSelect = document.getElementById('compileBoardModel');
-    
-    modelSelect.innerHTML = '';
-    
-    if (!boardType) {
-        modelSelect.disabled = true;
-        modelSelect.innerHTML = '<option value="">Select type first</option>';
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/config/list/${manufacturer}`);
-        const data = await response.json();
-        
-        const configs = data.configs.filter(c => c.type === boardType);
-        
-        modelSelect.innerHTML = '<option value="">Select model</option>';
-        configs.forEach(config => {
-            const option = document.createElement('option');
-            option.value = config.id;
-            option.textContent = config.name || config.id;
-            modelSelect.appendChild(option);
-        });
-        
-        modelSelect.disabled = false;
-    } catch (error) {
-        modelSelect.innerHTML = '<option value="">Load failed</option>';
-    }
-}
-
-// 仅编译固件
-async function compileFirmwareOnly() {
-    const manufacturer = document.getElementById('compileManufacturer').value;
-    const boardId = document.getElementById('compileBoardModel').value;
-    const flashMode = document.getElementById('compileFlashMode').value;
-    const klipperPath = document.getElementById('klipperPath').value;
-    const resultDiv = document.getElementById('compileResult');
-    const resultBox = resultDiv.querySelector('.result-box');
-    
-    if (!manufacturer || !boardId) {
-        showError('Please select manufacturer and board model');
-        return;
-    }
-    
-    resultDiv.style.display = 'block';
-    resultBox.innerHTML = '<p>⏳ Compiling firmware...</p>';
-    
-    try {
-        const response = await fetch('/api/firmware/compile', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                manufacturer,
-                config_id: boardId,
-                flash_mode: flashMode,
-                klipper_path: klipperPath
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            resultBox.innerHTML = `
-                <div class="status-success">
-                    <p>✅ Compile successful!</p>
-                    <p>Firmware: ${result.firmware_path || 'Generated'}</p>
-                    <p>You can now flash it in Step 3 below</p>
-                </div>
-            `;
-            showSuccess('Firmware compiled successfully!');
-        } else {
-            resultBox.innerHTML = `<div class="status-error">❌ Compile failed: ${result.error || 'Unknown error'}</div>`;
-            showError('Compile failed: ' + (result.error || 'Unknown error'));
-        }
-    } catch (error) {
-        resultBox.innerHTML = `<div class="status-error">❌ Error: ${error.message}</div>`;
-        showError('Error: ' + error.message);
-    }
-}
-
-// 刷新设备ID列表
-async function refreshDeviceIds() {
-    const select = document.getElementById('flashDeviceId');
-    
-    select.innerHTML = '<option value="">Scanning...</option>';
-    
-    try {
-        // 扫描 USB 设备
-        const response = await fetch('/api/system/ids');
-        const data = await response.json();
-        
-        select.innerHTML = '<option value="">Select device</option>';
-        
-        // 添加 USB 设备
-        if (data.usb && data.usb.length > 0) {
-            data.usb.forEach(device => {
-                const option = document.createElement('option');
-                option.value = device.path || device.id;
-                option.textContent = `USB: ${device.formatted || device.id}`;
-                select.appendChild(option);
-            });
-        }
-        
-        // 添加 CAN 设备
-        if (data.can && data.can.length > 0) {
-            data.can.forEach(device => {
-                const option = document.createElement('option');
-                option.value = device.uuid;
-                option.textContent = `CAN: ${device.formatted || device.uuid}`;
-                select.appendChild(option);
-            });
-        }
-        
-        if (select.options.length === 1) {
-            select.innerHTML = '<option value="">No devices found</option>';
-        }
-    } catch (error) {
-        select.innerHTML = '<option value="">Scan failed</option>';
-    }
-}
-
-// 固件源改变
-function onFirmwareSourceChange() {
-    const source = document.getElementById('firmwareSource').value;
-    const uploadArea = document.getElementById('firmwareUploadArea');
-    
-    if (source === 'upload') {
-        uploadArea.style.display = 'block';
-    } else {
-        uploadArea.style.display = 'none';
-    }
-}
-
-// 烧录固件
-async function flashFirmware() {
-    const deviceId = document.getElementById('flashDeviceId').value;
-    const source = document.getElementById('firmwareSource').value;
-    const resultDiv = document.getElementById('flashResult');
-    const resultBox = resultDiv.querySelector('.result-box');
-    
-    if (!deviceId) {
-        showError('Please select a device');
-        return;
-    }
-    
-    resultDiv.style.display = 'block';
-    resultBox.innerHTML = '<p>⏳ Flashing firmware...</p>';
-    
-    try {
-        // 这里调用烧录 API
-        // TODO: 实现具体的烧录逻辑
-        resultBox.innerHTML = `
-            <div class="status-success">
-                <p>✅ Flash command sent!</p>
-                <p>Device: ${deviceId}</p>
-                <p>Source: ${source}</p>
-            </div>
-        `;
-        showSuccess('Flash command sent!');
-    } catch (error) {
-        resultBox.innerHTML = `<div class="status-error">❌ Flash failed: ${error.message}</div>`;
-        showError('Flash failed: ' + error.message);
-    }
-}
-
-// 初始化固件上传区域
-function initFirmwareUpload() {
-    const uploadArea = document.getElementById('firmwareUploadArea');
-    const fileInput = document.getElementById('firmwareFileInput');
-    
-    if (!uploadArea) return;
-    
-    uploadArea.addEventListener('click', () => {
-        fileInput.click();
-    });
-    
-    fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-            showSuccess(`Selected: ${e.target.files[0].name}`);
-        }
-    });
-}
-
-// 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', () => {
-    initFirmwareUpload();
-    
-    // 自动刷新设备列表（如果当前是固件页面）
-    const firmwarePage = document.getElementById('page-firmware');
-    if (firmwarePage && firmwarePage.classList.contains('active')) {
-        setTimeout(refreshDeviceIds, 1000);
-    }
-});
 
 // ==================== 固件批量更新功能 ====================
 

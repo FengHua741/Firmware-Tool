@@ -24,6 +24,7 @@ import sys
 # 导入主板配置
 from board_config_loader import load_all_boards, load_board_config, get_manufacturers, get_board_types, get_bl_firmwares
 from firmware_compiler import FirmwareCompiler
+from kconfig_can_parser import parse_can_options
 
 # 配置日志
 logging.basicConfig(
@@ -37,6 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='static')
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 CORS(app)
 
 # 配置路径 - 使用动态路径，不硬编码
@@ -225,6 +227,225 @@ def get_system_resources():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ==================== lsusb API ====================
+@app.route('/api/system/lsusb')
+def get_lsusb():
+    """获取 lsusb 完整输出"""
+    search = request.args.get('search', '')
+    try:
+        output = subprocess.check_output(['lsusb'], text=True)
+        devices = []
+        for line in output.strip().split('\n'):
+            if not line.strip():
+                continue
+            if search and search.lower() not in line.lower():
+                continue
+            match = re.match(r'Bus\s+(\d+)\s+Device\s+(\d+):\s+ID\s+(\S+)\s+(.*)', line)
+            if match:
+                bus, dev, usb_id, name = match.groups()
+                devices.append({
+                    'name': name.strip(),
+                    'bus': bus,
+                    'device': dev,
+                    'usb_id': usb_id,
+                    'formatted': f'Bus {bus} Device {dev}: ID {usb_id} {name.strip()}'
+                })
+            else:
+                devices.append({'name': line.strip(), 'formatted': line.strip()})
+        return jsonify({'devices': devices})
+    except Exception as e:
+        return jsonify({'devices': [], 'error': str(e)})
+
+# ==================== 串口设备详情 API ====================
+@app.route('/api/system/serial')
+def get_serial_devices():
+    """获取串口设备详细信息（模仿FlyTools getSerial）"""
+    import glob
+    devices = []
+    serial_paths = glob.glob('/dev/serial/by-path/*')
+    for path in serial_paths:
+        try:
+            info = {}
+            output = subprocess.check_output(
+                ['udevadm', 'info', '--query=property', '--name=' + path],
+                text=True, timeout=5
+            )
+            for line in output.strip().split('\n'):
+                if '=' in line:
+                    k, v = line.split('=', 1)
+                    info[k] = v
+            devlinks = info.get('DEVLINKS', '').split()
+            link = ''
+            for dl in devlinks:
+                if dl != path:
+                    link = dl
+                    break
+            devices.append({
+                'path': path,
+                'link': link,
+                'devname': info.get('DEVNAME', ''),
+                'model': info.get('ID_MODEL', ''),
+                'vendor': info.get('ID_VENDOR', ''),
+                'vid': info.get('ID_VENDOR_ID', ''),
+                'pid': info.get('ID_USB_MODEL_ID', info.get('ID_MODEL_ID', '')),
+                'driver': info.get('ID_USB_DRIVER', ''),
+            })
+        except Exception:
+            continue
+    return jsonify({'devices': devices})
+
+# ==================== CAN接口列表 API ====================
+@app.route('/api/system/can-iface')
+def get_can_interfaces():
+    """获取可用CAN接口列表（模仿FlyTools getCanIface）"""
+    try:
+        output = subprocess.check_output(
+            ['ip', '-d', '-j', 'link', 'show', 'type', 'can'],
+            text=True, timeout=5
+        )
+        import json as _json
+        ifaces = _json.loads(output) if output.strip() else []
+        result = []
+        for iface in ifaces:
+            if isinstance(iface, dict) and iface.get('ifname'):
+                result.append({
+                    'ifname': iface.get('ifname', ''),
+                    'operstate': iface.get('operstate', 'UNKNOWN'),
+                    'flags': iface.get('flags', []),
+                })
+        return jsonify({'ifaces': result})
+    except subprocess.CalledProcessError:
+        return jsonify({'ifaces': []})
+    except Exception as e:
+        return jsonify({'ifaces': [], 'error': str(e)})
+
+# ==================== CAN UUID搜索 API ====================
+@app.route('/api/system/can-uuid', methods=['POST'])
+def search_can_uuid():
+    """通过指定CAN接口搜索UUID（模仿FlyTools getCan）"""
+    data = request.get_json() or {}
+    iface = data.get('iface', 'can0')
+    if not iface or not iface.startswith('can'):
+        return jsonify({'uuids': [], 'error': '无效的CAN接口'})
+    try:
+        import pwd
+        try:
+            home_dir = pwd.getpwnam('fenghua').pw_dir
+        except KeyError:
+            home_dir = os.path.expanduser('~')
+        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python')
+        canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
+        output = subprocess.run(
+            f'{python_bin} {canbus_script} {iface}',
+            shell=True, capture_output=True, text=True, timeout=10
+        )
+        uuids = []
+        error = None
+        combined = (output.stdout or '') + (output.stderr or '')
+        for line in combined.strip().split('\n'):
+            if 'canbus_uuid' in line:
+                match = re.search(r'canbus_uuid=([a-fA-F0-9]+)', line)
+                if match:
+                    uuid_val = match.group(1)
+                    app = 'Klipper' if 'Klipper' in line else \
+                          'Katapult' if 'Katapult' in line else 'Unknown'
+                    if not any(u['uuid'] == uuid_val for u in uuids):
+                        uuids.append({'uuid': uuid_val, 'app': app})
+            elif 'Error' in line or 'error' in line:
+                if not error:
+                    error = line.strip()
+        if not uuids and error:
+            return jsonify({'uuids': [], 'error': error})
+        return jsonify({'uuids': uuids})
+    except subprocess.TimeoutExpired:
+        return jsonify({'uuids': [], 'error': 'CAN查询超时'})
+    except Exception as e:
+        return jsonify({'uuids': [], 'error': str(e)})
+
+# ==================== 摄像头详情 API ====================
+@app.route('/api/system/video')
+def get_video_devices():
+    """获取摄像头详细信息（模仿FlyTools getVideoDevice）"""
+    import glob
+    devices = []
+    video_paths = sorted(glob.glob('/dev/video*'))
+    for path in video_paths:
+        video_name = os.path.basename(path)
+        name, index = 'Unknown', ''
+        try:
+            name_path = f'/sys/class/video4linux/{video_name}/name'
+            if os.path.exists(name_path):
+                with open(name_path) as f:
+                    name = f.read().strip()
+        except Exception:
+            pass
+        try:
+            index_path = f'/sys/class/video4linux/{video_name}/index'
+            if os.path.exists(index_path):
+                with open(index_path) as f:
+                    index = f.read().strip()
+        except Exception:
+            pass
+        devices.append({'path': path, 'name': name, 'index': index})
+    return jsonify({'videos': devices})
+
+# ==================== 通信选项 API ====================
+@app.route('/api/klipper/communication-options')
+def get_communication_options():
+    """获取 Kconfig 中的通信接口选项"""
+    klipper_path = request.args.get('klipper_path', config.get('klipper_path', '~/klipper'))
+    if klipper_path.startswith('~'):
+        klipper_path = '/home/fenghua' + klipper_path[1:]
+    try:
+        data = parse_can_options(klipper_path)
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f'解析通信选项失败: {e}')
+        return jsonify({'error': str(e)})
+
+# ==================== CAN 烧录搜索 API ====================
+@app.route('/api/firmware/detect-can')
+def detect_can_for_flash():
+    """为固件烧录搜索 CAN UUID 设备"""
+    try:
+        import pwd
+        try:
+            home_dir = pwd.getpwnam('fenghua').pw_dir
+        except KeyError:
+            home_dir = os.path.expanduser('~')
+        
+        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python')
+        canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
+        
+        output = subprocess.run(
+            f'{python_bin} {canbus_script} can0 2>&1',
+            shell=True, capture_output=True, text=True, timeout=10
+        )
+        
+        devices = []
+        error = None
+        seen_uuids = set()
+        
+        if output.stdout:
+            for line in output.stdout.strip().split('\n'):
+                if 'Error' in line or 'Traceback' in line:
+                    if not error:
+                        error = line
+                    continue
+                match = re.search(r'\b([a-f0-9]{8,})\b', line)
+                if match:
+                    uuid = match.group(1)
+                    if uuid not in seen_uuids:
+                        seen_uuids.add(uuid)
+                        devices.append(uuid)
+        
+        if not devices and not error:
+            error = '未找到CAN设备，请确认CAN接口已启用且设备处于Katapult/DFU模式'
+        
+        return jsonify({'devices': devices, 'error': error})
+    except Exception as e:
+        return jsonify({'devices': [], 'error': str(e)})
+
 # ==================== ID搜索 API ====================
 @app.route('/api/system/ids')
 def get_all_ids():
@@ -277,25 +498,30 @@ def get_all_ids():
                     
             output = subprocess.run(
                 f'{python_bin} {canbus_script} can0 2>&1',
-                shell=True, capture_output=True, text=True
+                shell=True, capture_output=True, text=True, timeout=10
             )
             seen_uuids = set()
+            can_error = None
             if output.stdout:
                 for line in output.stdout.strip().split('\n'):
-                    # 过滤错误信息和警告
+                    # 捕获错误信息
                     if 'Error' in line or 'Traceback' in line or 'DeprecationWarning' in line:
+                        if 'Error' in line and not can_error:
+                            can_error = line.strip()
                         continue
                     # 解析 UUID (8 位或更长的十六进制)
                     match = re.search(r'\b([a-f0-9]{8,})\b', line)
                     if match:
                         uuid = match.group(1)
-                        # 去重
                         if uuid in seen_uuids:
                             continue
                         seen_uuids.add(uuid)
-                        # 格式化为 canbus_uuid: <uuid>
                         formatted = f"canbus_uuid: {uuid}"
                         result['can'].append({'raw': uuid, 'formatted': formatted})
+            if not result['can'] and can_error:
+                result['can_error'] = can_error
+            elif not result['can']:
+                result['can_error'] = '未找到CAN设备，请确认CAN接口已启用且设备处于Katapult模式'
         except Exception as e:
             import logging
             logging.error(f'CAN设备检测失败：{e}')
@@ -444,6 +670,9 @@ def compile_firmware():
             processor = data.get('mcu', 'STM32F072').upper()
             bootloader_offset = data.get('bl_offset', '0')
             communication = data.get('connection', 'USB')
+            comm_type = data.get('comm_type', '')
+            comm_config_symbol = data.get('comm_config_symbol', '')
+            bridge_can_config = data.get('bridge_can_config', '')
             can_bus_interface = data.get('can_bus_interface', 'CAN bus (on PB8/PB9)')
             startup_pin = data.get('startup_pin', '')
             crystal = data.get('crystal', '8000000')
@@ -649,8 +878,27 @@ def compile_firmware():
         if bootloader_offset in offset_map:
             config_lines.append(offset_map[bootloader_offset])
         
-        # 通信接口
-        if 'RP2040' in processor or 'RP2350' in processor:
+        # 通信接口 - 优先使用动态 config_symbol
+        _is_dynamic = comm_config_symbol and ' ' not in comm_config_symbol and comm_config_symbol.replace('_', '').isalnum()
+        
+        if _is_dynamic:
+            # 动态模式: 前端直接传来 Kconfig config_symbol
+            config_lines.append(f'CONFIG_{comm_config_symbol}=y')
+            if comm_type == 'can':
+                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
+            elif comm_type == 'usbcanbridge':
+                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
+                if bridge_can_config:
+                    if bridge_can_config.startswith('STM32_') or bridge_can_config.startswith('RPXXXX_'):
+                        config_lines.append(f'CONFIG_{bridge_can_config}=y')
+                    else:
+                        pin_suffix = bridge_can_config.replace('/', '_')
+                        config_lines.append(f'CONFIG_STM32_CMENU_CANBUS_{pin_suffix}=y')
+            # RP2040 CAN/Bridge 需要 GPIO
+            if ('RP2040' in processor or 'RP2350' in processor) and comm_type in ('can', 'usbcanbridge'):
+                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_RX={rp2040_can_rx_gpio}')
+                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_TX={rp2040_can_tx_gpio}')
+        elif 'RP2040' in processor or 'RP2350' in processor:
             # RP2040/RP2350通信接口
             if 'USB to CAN bus bridge' in communication:
                 config_lines.append('CONFIG_RPXXXX_USBCANBUS=y')
@@ -2599,10 +2847,30 @@ def control_service():
 def check_update():
     """检查项目更新"""
     try:
+        import pwd
+        
+        # 获取项目所有者的用户名
+        stat_info = os.stat(BASE_DIR)
+        uid = stat_info.st_uid
+        user_info = pwd.getpwuid(uid)
+        username = user_info.pw_name
+        home_dir = user_info.pw_dir
+        
+        # 设置环境变量，使用项目所有者的home目录
+        env = os.environ.copy()
+        env['HOME'] = home_dir
+        env['USER'] = username
+        
+        # 添加 safe.directory 配置
+        subprocess.run(
+            ['git', 'config', '--global', '--add', 'safe.directory', BASE_DIR],
+            capture_output=True, env=env
+        )
+        
         # 获取当前版本（git commit hash）
         current_output = subprocess.run(
             ['git', '-C', BASE_DIR, 'rev-parse', '--short', 'HEAD'],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10, env=env
         )
         current_version = current_output.stdout.strip() if current_output.returncode == 0 else 'unknown'
         
@@ -2610,13 +2878,13 @@ def check_update():
         # 先获取远程信息
         subprocess.run(
             ['git', '-C', BASE_DIR, 'fetch', 'origin'],
-            capture_output=True, timeout=30
+            capture_output=True, timeout=30, env=env
         )
         
         # 获取远程最新commit
         remote_output = subprocess.run(
             ['git', '-C', BASE_DIR, 'rev-parse', '--short', 'origin/main'],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10, env=env
         )
         latest_version = remote_output.stdout.strip() if remote_output.returncode == 0 else current_version
         
@@ -2628,7 +2896,7 @@ def check_update():
         if has_update:
             time_output = subprocess.run(
                 ['git', '-C', BASE_DIR, 'log', '-1', '--format=%cd', '--date=iso', 'origin/main'],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, timeout=10, env=env
             )
             update_time = time_output.stdout.strip() if time_output.returncode == 0 else None
         
@@ -2647,6 +2915,24 @@ def update_project():
     """执行项目更新"""
     def generate():
         try:
+            import pwd
+            
+            # 获取项目所有者的环境变量
+            stat_info = os.stat(BASE_DIR)
+            uid = stat_info.st_uid
+            user_info = pwd.getpwuid(uid)
+            home_dir = user_info.pw_dir
+            
+            env = os.environ.copy()
+            env['HOME'] = home_dir
+            env['USER'] = user_info.pw_name
+            
+            # 添加 safe.directory 配置
+            subprocess.run(
+                ['git', 'config', '--global', '--add', 'safe.directory', BASE_DIR],
+                capture_output=True, env=env
+            )
+            
             yield "开始更新 Firmware-Tool...\n"
             
             # 1. 保存当前配置
@@ -2660,7 +2946,7 @@ def update_project():
             yield "拉取最新代码...\n"
             result = subprocess.run(
                 ['git', '-C', BASE_DIR, 'pull', 'origin', 'main'],
-                capture_output=True, text=True, timeout=60
+                capture_output=True, text=True, timeout=60, env=env
             )
             yield result.stdout
             if result.stderr:

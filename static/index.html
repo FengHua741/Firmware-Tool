@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Firmware-Tool - 固件工具</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260320f">
 </head>
 <body>
     <div class="app-container">
@@ -43,98 +42,97 @@
             <!-- ==================== 系统资源页面 ==================== -->
             <div id="page-resources" class="page active">
                 <div class="page-header">
-                    <h2>📊 系统资源</h2>
+                    <h2>系统资源</h2>
                 </div>
                 
-                <div class="grid-2">
+                <div class="resource-grid">
+                    <!-- 实时资源监控 -->
                     <div class="card">
-                        <div class="card-header"><h3>💻 系统信息</h3></div>
+                        <div class="card-header"><h3>实时资源监控</h3></div>
                         <div class="card-body">
-                            <div class="gauge-container">
-                                <div class="gauge-item">
-                                    <canvas id="cpuGauge"></canvas>
-                                    <p class="gauge-label">CPU 使用率</p>
-                                    <p class="gauge-value" id="cpuPercentText">--%</p>
+                            <div class="resource-values-large">
+                                <div class="resource-item-large">
+                                    <span class="resource-label">CPU</span>
+                                    <span class="resource-percent" id="cpuPercentText">--%</span>
+                                    <span class="resource-detail" id="cpuDetailText">--</span>
                                 </div>
-                                <div class="gauge-item">
-                                    <canvas id="memGauge"></canvas>
-                                    <p class="gauge-label">内存使用</p>
-                                    <p class="gauge-value" id="memPercentText">--%</p>
+                                <div class="resource-item-large">
+                                    <span class="resource-label">内存</span>
+                                    <span class="resource-percent" id="memPercentText">--%</span>
+                                    <span class="resource-detail" id="memDetailText">--</span>
                                 </div>
-                                <div class="gauge-item">
-                                    <canvas id="diskGauge"></canvas>
-                                    <p class="gauge-label">磁盘使用</p>
-                                    <p class="gauge-value" id="diskPercentText">--%</p>
+                                <div class="resource-item-large">
+                                    <span class="resource-label">磁盘</span>
+                                    <span class="resource-percent" id="diskPercentText">--%</span>
+                                    <span class="resource-detail" id="diskDetailText">--</span>
                                 </div>
                             </div>
                         </div>
                     </div>
 
+                    <!-- 网络状态 -->
                     <div class="card">
-                        <div class="card-header"><h3>🌐 网络状态</h3></div>
+                        <div class="card-header"><h3>网络状态</h3></div>
                         <div class="card-body">
                             <div id="networkInterfaces"><p class="empty">加载中...</p></div>
                         </div>
                     </div>
-                </div>
 
-                <div class="card">
-                    <div class="card-header"><h3>🔍 ID搜索</h3></div>
-                    <div class="card-body">
-                        <div class="id-search-container">
-                            <div class="id-column">
-                                <h4>USB设备</h4>
-                                <div id="usbDevices" class="id-list"><p class="empty">点击刷新按钮搜索</p></div>
-                            </div>
-                            <div class="id-column">
-                                <h4>CAN设备</h4>
-                                <div id="canDevices" class="id-list"><p class="empty">点击刷新按钮搜索</p></div>
-                            </div>
-                            <div class="id-column">
-                                <h4>摄像头</h4>
-                                <div id="cameraDevices" class="id-list"><p class="empty">点击刷新按钮搜索</p></div>
-                            </div>
+                    <!-- 摄像头 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>摄像头</h3>
+                            <button class="btn btn-sm btn-primary" onclick="searchCamera()">搜索</button>
                         </div>
-                        <button class="btn btn-primary" onclick="refreshIds()">🔄 刷新搜索</button>
+                        <div class="card-body">
+                            <div id="cameraDevices" class="id-list"><p class="empty">点击搜索按钮</p></div>
+                        </div>
+                    </div>
+
+                    <!-- USB 设备 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>USB 设备</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="device-card-actions">
+                                <input type="text" class="form-control" id="lsusbFilter" placeholder="过滤关键字（可选）">
+                                <button class="btn btn-sm btn-primary" onclick="searchLsusb()">搜索</button>
+                            </div>
+                            <div id="lsusbDevices" class="id-list"><p class="empty">点击搜索按钮</p></div>
+                        </div>
+                    </div>
+
+                    <!-- 串口设备 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>串口设备</h3>
+                            <button class="btn btn-sm btn-primary" onclick="searchSerial()">搜索</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="serialDevices" class="id-list"><p class="empty">点击搜索按钮</p></div>
+                        </div>
+                    </div>
+
+                    <!-- CAN 设备 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>CAN 设备</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="device-card-actions">
+                                <select id="canIfaceSelect" class="form-control">
+                                    <option value="">选择CAN接口</option>
+                                </select>
+                                <button class="btn btn-sm btn-secondary" onclick="refreshCanIfaces()">刷新接口</button>
+                                <button class="btn btn-sm btn-primary" onclick="searchCanUuid()">搜索UUID</button>
+                            </div>
+                            <div id="canDevices" class="id-list"><p class="empty">先选择CAN接口再搜索</p></div>
+                            <div id="canSearchError" style="display:none;"></div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-header"><h3>📡 CAN配置</h3></div>
-                    <div class="card-body">
-                        <div id="canConfigStatus"><p class="empty">加载中...</p></div>
-                        <div class="form-row" id="canConfigForm" style="display: none;">
-                            <div class="form-group">
-                                <label class="form-label">CAN速率</label>
-                                <select class="form-control form-select" id="canBitrate">
-                                    <option value="1000000">1M</option>
-                                    <option value="500000">500K</option>
-                                    <option value="250000">250K</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">CAN缓存</label>
-                                <select class="form-control form-select" id="canTxqueuelen">
-                                    <option value="128">128</option>
-                                    <option value="256">256</option>
-                                    <option value="512">512</option>
-                                    <option value="1024">1024 (默认)</option>
-                                    <option value="2048">2048</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <button class="btn btn-primary" onclick="loadCanConfig()">🔄 刷新状态</button>
-                            <button class="btn btn-success" onclick="saveCanConfig()" id="saveCanBtn" style="display: none;">💾 保存配置</button>
-                        </div>
-                        <div class="form-row" style="margin-top: 10px;">
-                            <button class="btn btn-info" onclick="diagnoseCanNetwork()">🔍 诊断网络</button>
-                            <button class="btn btn-warning" onclick="repairCanNetwork()">🔧 修复网络</button>
-                        </div>
-                        <div id="canDiagnoseResult" class="status-area" style="display: none; margin-top: 10px;"></div>
-                        <div id="canConfigMessage" class="status-area" style="margin-top: 10px;"></div>
-                    </div>
-                </div>
             </div>
 
             <!-- ==================== 固件编译与烧录页面 ==================== -->
@@ -224,49 +222,49 @@
                                     </select>
                                 </div>
                             </div>
+                        </div>
+
+                        <!-- MCU 详细参数（共享区域，预设和自定义模式共用） -->
+                        <div id="compileMcuDetails" style="display:none;">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">📳 晶振频率</label>
+                                    <select class="form-control form-select" id="compileCrystal">
+                                        <!-- 动态填充 -->
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">📍 Bootloader 偏移</label>
+                                    <select class="form-control form-select" id="compileBlOffset">
+                                        <!-- 动态填充 -->
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">🔌 连接方式</label>
+                                    <select class="form-control form-select" id="compileConnection" onchange="onCompileConnectionChange()">
+                                        <!-- 动态填充 -->
+                                    </select>
+                                </div>
+                            </div>
                             
-                            <!-- MCU 详细参数（从 Klipper 读取） -->
-                            <div id="compileMcuDetails" style="display:none;">
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label class="form-label">📳 晶振频率</label>
-                                        <select class="form-control form-select" id="compileCrystal">
-                                            <!-- 动态填充 -->
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">📍 Bootloader 偏移</label>
-                                        <select class="form-control form-select" id="compileBlOffset">
-                                            <!-- 动态填充 -->
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label class="form-label">🔌 连接方式</label>
-                                        <select class="form-control form-select" id="compileConnection" onchange="onCompileConnectionChange()">
-                                            <!-- 动态填充 -->
-                                        </select>
-                                    </div>
+                            <!-- CAN 桥接选项（仅当选择 CAN_BRIDGE 时显示） -->
+                            <div id="compileCanBridgeOptions" class="form-row" style="display:none;">
+                                <div class="form-group">
+                                    <label class="form-label">🔌 CAN 接口</label>
+                                    <select class="form-control form-select" id="compileCanInterface">
+                                        <option value="PB8/PB9">PB8/PB9</option>
+                                        <option value="PD0/PD1">PD0/PD1</option>
+                                        <option value="PA11/PA12">PA11/PA12</option>
+                                    </select>
                                 </div>
-                                
-                                <!-- CAN 桥接选项（仅当选择 CAN_BRIDGE 时显示） -->
-                                <div id="compileCanBridgeOptions" class="form-row" style="display:none;">
-                                    <div class="form-group">
-                                        <label class="form-label">🔌 CAN 接口</label>
-                                        <select class="form-control form-select" id="compileCanInterface">
-                                            <option value="PB8/PB9">PB8/PB9</option>
-                                            <option value="PD0/PD1">PD0/PD1</option>
-                                            <option value="PA11/PA12">PA11/PA12</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                
-                                <!-- 启动引脚 -->
-                                <div class="form-row">
-                                    <div class="form-group" style="flex: 2;">
-                                        <label class="form-label">🚀 启动引脚（可选）</label>
-                                        <input type="text" class="form-control" id="compileStartupPin" placeholder="例如: PA2 或 gpio5（多个用逗号分隔）">
-                                        <small class="form-text text-muted">STM32格式: PA2,PB9 | RP2040格式: gpio5,gpio19</small>
-                                    </div>
+                            </div>
+                            
+                            <!-- 启动引脚 -->
+                            <div class="form-row">
+                                <div class="form-group" style="flex: 2;">
+                                    <label class="form-label">🚀 启动引脚（可选）</label>
+                                    <input type="text" class="form-control" id="compileStartupPin" placeholder="例如: PA2 或 gpio5（多个用逗号分隔）">
+                                    <small class="form-text text-muted">STM32格式: PA2,PB9 | RP2040格式: gpio5,gpio19</small>
                                 </div>
                             </div>
                         </div>
@@ -561,7 +559,7 @@
                             <div class="form-group">
                                 <label class="form-label">选择厂家</label>
                                 <select class="form-control form-select" id="configManufacturer">
-                                    <option value="FLY">FLY</option>
+                                    <option value="">-- 选择厂家 --</option>
                                 </select>
                             </div>
                             <button class="btn btn-primary" onclick="loadConfigList()">🔄 加载配置</button>
@@ -919,10 +917,10 @@
         </main>
     </div>
 
-    <script src="/static/js/app.js"></script>
-    <script src="/static/js/mcu-presets.js"></script>
-    <script src="/static/js/config-manager.js"></script>
-    <script src="/static/js/firmware-compile.js"></script>
-    <script src="/static/js/firmware-update.js"></script>
+    <script src="/static/js/app.js?v=20260320f"></script>
+    <script src="/static/js/mcu-presets.js?v=20260320f"></script>
+    <script src="/static/js/config-manager.js?v=20260320f"></script>
+    <script src="/static/js/firmware-compile.js?v=20260320f"></script>
+    <script src="/static/js/firmware-update.js?v=20260320f"></script>
 </body>
 </html>

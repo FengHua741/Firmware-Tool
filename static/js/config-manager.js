@@ -10,7 +10,30 @@ async function initConfigPage() {
     await loadKlipperMcuDatabase();
     loadMcuPlatforms(); // 加载MCU平台列表到主表单
     await refreshManufacturerList(); // 加载厂家列表到datalist
+    await loadConfigManufacturerSelect(); // 加载厂家到选择框
     setupEventListeners();
+}
+
+// 加载厂家到配置管理页面的选择框
+async function loadConfigManufacturerSelect() {
+    try {
+        const response = await fetch('/api/config/manufacturers');
+        const data = await response.json();
+        
+        const select = document.getElementById('configManufacturer');
+        if (!select) return;
+        
+        select.innerHTML = '<option value="">-- 选择厂家 --</option>';
+        
+        if (data.manufacturers) {
+            data.manufacturers.forEach(mfr => {
+                select.innerHTML += `<option value="${mfr}">${mfr}</option>`;
+            });
+        }
+        console.log('✓ 配置管理厂家列表已加载');
+    } catch (error) {
+        console.error('加载配置管理厂家列表失败:', error);
+    }
 }
 
 // 刷新厂家列表（用于datalist）
