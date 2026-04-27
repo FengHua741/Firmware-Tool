@@ -160,8 +160,9 @@ async function displayCompileMcuDetails(data) {
     await loadCommunicationOptions(mcu);
     
     // 根据 MCU 预设自动设置烧录模式（自定义模式）
+    // 如果从预设产品切换过来，保留预设配置的烧录模式，不覆盖
     const flashModeEl = document.getElementById('flashMode');
-    if (flashModeEl && typeof MCU_PRESETS !== 'undefined') {
+    if (flashModeEl && typeof MCU_PRESETS !== 'undefined' && !window._fromPreset) {
         let defaultFlash = null;
         for (const platform in MCU_PRESETS) {
             const found = MCU_PRESETS[platform].find(m => m.id === mcu.id);
@@ -178,6 +179,9 @@ async function displayCompileMcuDetails(data) {
             flashModeEl.value = defaultFlash;
             onFlashModeChange();
         }
+    }
+    if (window._fromPreset) {
+        window._fromPreset = false;
     }
     
     document.getElementById('compileMcuDetails').style.display = 'block';
@@ -510,6 +514,9 @@ async function onCompilePresetModelChange() {
         return;
     }
 
+    // 标记为从预设切换，避免 displayCompileMcuDetails 覆盖烧录模式
+    window._fromPreset = true;
+    
     // 加载MCU详细参数（晶振选项、BL偏移选项、通信选项）
     await onCompileMcuModelChange();
 
