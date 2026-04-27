@@ -11,8 +11,9 @@ from pathlib import Path
 class FirmwareCompiler:
     def __init__(self, klipper_path='~/klipper'):
         self.klipper_path = os.path.expanduser(klipper_path)
-        self.configs_dir = '/home/fenghua/Firmware-Tool/configs'
-        self.bl_firmwares_dir = '/home/fenghua/Firmware-Tool/bl_firmwares'
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.configs_dir = os.path.join(base_dir, 'configs')
+        self.bl_firmwares_dir = os.path.join(base_dir, 'bl_firmwares')
         
     def check_dependencies(self):
         """检查 Klipper依赖"""

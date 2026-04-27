@@ -14,7 +14,10 @@ echo -e "${GREEN}=== Firmware-Tool 卸载脚本 ===${NC}"
 echo ""
 
 SERVICE_NAME="firmware-tool"
-PROJECT_DIR="/home/fenghua/Firmware-Tool"
+
+# 从脚本位置推断项目目录
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # 检查 root 权限
 if [ "$EUID" -ne 0 ]; then

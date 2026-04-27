@@ -49,8 +49,17 @@ else
     # 获取当前用户（非root）
     CURRENT_USER=${SUDO_USER:-$USER}
     if [ "$CURRENT_USER" = "root" ]; then
-        echo -e "${YELLOW}警告: 当前用户为root，建议使用普通用户运行${NC}"
-        CURRENT_USER="fenghua"
+        # 尝试从 /home 推断实际用户
+        for user_dir in /home/*; do
+            if [ -d "$user_dir" ]; then
+                CURRENT_USER=$(basename "$user_dir")
+                break
+            fi
+        done
+        if [ "$CURRENT_USER" = "root" ]; then
+            echo -e "${YELLOW}警告: 无法推断普通用户，默认使用 fenghua${NC}"
+            CURRENT_USER="fenghua"
+        fi
     fi
 fi
 
