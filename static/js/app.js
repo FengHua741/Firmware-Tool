@@ -476,14 +476,11 @@ async function loadSettings() {
         const config = await response.json();
         
         if (config) {
-            document.getElementById('klipperPath').value = config.klipper_path || '~/klipper';
-            document.getElementById('serverPort').value = config.port || 9999;
-            document.getElementById('jsonRepoUrl').value = config.json_repo_url || '';
-            document.getElementById('lastJsonUpdate').textContent = config.last_json_update || '从未';
+            const kp = document.getElementById('settingsKlipperPath');
+            if (kp) kp.value = config.klipper_path || '~/klipper';
+            const ktp = document.getElementById('settingsKatapultPath');
+            if (ktp) ktp.value = config.katapult_path || '~/katapult';
         }
-        
-        // 加载 Web 界面状态
-        loadCurrentWebUI();
     } catch (error) {
         console.error('加载设置失败:', error);
     }
@@ -500,28 +497,25 @@ async function loadCurrentWebUI() {
         const fluiddBtn = document.getElementById('fluiddBtn');
         const mainsailBtn = document.getElementById('mainsailBtn');
         
+        if (!statusEl) return;
+        
         if (currentUI === 'fluidd') {
             statusEl.textContent = '当前：Fluidd (端口 80)';
-            fluiddBtn.classList.add('btn-success');
-            fluiddBtn.classList.remove('btn-primary');
-            mainsailBtn.classList.add('btn-secondary');
-            mainsailBtn.classList.remove('btn-primary');
+            if (fluiddBtn) { fluiddBtn.classList.add('btn-success'); fluiddBtn.classList.remove('btn-primary'); }
+            if (mainsailBtn) { mainsailBtn.classList.add('btn-secondary'); mainsailBtn.classList.remove('btn-primary'); }
         } else if (currentUI === 'mainsail') {
             statusEl.textContent = '当前：Mainsail (端口 81)';
-            mainsailBtn.classList.add('btn-success');
-            mainsailBtn.classList.remove('btn-secondary');
-            fluiddBtn.classList.add('btn-primary');
-            fluiddBtn.classList.remove('btn-success');
+            if (mainsailBtn) { mainsailBtn.classList.add('btn-success'); mainsailBtn.classList.remove('btn-secondary'); }
+            if (fluiddBtn) { fluiddBtn.classList.add('btn-primary'); fluiddBtn.classList.remove('btn-success'); }
         } else {
             statusEl.textContent = '当前：未检测到';
-            fluiddBtn.classList.add('btn-primary');
-            fluiddBtn.classList.remove('btn-success');
-            mainsailBtn.classList.add('btn-secondary');
-            mainsailBtn.classList.remove('btn-success');
+            if (fluiddBtn) { fluiddBtn.classList.add('btn-primary'); fluiddBtn.classList.remove('btn-success'); }
+            if (mainsailBtn) { mainsailBtn.classList.add('btn-secondary'); mainsailBtn.classList.remove('btn-success'); }
         }
     } catch (error) {
         console.error('加载 Web 界面状态失败:', error);
-        document.getElementById('currentWebUI').textContent = '当前：检测失败';
+        const statusEl = document.getElementById('currentWebUI');
+        if (statusEl) statusEl.textContent = '当前：检测失败';
     }
 }
 
@@ -549,10 +543,11 @@ async function switchWebUI(target) {
 }
 
 async function saveSettings() {
+    const kp = document.getElementById('settingsKlipperPath');
+    const ktp = document.getElementById('settingsKatapultPath');
     const settings = {
-        klipper_path: document.getElementById('klipperPath').value,
-        port: parseInt(document.getElementById('serverPort').value),
-        json_repo_url: document.getElementById('jsonRepoUrl').value
+        klipper_path: kp ? kp.value : '~/klipper',
+        katapult_path: ktp ? ktp.value : '~/katapult'
     };
     
     try {
@@ -583,7 +578,7 @@ async function updateJsonRepo() {
     }
     
     const statusDiv = document.getElementById('jsonUpdateStatus');
-    statusDiv.innerHTML = '<span class="status-info">正在保存并更新...</span>';
+    if (statusDiv) statusDiv.innerHTML = '<span class="status-info">正在保存并更新...</span>';
     
     try {
         // 先保存仓库地址到配置
@@ -1037,7 +1032,7 @@ function onMCUTypeChange() {
         modelSelect.appendChild(option);
     });
     
-    showInfo(`已加载 ${models.length} 个 ${mcuType} 系列型号`);
+    showSuccess(`已加载 ${models.length} 个 ${mcuType} 系列型号`);
 }
 
 // 选择预设型号后自动填充参数

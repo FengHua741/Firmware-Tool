@@ -618,6 +618,26 @@ def get_manufacturers_list():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/firmware/bl-firmwares')
+def get_all_bl_firmwares():
+    """获取所有厂家的BL固件列表"""
+    try:
+        all_firmwares = []
+        if os.path.exists(BOARD_CONFIGS_DIR):
+            for manufacturer in os.listdir(BOARD_CONFIGS_DIR):
+                mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+                if os.path.isdir(mfr_dir):
+                    try:
+                        firmwares = get_bl_firmwares(manufacturer)
+                        for fw in firmwares:
+                            fw['manufacturer'] = manufacturer
+                        all_firmwares.extend(firmwares)
+                    except Exception:
+                        pass
+        return jsonify({'files': all_firmwares})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/firmware/bl-firmwares/<manufacturer>')
 @app.route('/api/firmware/bl-firmwares/<manufacturer>/<board_type>')
 def get_bl_firmwares_list(manufacturer, board_type=None):
@@ -1444,7 +1464,7 @@ def handle_config():
     else:
         data = request.json
         # 更新配置
-        for key in ['klipper_path', 'json_repo_url', 'port']:
+        for key in ['klipper_path', 'katapult_path', 'json_repo_url', 'port']:
             if key in data:
                 config[key] = data[key]
         
