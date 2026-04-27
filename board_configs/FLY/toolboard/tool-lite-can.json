@@ -10,10 +10,9 @@
   ],
   "default_connection": "CAN bus",
   "flash_modes": [
-    "UF2",
-    "KAT"
+    "UF2"
   ],
-  "default_flash": "KAT",
+  "default_flash": "UF2",
   "boot_pins": "!gpio18",
   "bl_flash_support": "支持",
   "bl_default_flash": "UF2",

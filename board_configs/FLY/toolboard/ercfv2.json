@@ -10,7 +10,7 @@
   ],
   "default_connection": "CAN bus",
   "flash_modes": [
-    "UF2",
+    "DFU",
     "KAT"
   ],
   "default_flash": "KAT",

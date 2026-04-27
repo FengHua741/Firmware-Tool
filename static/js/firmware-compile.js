@@ -827,6 +827,11 @@ function onFlashModeChange() {
         tfCardSection.style.display = 'block';
         flashBtn.style.display = 'none';
         deviceIdGroup.style.display = 'none';
+    } else if (flashMode === 'HOST') {
+        // HOST模式：隐藏TF卡区域和设备选择，显示烧录按钮
+        tfCardSection.style.display = 'none';
+        flashBtn.style.display = 'inline-block';
+        deviceIdGroup.style.display = 'none';
     } else {
         // 其他模式：正常显示
         tfCardSection.style.display = 'none';
@@ -878,12 +883,20 @@ async function flashFirmware() {
         return;
     }
     
+    let firmwarePath = compiledFirmwarePath;
+    
+    if (flashMode === 'HOST') {
+        // HOST模式：安装固件到上位机
+        if (!firmwarePath) {
+            firmwarePath = '~/klipper/out/klipper.bin';
+        }
+        return await flashHostFirmware(firmwarePath);
+    }
+    
     if (!deviceId) {
         showError('请选择设备 ID');
         return;
     }
-    
-    let firmwarePath = compiledFirmwarePath;
     
     if (!firmwarePath) {
         // 如果没有编译过，尝试使用默认路径
@@ -932,6 +945,51 @@ async function flashFirmware() {
             </div>
         `;
         showError('烧录请求失败: ' + error.message);
+    }
+}
+
+// HOST模式固件安装
+async function flashHostFirmware(firmwarePath) {
+    const resultDiv = document.getElementById('flashResult');
+    resultDiv.style.display = 'block';
+    resultDiv.querySelector('.result-box').innerHTML = '<p>⏳ 正在安装固件到上位机，请稍候...</p>';
+    
+    try {
+        const response = await fetch('/api/firmware/install-host', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                firmware_path: firmwarePath
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            resultDiv.querySelector('.result-box').innerHTML = `
+                <div class="status-success">
+                    <p>✅ ${result.message || '固件安装成功！'}</p>
+                </div>
+            `;
+            showSuccess('固件安装成功！');
+        } else {
+            resultDiv.querySelector('.result-box').innerHTML = `
+                <div class="status-error">
+                    <p>❌ 安装失败</p>
+                    <pre>${result.error || '未知错误'}</pre>
+                </div>
+            `;
+            showError('安装失败: ' + (result.error || '未知错误'));
+        }
+    } catch (error) {
+        console.error('安装失败:', error);
+        resultDiv.querySelector('.result-box').innerHTML = `
+            <div class="status-error">
+                <p>❌ 安装请求失败</p>
+                <pre>${error.message}</pre>
+            </div>
+        `;
+        showError('安装请求失败: ' + error.message);
     }
 }
 

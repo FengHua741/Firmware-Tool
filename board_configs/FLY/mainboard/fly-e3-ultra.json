@@ -10,9 +10,11 @@
   ],
   "default_connection": "USB (on PA11/PA12)",
   "flash_modes": [
-    "DFU"
+    "DFU",
+    "KAT",
+    "TF"
   ],
-  "default_flash": "DFU",
+  "default_flash": "TF",
   "boot_pins": null,
   "crystal": "25000000",
   "bl_flash_support": "支持",
