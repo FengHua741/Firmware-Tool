@@ -13,7 +13,7 @@
     "DFU",
     "KAT"
   ],
-  "default_flash": "DFU",
+  "default_flash": "KAT",
   "boot_pins": null,
   "crystal": "25000000",
   "bl_flash_support": "支持",
