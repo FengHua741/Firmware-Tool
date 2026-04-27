@@ -280,194 +280,17 @@ function fallbackCopyToClipboard(text) {
     }
 }
 
-// ==================== BL固件烧录 ====================
 
 // 初始化 BL 厂家选择
-async function initBLManufacturers() {
-    try {
-        const response = await fetch('/api/firmware/boards');
-        const data = await response.json();
-        
-        const select = document.getElementById('blManufacturerSelect');
-        select.innerHTML = '<option value="">请选择厂家...</option>';
-        
-        if (data.manufacturers) {
-            data.manufacturers.forEach(mfr => {
-                select.innerHTML += `<option value="${mfr}">${mfr}</option>`;
-            });
-        }
-    } catch (error) {
-        console.error('加载BL厂家失败:', error);
-    }
-}
 
 // BL 厂家改变
-async function onBLManufacturerChange() {
-    const manufacturer = document.getElementById('blManufacturerSelect').value;
-    const typeSelect = document.getElementById('blBoardTypeSelect');
-    const firmwareSelect = document.getElementById('blFirmwareSelect');
-    
-    // 重置下级选择
-    firmwareSelect.innerHTML = '<option value="">请先选择主板类型</option>';
-    firmwareSelect.disabled = true;
-    
-    if (!manufacturer) {
-        typeSelect.innerHTML = '<option value="">请先选择厂家</option>';
-        typeSelect.disabled = true;
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/firmware/boards');
-        const data = await response.json();
-        
-        typeSelect.innerHTML = '<option value="">请选择主板类型...</option>';
-        
-        if (data.boards && data.boards[manufacturer]) {
-            const types = Object.keys(data.boards[manufacturer]);
-            types.forEach(type => {
-                const label = type === 'mainboard' ? '主板' : 
-                              type === 'toolboard' ? '工具板' : 
-                              type === 'extensionboard' ? '扩展板' : type;
-                typeSelect.innerHTML += `<option value="${type}">${label}</option>`;
-            });
-        }
-        
-        typeSelect.disabled = false;
-    } catch (error) {
-        console.error('加载主板类型失败:', error);
-    }
-}
 
 // BL 主板类型改变
-async function onBLBoardTypeChange() {
-    const manufacturer = document.getElementById('blManufacturerSelect').value;
-    const boardType = document.getElementById('blBoardTypeSelect').value;
-    const firmwareSelect = document.getElementById('blFirmwareSelect');
-    
-    if (!boardType) {
-        firmwareSelect.innerHTML = '<option value="">请先选择主板类型</option>';
-        firmwareSelect.disabled = true;
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/firmware/bl-firmwares/${manufacturer}/${boardType}`);
-        const data = await response.json();
-        
-        firmwareSelect.innerHTML = '<option value="">请选择BL固件...</option>';
-        
-        if (data.firmwares && data.firmwares.length > 0) {
-            data.firmwares.forEach(fw => {
-                firmwareSelect.innerHTML += `<option value="${fw.path}">${fw.name}</option>`;
-            });
-        } else {
-            firmwareSelect.innerHTML = '<option value="">无可用BL固件</option>';
-        }
-        
-        firmwareSelect.disabled = false;
-    } catch (error) {
-        console.error('加载BL固件失败:', error);
-    }
-}
 
 // BL 烧录方式改变
-function onBLFlashModeChange() {
-    // 清空设备列表
-    document.getElementById('blDeviceList').innerHTML = '<p class="empty">点击"检测设备"按钮扫描可用设备</p>';
-    document.getElementById('blTargetDevice').value = '';
-}
 
-async function detectBLDevices() {
-    try {
-        const response = await fetch('/api/system/ids');
-        const data = await response.json();
-        
-        const container = document.getElementById('blDeviceList');
-        const flashMode = document.getElementById('blFlashMode').value;
-        
-        let devices = [];
-        let modeText = '设备';
-        
-        // 根据烧录模式检测对应类型的设备
-        if (flashMode === 'UF2') {
-            devices = data.rp_boot || [];
-            modeText = 'RP2040 BOOT设备';
-        } else {
-            devices = data.dfu || [];
-            modeText = 'DFU设备';
-        }
-        
-        if (devices.length > 0) {
-            container.innerHTML = devices.map(device => {
-                const displayText = device.formatted || device.raw || device;
-                return `
-                    <div class="device-item">
-                        <span>${displayText}</span>
-                        <button class="btn btn-sm btn-primary" onclick="selectBLDevice('${device.raw || device}')">选择</button>
-                    </div>
-                `;
-            }).join('');
-        } else {
-            container.innerHTML = `<p class="empty">未找到${modeText}</p>`;
-        }
-    } catch (error) {
-        console.error('检测设备失败:', error);
-    }
-}
 
-function selectBLDevice(deviceId) {
-    document.getElementById('blTargetDevice').value = deviceId;
-}
 
-async function flashBLFirmware() {
-    if (blFlashInProgress) return;
-    
-    const firmwarePath = document.getElementById('blFirmwareSelect').value;
-    const flashMode = document.getElementById('blFlashMode').value;
-    const device = document.getElementById('blTargetDevice').value;
-    
-    if (!firmwarePath) {
-        showError('请选择BL固件');
-        return;
-    }
-    
-    // UF2模式不需要设备ID
-    if (!device && flashMode !== 'UF2') {
-        showError('请选择或输入设备ID');
-        return;
-    }
-    
-    blFlashInProgress = true;
-    const statusDiv = document.getElementById('blFlashStatus');
-    
-    statusDiv.innerHTML = '<span class="status-info">正在烧录BL固件...</span>';
-    
-    try {
-        const response = await fetch('/api/firmware/bl/flash', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                bl_firmware_path: firmwarePath,
-                flash_mode: flashMode,
-                device: device
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusDiv.innerHTML = '<span class="status-success">✅ BL固件烧录成功</span>';
-            showSuccess('BL固件烧录成功！');
-        } else {
-            statusDiv.innerHTML = `<span class="status-error">❌ 烧录失败: ${data.error}</span>`;
-        }
-    } catch (error) {
-        statusDiv.innerHTML = `<span class="status-error">❌ 错误: ${error.message}</span>`;
-    } finally {
-        blFlashInProgress = false;
-    }
-}
 
 // ==================== 系统设置 ====================
 async function loadSettings() {
@@ -487,60 +310,8 @@ async function loadSettings() {
 }
 
 // 加载当前 Web 界面状态
-async function loadCurrentWebUI() {
-    try {
-        const response = await fetch('/api/system/web-ui');
-        const data = await response.json();
-        
-        const currentUI = data.current_ui || 'unknown';
-        const statusEl = document.getElementById('currentWebUI');
-        const fluiddBtn = document.getElementById('fluiddBtn');
-        const mainsailBtn = document.getElementById('mainsailBtn');
-        
-        if (!statusEl) return;
-        
-        if (currentUI === 'fluidd') {
-            statusEl.textContent = '当前：Fluidd (端口 80)';
-            if (fluiddBtn) { fluiddBtn.classList.add('btn-success'); fluiddBtn.classList.remove('btn-primary'); }
-            if (mainsailBtn) { mainsailBtn.classList.add('btn-secondary'); mainsailBtn.classList.remove('btn-primary'); }
-        } else if (currentUI === 'mainsail') {
-            statusEl.textContent = '当前：Mainsail (端口 81)';
-            if (mainsailBtn) { mainsailBtn.classList.add('btn-success'); mainsailBtn.classList.remove('btn-secondary'); }
-            if (fluiddBtn) { fluiddBtn.classList.add('btn-primary'); fluiddBtn.classList.remove('btn-success'); }
-        } else {
-            statusEl.textContent = '当前：未检测到';
-            if (fluiddBtn) { fluiddBtn.classList.add('btn-primary'); fluiddBtn.classList.remove('btn-success'); }
-            if (mainsailBtn) { mainsailBtn.classList.add('btn-secondary'); mainsailBtn.classList.remove('btn-success'); }
-        }
-    } catch (error) {
-        console.error('加载 Web 界面状态失败:', error);
-        const statusEl = document.getElementById('currentWebUI');
-        if (statusEl) statusEl.textContent = '当前：检测失败';
-    }
-}
 
 // 切换 Web 界面
-async function switchWebUI(target) {
-    try {
-        const response = await fetch('/api/system/web-ui/switch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target: target })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showSuccess(data.message);
-            // 延迟刷新状态
-            setTimeout(loadCurrentWebUI, 2000);
-        } else {
-            showError('切换失败：' + data.error);
-        }
-    } catch (error) {
-        showError('切换失败：' + error.message);
-    }
-}
 
 async function saveSettings() {
     const kp = document.getElementById('settingsKlipperPath');
@@ -569,72 +340,7 @@ async function saveSettings() {
     }
 }
 
-async function updateJsonRepo() {
-    const repoUrl = document.getElementById('jsonRepoUrl').value;
-    
-    if (!repoUrl) {
-        showError('请输入JSON仓库地址');
-        return;
-    }
-    
-    const statusDiv = document.getElementById('jsonUpdateStatus');
-    if (statusDiv) statusDiv.innerHTML = '<span class="status-info">正在保存并更新...</span>';
-    
-    try {
-        // 先保存仓库地址到配置
-        const saveResponse = await fetch('/api/settings/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ json_repo_url: repoUrl })
-        });
-        
-        const saveData = await saveResponse.json();
-        if (!saveData.success) {
-            statusDiv.innerHTML = `<span class="status-error">❌ 保存地址失败: ${saveData.error}</span>`;
-            return;
-        }
-        
-        // 然后更新JSON配置
-        const response = await fetch('/api/settings/update-json', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ json_repo_url: repoUrl })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusDiv.innerHTML = '<span class="status-success">✅ ' + data.message + '</span>';
-            document.getElementById('lastJsonUpdate').textContent = new Date().toLocaleString();
-        } else {
-            statusDiv.innerHTML = `<span class="status-error">❌ ${data.error}</span>`;
-        }
-    } catch (error) {
-        statusDiv.innerHTML = `<span class="status-error">❌ 错误: ${error.message}</span>`;
-    }
-}
 
-async function saveTimezone() {
-    const timezone = document.getElementById('timezoneSelect').value;
-    
-    try {
-        const response = await fetch('/api/settings/timezone', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timezone })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showSuccess('时区已保存');
-        } else {
-            showError('保存失败: ' + data.error);
-        }
-    } catch (error) {
-        showError('保存失败: ' + error.message);
-    }
-}
 
 async function manageService(service, action) {
     try {
@@ -680,167 +386,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // 加载初始页面
     switchPage('resources');
     
-    // 初始化 BL 厂家选择
-    initBLManufacturers();
 });
 
-// ==================== 配置管理功能 ====================
-
-// 导航到配置页面
-function navigateToConfigPage() {
-    switchPage('config');
-}
-
 // 加载配置列表
-async function loadConfigList() {
-    const manufacturer = document.getElementById('configManufacturer').value;
-    const configList = document.getElementById('configList');
-    
-    try {
-        configList.innerHTML = '<p class="empty">加载中...</p>';
-        
-        const response = await fetch(`/api/config/list/${manufacturer}`);
-        const data = await response.json();
-        
-        if (data.configs && data.configs.length > 0) {
-            let html = '';
-            data.configs.forEach(config => {
-                html += `
-                    <div class="config-item">
-                        <div class="config-item-info">
-                            <div class="config-item-name">${config.name || 'Unnamed'}</div>
-                            <div class="config-item-details">
-                                ${config.type || 'unknown'} | 
-                                ${config.mcu || 'unknown MCU'}
-                            </div>
-                        </div>
-                        <div class="config-item-actions">
-                            <button class="btn btn-secondary" onclick="editConfig('${config.id}')">✏️ Edit</button>
-                            <button class="btn btn-danger" onclick="deleteConfig('${config.id}')">🗑️ Delete</button>
-                        </div>
-                    </div>
-                `;
-            });
-            configList.innerHTML = html;
-        } else {
-            configList.innerHTML = '<p class="empty">No configs yet, please add new config or upload folder</p>';
-        }
-    } catch (error) {
-        configList.innerHTML = `<p class="empty" style="color: var(--danger-color);">加载失败：${error.message}</p>`;
-    }
-}
 
 // 创建新配置
-async function createNewConfig() {
-    const manufacturer = document.getElementById('configManufacturer').value;
-    const boardName = document.getElementById('boardName').value.trim();
-    const productType = document.getElementById('productType').value;
-    const mcuModel = document.getElementById('mcuModel').value.trim();
-    const crystalFreq = document.getElementById('crystalFreq').value.trim();
-    const blOffset = document.getElementById('blOffset').value.trim();
-    const bootPins = document.getElementById('bootPins').value.trim();
-    const defaultFlash = document.getElementById('defaultFlash').value;
-    
-    if (!boardName || !mcuModel) {
-        showError('请填写产品名称和处理器型号');
-        return;
-    }
-    
-    try {
-        const configData = {
-            'name': boardName,
-            'type': productType,
-            'mcu': mcuModel,
-            'crystal': crystalFreq,
-            'bl_offset': blOffset,
-            'boot_pins': bootPins,
-            'default_flash': defaultFlash,
-            'flash_modes': [defaultFlash],
-            'id': generateConfigId(boardName)
-        };
-        
-        const response = await fetch(`/api/config/create/${manufacturer}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(configData)
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            showSuccess('配置创建成功！');
-            // 清空表单
-            document.getElementById('boardName').value = '';
-            document.getElementById('mcuModel').value = '';
-            document.getElementById('crystalFreq').value = '';
-            document.getElementById('blOffset').value = '';
-            document.getElementById('bootPins').value = '';
-            // 刷新列表
-            loadConfigList();
-        } else {
-            showError('创建失败：' + result.error);
-        }
-    } catch (error) {
-        showError('创建失败：' + error.message);
-    }
-}
 
 // 编辑配置
-async function editConfig(configId) {
-    const manufacturer = document.getElementById('configManufacturer').value;
-    
-    try {
-        const response = await fetch(`/api/config/get/${manufacturer}/${configId}`);
-        const config = await response.json();
-        
-        if (config) {
-            // 填充表单
-            document.getElementById('boardName').value = config['名称'] || config['name'] || '';
-            document.getElementById('productType').value = config['产品类型'] || config['product_type'] || 'mainboard';
-            document.getElementById('mcuModel').value = config['处理器'] || config['mcu'] || '';
-            document.getElementById('crystalFreq').value = config['晶振'] || config['crystal'] || '';
-            document.getElementById('blOffset').value = config['BL 偏移'] || config['bl_offset'] || '';
-            document.getElementById('bootPins').value = config['启动引脚'] || config['boot_pins'] || '';
-            document.getElementById('defaultFlash').value = config['默认烧录'] || config['default_flash'] || 'UF2';
-            
-            showSuccess('配置已加载，修改后点击"创建配置"保存');
-        }
-    } catch (error) {
-        showError('加载配置失败：' + error.message);
-    }
-}
 
 // 删除配置
-async function deleteConfig(configId) {
-    if (!confirm('确定要删除这个配置吗？')) return;
-    
-    const manufacturer = document.getElementById('configManufacturer').value;
-    
-    try {
-        const response = await fetch(`/api/config/delete/${manufacturer}/${configId}`, {
-            method: 'DELETE'
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            showSuccess('配置已删除');
-            loadConfigList();
-        } else {
-            showError('删除失败：' + result.error);
-        }
-    } catch (error) {
-        showError('删除失败：' + error.message);
-    }
-}
 
 // 生成配置 ID
-function generateConfigId(name) {
-    return name.toLowerCase()
-        .replace(/[^a-z0-9]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
-}
 
 // 文件上传功能
 function initUploadArea() {
