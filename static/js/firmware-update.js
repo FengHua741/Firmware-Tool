@@ -313,6 +313,34 @@ function updateSelectedUpdateList() {
 }
 
 // 打开更新设置弹窗（用于新建配置）
+function inferUpdateMode(boardConfig) {
+    const fw = boardConfig.firmware_update || {};
+    const flashMode = fw.flash_mode || boardConfig.default_flash || 'DFU';
+    const conn = (boardConfig.default_connection || '').toUpperCase();
+    const isBridge = conn.includes('BRIDGE') || conn.includes('USB转CAN') || conn.includes('USBCANBUS');
+    const hasCan = conn.includes('CAN');
+    const hasUsb = conn.includes('USB') && !conn.includes('转');
+
+    if (flashMode === 'UF2') {
+        return 'TF';
+    }
+
+    if (isBridge) {
+        if (flashMode === 'DFU') return 'CAN_BRIDGE_DFU';
+        return 'CAN_BRIDGE_KATAPULT';
+    }
+
+    if (hasCan && !hasUsb) {
+        return 'CAN';
+    }
+
+    if (flashMode === 'DFU') return 'USB_DFU';
+    if (flashMode === 'KAT') return 'USB_KATAPULT';
+    if (flashMode === 'SERIAL') return 'USB_SERIAL';
+
+    return 'USB_DFU';
+}
+
 function openUpdateSettingsForNewConfig(boardConfig) {
     // 生成固件更新配置ID
     const updateConfigId = `update_${boardConfig.id}`;
@@ -321,7 +349,7 @@ function openUpdateSettingsForNewConfig(boardConfig) {
     document.getElementById('updateSettingBoardConfigId').value = boardConfig.id;
     document.getElementById('updateSettingManufacturer').value = boardConfig.manufacturer || 'FLY';
     document.getElementById('updateSettingEnabled').value = 'true';
-    document.getElementById('updateSettingMode').value = 'CAN';
+    document.getElementById('updateSettingMode').value = inferUpdateMode(boardConfig);
     document.getElementById('updateSettingDeviceId').value = '';
     document.getElementById('updateSettingKatapultSerial').value = '';
     

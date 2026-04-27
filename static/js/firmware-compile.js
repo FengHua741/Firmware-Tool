@@ -159,6 +159,27 @@ async function displayCompileMcuDetails(data) {
     // 连接方式 - 两级选择（从Kconfig动态获取）
     await loadCommunicationOptions(mcu);
     
+    // 根据 MCU 预设自动设置烧录模式（自定义模式）
+    const flashModeEl = document.getElementById('flashMode');
+    if (flashModeEl && typeof MCU_PRESETS !== 'undefined') {
+        let defaultFlash = null;
+        for (const platform in MCU_PRESETS) {
+            const found = MCU_PRESETS[platform].find(m => m.id === mcu.id);
+            if (found && found.default_flash) {
+                defaultFlash = found.default_flash;
+                break;
+            }
+        }
+        if (defaultFlash) {
+            // 恢复所有选项可见
+            Array.from(flashModeEl.options).forEach(opt => {
+                opt.style.display = '';
+            });
+            flashModeEl.value = defaultFlash;
+            onFlashModeChange();
+        }
+    }
+    
     document.getElementById('compileMcuDetails').style.display = 'block';
 }
 
@@ -422,13 +443,23 @@ async function onCompilePresetModelChange() {
     const config = JSON.parse(option.dataset.config);
     const presetName = config.name || option.textContent;
 
-    // 设置烧录模式
-    if (config.default_flash) {
-        const flashModeEl = document.getElementById('flashMode');
-        if (flashModeEl) {
+    // 设置烧录模式：根据 flash_modes 过滤选项并默认选中 default_flash
+    const flashModeEl = document.getElementById('flashMode');
+    if (flashModeEl && config.flash_modes && config.flash_modes.length > 0) {
+        // 保存当前值用于回退
+        const prevValue = flashModeEl.value;
+        // 过滤选项：只显示产品支持的烧录模式
+        const supportedModes = config.flash_modes;
+        Array.from(flashModeEl.options).forEach(opt => {
+            opt.style.display = supportedModes.includes(opt.value) ? '' : 'none';
+        });
+        // 设置默认值
+        if (config.default_flash && supportedModes.includes(config.default_flash)) {
             flashModeEl.value = config.default_flash;
-            onFlashModeChange();
+        } else {
+            flashModeEl.value = supportedModes[0];
         }
+        onFlashModeChange();
     }
 
     // 隐藏预设高级选项

@@ -11,7 +11,8 @@
   ],
   "default_connection": "CAN bus (on PB8/PB9)",
   "flash_modes": [
-    "DFU"
+    "DFU",
+    "KAT"
   ],
   "default_flash": "KAT",
   "boot_pins": "!PA15",

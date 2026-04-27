@@ -10,7 +10,8 @@
   ],
   "default_connection": "CAN bus",
   "flash_modes": [
-    "UF2"
+    "UF2",
+    "KAT"
   ],
   "default_flash": "KAT",
   "boot_pins": "!gpio5",

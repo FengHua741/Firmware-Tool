@@ -10,7 +10,8 @@
   ],
   "default_connection": "USB (on PA11/PA12)",
   "flash_modes": [
-    "DFU"
+    "DFU",
+    "KAT"
   ],
   "default_flash": "KAT",
   "boot_pins": null,
