@@ -206,6 +206,9 @@ class KlipperKconfigParser:
                 
                 # RP2040 特殊处理：0100 (256 bytes) 是 stage2，不是真正的 bootloader
                 if should_add:
+                    # 过滤掉异常的 131584 (0x20200, 128.5KiB)，这不是标准的 bootloader 偏移
+                    if bl['offset'] == '131584':
+                        continue
                     if mcu_id == 'rp2040' and bl['offset'] == '256':
                         # RP2040 的 256 bytes 是 stage2，标记为特殊的 "256"
                         mcu['bl_offsets'].append('256')

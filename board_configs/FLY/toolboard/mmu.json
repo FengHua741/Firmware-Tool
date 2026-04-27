@@ -3,7 +3,7 @@
   "name": "FLY-MMU",
   "platform": "STM32",
   "mcu": "stm32h723",
-  "bl_offset": "8192",
+  "bl_offset": "131072",
   "connections": [
     "CANBUS",
     "USB",

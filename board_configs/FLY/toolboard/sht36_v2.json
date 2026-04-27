@@ -3,7 +3,7 @@
   "name": "FLY-SHT36 V2",
   "platform": "STM32",
   "mcu": "stm32f103",
-  "bl_offset": "2048",
+  "bl_offset": "8192",
   "connections": [
     "CANBUS",
     "USB",

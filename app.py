@@ -682,7 +682,7 @@ def compile_firmware():
         # 转换 BL 偏移数值为文本格式
         bl_offset_map = {
             '0': 'No bootloader',
-            '256': '256',
+            '256': 'No bootloader',
             '2048': '2KiB bootloader',
             '4096': '4KiB bootloader',
             '8192': '8KiB bootloader',
@@ -690,7 +690,14 @@ def compile_firmware():
             '32768': '32KiB bootloader',
             '49152': '48KiB bootloader',
             '65536': '64KiB bootloader',
-            '131072': '128KiB bootloader'
+            '131072': '128KiB bootloader',
+            '20480': '20KiB bootloader',
+            '28672': '28KiB bootloader',
+            '34816': '34KiB bootloader',
+            '36864': '36KiB bootloader',
+            '0x8000': '32KiB bootloader',
+            '0xC000': '48KiB bootloader',
+            '0x10000': '64KiB bootloader'
         }
         if bootloader_offset in bl_offset_map:
             bootloader_offset = bl_offset_map[bootloader_offset]
@@ -1034,6 +1041,20 @@ def compile_firmware():
                 os.chmod(firmware_path, 0o666)
                 # 也修改 out 目录权限
                 os.chmod(out_dir, 0o755)
+                # 修改文件所有者为运行服务的实际用户（避免root编译后普通用户无权限）
+                import shutil
+                shutil.chown(firmware_path, user='fenghua', group='fenghua')
+                shutil.chown(out_dir, user='fenghua', group='fenghua')
+                # 递归修改 out 目录下所有文件/子目录的所有者
+                for root_dir, dirs, files in os.walk(out_dir):
+                    for d in dirs:
+                        shutil.chown(os.path.join(root_dir, d), user='fenghua', group='fenghua')
+                    for f in files:
+                        shutil.chown(os.path.join(root_dir, f), user='fenghua', group='fenghua')
+                # 同时修改 .config 文件所有者
+                config_file = os.path.join(klipper_path, '.config')
+                if os.path.exists(config_file):
+                    shutil.chown(config_file, user='fenghua', group='fenghua')
             except Exception as e:
                 logger.warning(f"修改文件权限失败: {e}")
             
@@ -1715,7 +1736,6 @@ Name=can*
 
 [CAN]
 BitRate={bitrate_str}
-RestartSec=100ms
 """
             subprocess.run(f'echo "{config_content}" | sudo tee {config_file} > /dev/null', 
                          shell=True, capture_output=True, check=True)
@@ -1891,7 +1911,6 @@ Name=can*
 
 [CAN]
 BitRate={bitrate_str}
-RestartSec=100ms
 """
             subprocess.run(
                 f'echo "{config_content}" | sudo tee {CAN_NETWORK_DIR}/99-can.network > /dev/null',

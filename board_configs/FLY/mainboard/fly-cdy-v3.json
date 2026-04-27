@@ -3,7 +3,7 @@
   "name": "FLY-CDY-V3",
   "platform": "STM32",
   "mcu": "stm32f407",
-  "bl_offset": "2048",
+  "bl_offset": "32768",
   "connections": [
     "USB",
     "USB转CAN"

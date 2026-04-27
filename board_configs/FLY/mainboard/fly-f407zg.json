@@ -3,7 +3,7 @@
   "name": "FLY-F407ZG",
   "platform": "STM32",
   "mcu": "stm32f407",
-  "bl_offset": "2048",
+  "bl_offset": "32768",
   "connections": [
     "USB",
     "USB转CAN"
