@@ -37,6 +37,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def get_klipper_owner(klipper_path=None):
+    """获取 Klipper 安装用户的用户名和家目录"""
+    import pwd
+    if not klipper_path:
+        klipper_path = config.get('klipper_path', '~/klipper')
+    # 处理 ~ 开头路径：先尝试查找 /home 下实际存在的 klipper 目录
+    if klipper_path.startswith('~'):
+        for user_dir in os.listdir('/home'):
+            candidate = os.path.join('/home', user_dir, 'klipper')
+            if os.path.exists(candidate):
+                klipper_path = candidate
+                break
+    if os.path.exists(klipper_path):
+        try:
+            stat_info = os.stat(klipper_path)
+            pw = pwd.getpwuid(stat_info.st_uid)
+            return pw.pw_name, pw.pw_dir
+        except (KeyError, OSError):
+            pass
+    # fallback：查找非 root 用户的 klipper 目录
+    for entry in pwd.getpwall():
+        if entry.pw_uid >= 1000 and entry.pw_name not in ('nobody', 'nogroup'):
+            candidate = os.path.join(entry.pw_dir, 'klipper')
+            if os.path.exists(candidate):
+                return entry.pw_name, entry.pw_dir
+    return 'fenghua', '/home/fenghua'
+
+
+def expand_klipper_path(path):
+    """展开 Klipper 路径，处理 systemd root 运行时 ~ 扩展问题"""
+    if not path.startswith('~'):
+        return os.path.expanduser(path)
+    _, home_dir = get_klipper_owner()
+    return home_dir + path[1:]
+
+
 app = Flask(__name__, static_folder='static')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 CORS(app)
@@ -328,11 +364,7 @@ def search_can_uuid():
     if not iface or not iface.startswith('can'):
         return jsonify({'uuids': [], 'error': '无效的CAN接口'})
     try:
-        import pwd
-        try:
-            home_dir = pwd.getpwnam('fenghua').pw_dir
-        except KeyError:
-            home_dir = os.path.expanduser('~')
+        klipper_owner, home_dir = get_klipper_owner()
         python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python')
         canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
         output = subprocess.run(
@@ -394,8 +426,7 @@ def get_video_devices():
 def get_communication_options():
     """获取 Kconfig 中的通信接口选项"""
     klipper_path = request.args.get('klipper_path', config.get('klipper_path', '~/klipper'))
-    if klipper_path.startswith('~'):
-        klipper_path = '/home/fenghua' + klipper_path[1:]
+    klipper_path = expand_klipper_path(klipper_path)
     try:
         data = parse_can_options(klipper_path)
         return jsonify(data)
@@ -408,11 +439,7 @@ def get_communication_options():
 def detect_can_for_flash():
     """为固件烧录搜索 CAN UUID 设备"""
     try:
-        import pwd
-        try:
-            home_dir = pwd.getpwnam('fenghua').pw_dir
-        except KeyError:
-            home_dir = os.path.expanduser('~')
+        klipper_owner, home_dir = get_klipper_owner()
         
         python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python')
         canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
@@ -487,11 +514,7 @@ def get_all_ids():
         
         # CAN设备 - 使用Klipper的 canbus_query.py
         try:
-            import pwd
-            try:
-                home_dir = pwd.getpwnam('fenghua').pw_dir
-            except KeyError:
-                home_dir = os.path.expanduser('~')
+            klipper_owner, home_dir = get_klipper_owner()
                     
             python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python')
             canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
@@ -646,10 +669,7 @@ def compile_firmware():
         # 获取 Klipper 路径，优先使用用户传入的，其次是配置的，最后是默认值
         # 修复 systemd root 运行时 ~ 被扩展为 /root 的问题
         klipper_path = data.get('klipper_path', config.get('klipper_path', '~/klipper'))
-        # 手动替换 ~ 为 /home/fenghua（因为服务以 root 运行但 klipper 在用户目录）
-        if klipper_path.startswith('~'):
-            klipper_path = '/home/fenghua' + klipper_path[1:]
-        klipper_path = os.path.expanduser(klipper_path)
+        klipper_path = expand_klipper_path(klipper_path)
         
         # 检查是否是预设配置模式
         config_data = data.get('config')
@@ -1041,20 +1061,30 @@ def compile_firmware():
                 os.chmod(firmware_path, 0o666)
                 # 也修改 out 目录权限
                 os.chmod(out_dir, 0o755)
-                # 修改文件所有者为运行服务的实际用户（避免root编译后普通用户无权限）
+                # 修改文件所有者为 Klipper 目录所有者（避免root编译后普通用户无权限）
                 import shutil
-                shutil.chown(firmware_path, user='fenghua', group='fenghua')
-                shutil.chown(out_dir, user='fenghua', group='fenghua')
-                # 递归修改 out 目录下所有文件/子目录的所有者
-                for root_dir, dirs, files in os.walk(out_dir):
-                    for d in dirs:
-                        shutil.chown(os.path.join(root_dir, d), user='fenghua', group='fenghua')
-                    for f in files:
-                        shutil.chown(os.path.join(root_dir, f), user='fenghua', group='fenghua')
-                # 同时修改 .config 文件所有者
-                config_file = os.path.join(klipper_path, '.config')
-                if os.path.exists(config_file):
-                    shutil.chown(config_file, user='fenghua', group='fenghua')
+                import pwd
+                import grp
+                try:
+                    klipper_stat = os.stat(klipper_path)
+                    owner_name = pwd.getpwuid(klipper_stat.st_uid).pw_name
+                    group_name = grp.getgrgid(klipper_stat.st_gid).gr_name
+                except (KeyError, OSError):
+                    owner_name = None
+                    group_name = None
+                if owner_name and group_name:
+                    shutil.chown(firmware_path, user=owner_name, group=group_name)
+                    shutil.chown(out_dir, user=owner_name, group=group_name)
+                    # 递归修改 out 目录下所有文件/子目录的所有者
+                    for root_dir, dirs, files in os.walk(out_dir):
+                        for d in dirs:
+                            shutil.chown(os.path.join(root_dir, d), user=owner_name, group=group_name)
+                        for f in files:
+                            shutil.chown(os.path.join(root_dir, f), user=owner_name, group=group_name)
+                    # 同时修改 .config 文件所有者
+                    config_file = os.path.join(klipper_path, '.config')
+                    if os.path.exists(config_file):
+                        shutil.chown(config_file, user=owner_name, group=group_name)
             except Exception as e:
                 logger.warning(f"修改文件权限失败: {e}")
             
@@ -1232,11 +1262,7 @@ def flash_firmware():
             
         elif flash_mode == 'KAT':
             # Katapult 烧录 - 自动判断 USB 或 CAN 方式
-            import pwd
-            try:
-                home_dir = pwd.getpwnam('fenghua').pw_dir
-            except KeyError:
-                home_dir = os.path.expanduser('~')
+            klipper_owner, home_dir = get_klipper_owner()
                     
             python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
@@ -2819,7 +2845,7 @@ def get_versions():
     
     # 获取 Klipper 版本 - 使用绝对路径避免systemd的~扩展问题
     try:
-        klipper_path = '/home/fenghua/klipper'
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         if os.path.exists(os.path.join(klipper_path, '.git')):
             output = subprocess.run(
                 ['git', '-C', klipper_path, 'describe', '--tags', '--always'],
