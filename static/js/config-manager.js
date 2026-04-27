@@ -476,8 +476,8 @@ async function saveConfig() {
         
         if (isUserConfig) {
             // 更新现有用户配置
-            url = `/api/config/update/${manufacturer}/${currentConfig.id}`;
-            method = 'PUT';
+            url = '/api/config/save';
+            method = 'POST';
             successMsg = '配置更新成功！';
         } else {
             // 创建新配置（新配置或基于预设创建）
