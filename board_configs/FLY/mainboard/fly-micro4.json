@@ -10,9 +10,10 @@
   ],
   "default_connection": "USB",
   "flash_modes": [
-    "UF2"
+    "UF2",
+    "KAT"
   ],
-  "default_flash": "UF2",
+  "default_flash": "KAT",
   "boot_pins": "gpio5",
   "bl_flash_support": "支持",
   "bl_default_flash": "UF2",
@@ -21,7 +22,7 @@
     "enabled": false,
     "katapult_mode": "USB",
     "device_id": "",
-    "flash_mode": "UF2",
+    "flash_mode": "KAT",
     "custom_config": ""
   },
   "manufacturer": "FLY"

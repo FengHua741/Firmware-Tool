@@ -493,11 +493,10 @@ def get_all_ids():
                         # 格式化为 serial: <id>
                         formatted = f"serial: {device_id}"
                         result['usb'].append({'raw': device_id, 'formatted': formatted})
-                        # 如果是 Katapult 设备，同时添加到 kat_usb 列表
-                        if 'katapult' in device_id.lower():
-                            if 'kat_usb' not in result:
-                                result['kat_usb'] = []
-                            result['kat_usb'].append({'raw': device_id, 'formatted': f'Katapult (USB): {device_id}'})
+                        # 所有USB串口设备同时添加到 kat_usb 列表（供Katapult烧录使用）
+                        if 'kat_usb' not in result:
+                            result['kat_usb'] = []
+                        result['kat_usb'].append({'raw': device_id, 'formatted': f'USB: {device_id}'})
         except:
             pass
         
@@ -704,6 +703,10 @@ def compile_firmware():
             crystal = config_data.get('crystal', config_data.get('晶振', '8000000'))
             rp2040_can_rx_gpio = str(config_data.get('can_gpio', {}).get('rx', '4'))
             rp2040_can_tx_gpio = str(config_data.get('can_gpio', {}).get('tx', '5'))
+            # 预设模式下也初始化这些变量，避免后续引用报错
+            comm_type = ''
+            comm_config_symbol = ''
+            bridge_can_config = ''
         else:
             # 自定义MCU模式
             mcu_arch = data.get('platform', 'STM32')
@@ -872,25 +875,51 @@ def compile_firmware():
         else:
             config_lines.append('CONFIG_MACH_STM32F072=y')
         
-        # 晶振配置
-        crystal_map = {
-            '8000000': 'CONFIG_CLOCK_REF_8=y',
-            '12000000': 'CONFIG_CLOCK_REF_12=y',
-            '16000000': 'CONFIG_CLOCK_REF_16=y',
-            '20000000': 'CONFIG_CLOCK_REF_20=y',
-            '24000000': 'CONFIG_CLOCK_REF_24=y',
-            '25000000': 'CONFIG_CLOCK_REF_25=y',
-            '8000000': 'CONFIG_CLOCK_REF_8=y',
-            '12000000': 'CONFIG_CLOCK_REF_12=y',
-            '16000000': 'CONFIG_CLOCK_REF_16=y',
-            '20000000': 'CONFIG_CLOCK_REF_20=y',
-            '24000000': 'CONFIG_CLOCK_REF_24=y',
-            '25000000': 'CONFIG_CLOCK_REF_25=y'
-        }
-        if crystal in crystal_map:
-            config_lines.append(crystal_map[crystal])
-        elif str(crystal) in crystal_map:
-            config_lines.append(crystal_map[str(crystal)])
+        # 晶振配置 - 根据平台使用正确的 Klipper Kconfig 配置项名称
+        crystal_str = str(crystal) if crystal else ''
+        if 'STM32' in mcu_arch_upper:
+            crystal_map = {
+                '8000000': 'CONFIG_STM32_CLOCK_REF_8M=y',
+                '12000000': 'CONFIG_STM32_CLOCK_REF_12M=y',
+                '16000000': 'CONFIG_STM32_CLOCK_REF_16M=y',
+                '20000000': 'CONFIG_STM32_CLOCK_REF_20M=y',
+                '24000000': 'CONFIG_STM32_CLOCK_REF_24M=y',
+                '25000000': 'CONFIG_STM32_CLOCK_REF_25M=y',
+            }
+            if crystal_str in crystal_map:
+                config_lines.append(crystal_map[crystal_str])
+        elif 'ATSAMD' in mcu_arch_upper:
+            crystal_map = {
+                '32768': 'CONFIG_CLOCK_REF_X32K=y',
+                '12000000': 'CONFIG_CLOCK_REF_X12M=y',
+                '25000000': 'CONFIG_CLOCK_REF_X25M=y',
+            }
+            if crystal_str in crystal_map:
+                config_lines.append(crystal_map[crystal_str])
+        elif 'ATSAM' in mcu_arch_upper:
+            # ATSAM (SAM3X/SAM4E/SAME70) 使用与 STM32 类似的 CLOCK_REF_8M/12M/16M/20M/24M/25M
+            crystal_map = {
+                '8000000': 'CONFIG_CLOCK_REF_8M=y',
+                '12000000': 'CONFIG_CLOCK_REF_12M=y',
+                '16000000': 'CONFIG_CLOCK_REF_16M=y',
+                '20000000': 'CONFIG_CLOCK_REF_20M=y',
+                '24000000': 'CONFIG_CLOCK_REF_24M=y',
+                '25000000': 'CONFIG_CLOCK_REF_25M=y',
+            }
+            if crystal_str in crystal_map:
+                config_lines.append(crystal_map[crystal_str])
+        else:
+            # 其他平台（LPC176x/HC32F460/AVR）默认映射
+            crystal_map = {
+                '8000000': 'CONFIG_CLOCK_REF_8M=y',
+                '12000000': 'CONFIG_CLOCK_REF_12M=y',
+                '16000000': 'CONFIG_CLOCK_REF_16M=y',
+                '20000000': 'CONFIG_CLOCK_REF_20M=y',
+                '24000000': 'CONFIG_CLOCK_REF_24M=y',
+                '25000000': 'CONFIG_CLOCK_REF_25M=y',
+            }
+            if crystal_str in crystal_map:
+                config_lines.append(crystal_map[crystal_str])
         
         # Bootloader偏移 (区分STM32和RP2040/RP2350)
         if 'RP2040' in processor:
@@ -1152,9 +1181,10 @@ def download_firmware():
         
         firmware_path = os.path.expanduser(firmware_path)
         
-        # 安全检查
+        # 安全检查：使用配置中的 klipper_path 而不是依赖运行时用户的 home 目录
+        klipper_out = os.path.join(os.path.expanduser(config.get('klipper_path', '~/klipper')), 'out')
         allowed_paths = [
-            os.path.expanduser('~/klipper/out'),
+            klipper_out,
             '/data/klipper/out',
             os.path.join(BASE_DIR, 'board_configs'),
             os.path.join(BASE_DIR, 'out')  # 编译输出目录
@@ -1187,7 +1217,8 @@ def detect_devices():
             if result.stdout:
                 for line in result.stdout.strip().split('\n'):
                     if '/dev/serial/by-id/' in line:
-                        devices.append(line.strip())
+                        device_id = line.strip()
+                        devices.append({'id': device_id, 'name': 'USB Serial'})
         except:
             pass
         
@@ -1198,7 +1229,7 @@ def detect_devices():
                 shell=True, capture_output=True, text=True
             )
             if result.stdout and '0483:df11' in result.stdout:
-                devices.append('DFU Device (0483:df11)')
+                devices.append({'id': 'dfu', 'name': 'DFU Device (0483:df11)'})
         except:
             pass
         
@@ -1239,7 +1270,7 @@ def flash_firmware():
     try:
         data = request.json
         klipper_path = os.path.expanduser(config.get('klipper_path', '~/klipper'))
-        device = data.get('device', '')
+        device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
         dfu_address = data.get('dfu_address', '0x08000000')
         firmware_path = data.get('firmware_path', '')
@@ -1305,7 +1336,7 @@ def flash_firmware():
                 time.sleep(3)
                 
                 # 第三步：查找新的 USB 串口设备
-                find_device_cmd = "ls /dev/serial/by-id/*katapult* 2>/dev/null | head -1"
+                find_device_cmd = "ls /dev/serial/by-id/* 2>/dev/null | head -1"
                 device_result = subprocess.run(find_device_cmd, shell=True, capture_output=True, text=True, timeout=10)
                 
                 if device_result.stdout.strip():
@@ -1350,6 +1381,11 @@ def flash_firmware():
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
             output = result.stdout + result.stderr
             returncode = result.returncode
+            
+            # 修复：rp2040_flash 在找不到设备时返回 0（rc 未设置为 1），需要检查输出
+            if returncode == 0 and 'No rp2040 in BOOTSEL mode was found' in output:
+                returncode = 1
+                output = '【错误】未找到处于 BOOTSEL 模式的 RP2040 设备\n' + output
         else:
             return jsonify({'error': f'不支持的烧录方式: {flash_mode}'}), 400
         
@@ -1409,7 +1445,7 @@ def flash_bl_firmware():
     try:
         data = request.json
         bl_firmware_path = data.get('bl_firmware_path', '')
-        device = data.get('device', '')
+        device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
         
         if not bl_firmware_path or not os.path.exists(bl_firmware_path):
@@ -2225,6 +2261,7 @@ def list_configs(manufacturer):
     """获取指定厂家的所有配置"""
     try:
         configs = []
+        board_types = []
         
         # 从 BOARD_CONFIGS_DIR 读取配置
         mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
@@ -2232,6 +2269,7 @@ def list_configs(manufacturer):
             for board_type in os.listdir(mfr_dir):
                 type_dir = os.path.join(mfr_dir, board_type)
                 if os.path.isdir(type_dir) and not board_type.startswith('.'):
+                    board_types.append(board_type)
                     for filename in os.listdir(type_dir):
                         if filename.endswith('.json') and not filename.endswith('.bak'):
                             filepath = os.path.join(type_dir, filename)
@@ -2248,7 +2286,7 @@ def list_configs(manufacturer):
         # 按名称排序
         configs.sort(key=lambda x: x.get('name', ''))
         
-        return jsonify({'configs': configs})
+        return jsonify({'configs': configs, 'board_types': board_types})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2486,6 +2524,41 @@ def get_preset_manufacturers():
             'manufacturers': PRESET_MANUFACTURERS
         })
 
+
+
+@app.route('/api/config/create-manufacturer', methods=['POST'])
+def create_manufacturer():
+    """创建新厂家目录（自动创建主板和工具板子目录）"""
+    try:
+        data = request.get_json()
+        manufacturer = data.get('name', '').strip()
+
+        if not manufacturer:
+            return jsonify({'success': False, 'error': '厂家名称不能为空'}), 400
+
+        # 验证名称合法性
+        if not manufacturer.replace('-', '').replace('_', '').isalnum():
+            return jsonify({'success': False, 'error': '厂家名称只能包含字母、数字、连字符和下划线'}), 400
+
+        mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+
+        if os.path.exists(mfr_dir):
+            return jsonify({'success': False, 'error': '厂家已存在'}), 400
+
+        # 创建厂家目录及子目录
+        os.makedirs(os.path.join(mfr_dir, 'mainboard'), exist_ok=True)
+        os.makedirs(os.path.join(mfr_dir, 'toolboard'), exist_ok=True)
+
+        logger.info(f"创建新厂家目录：{manufacturer}")
+
+        return jsonify({
+            'success': True,
+            'message': f'厂家 {manufacturer} 创建成功',
+            'manufacturer': manufacturer
+        })
+    except Exception as e:
+        logger.error(f"创建厂家失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 @app.route('/api/config/mcu-info/<mcu_id>', methods=['GET'])
 def get_mcu_info(mcu_id):
     """获取特定 MCU 的详细信息"""
