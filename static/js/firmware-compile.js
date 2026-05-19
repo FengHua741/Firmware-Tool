@@ -778,6 +778,7 @@ async function compileFirmware() {
 // 刷新设备 ID 列表（含CAN检测）
 async function refreshDeviceIds() {
     const select = document.getElementById('flashDeviceId');
+    const previousValue = select.value;
     select.innerHTML = '<option value="">-- 正在扫描 --</option>';
     
     try {
@@ -815,6 +816,16 @@ async function refreshDeviceIds() {
         
         if (select.options.length === 1) {
             select.innerHTML += '<option value="" disabled>未找到设备</option>';
+        }
+        
+        // 恢复之前的选择（如果仍然有效）
+        if (previousValue) {
+            for (let i = 0; i < select.options.length; i++) {
+                if (select.options[i].value === previousValue) {
+                    select.selectedIndex = i;
+                    break;
+                }
+            }
         }
     } catch (error) {
         console.error('扫描设备失败:', error);

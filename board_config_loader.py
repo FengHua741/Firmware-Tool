@@ -47,12 +47,10 @@ def normalize_config(config):
         '默认通讯': 'default_comm',
         '烧录方法': 'flash_methods',
         '默认烧录': 'default_flash',
-        '启动引脚': 'startup_pin',
-        'can_gpio': 'can_gpio',
+        '启动引脚': 'boot_pins',       # 统一映射到 boot_pins
         'BL烧录': 'bl_flash_support',
         'BL默认方式': 'bl_default_method',
         'id': 'id',
-        '启动引脚': 'boot_pins',
         'MCU型号': 'mcu',
         'can_gpio_rx': 'can_gpio_rx',
         'can_gpio_tx': 'can_gpio_tx',

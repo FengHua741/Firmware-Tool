@@ -492,8 +492,10 @@ async function scanDeviceIdForUpdate() {
             const response = await fetch('/api/firmware/detect');
             const data = await response.json();
             if (data.devices && data.devices.length > 0) {
-                // 查找匹配的USB设备（devices是对象数组，含id/name/path字段）
-                const usbDevice = data.devices.find(d => (d.id || '').includes('by-id') || (d.name || '').includes('by-id'));
+                // 优先匹配 USB 串口设备（type === 'usb_serial'），其次匹配含 by-id 的 id
+                const usbDevice = data.devices.find(d => d.type === 'usb_serial')
+                    || data.devices.find(d => (d.id || '').includes('by-id'))
+                    || data.devices[0];
                 if (usbDevice) {
                     deviceIdInput.value = usbDevice.id || usbDevice.path || usbDevice.name || '';
                     showSuccess('找到USB设备');

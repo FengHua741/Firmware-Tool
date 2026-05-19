@@ -727,7 +727,7 @@ def detect_can_for_flash():
 def get_all_ids():
     """获取所有ID信息"""
     try:
-        result = {'usb': [], 'can': [], 'camera': []}
+        result = {'usb': [], 'can': [], 'camera': [], 'kat_usb': [], 'rp_boot': []}
         
         # USB 设备 - 格式：serial: <id>
         try:
@@ -743,8 +743,6 @@ def get_all_ids():
                         formatted = f"serial: {device_id}"
                         result['usb'].append({'raw': device_id, 'formatted': formatted})
                         # 所有USB串口设备同时添加到 kat_usb 列表（供Katapult烧录使用）
-                        if 'kat_usb' not in result:
-                            result['kat_usb'] = []
                         result['kat_usb'].append({'raw': device_id, 'formatted': f'USB: {device_id}'})
         except:
             pass
@@ -811,7 +809,6 @@ def get_all_ids():
             pass
         
         # RP2040 BOOT设备检测
-        result['rp_boot'] = []
         try:
             # 方法1: 通过lsblk检测RP2040 BOOT块设备
             lsblk_output = subprocess.run(
@@ -1467,7 +1464,9 @@ def detect_devices():
                 for line in result.stdout.strip().split('\n'):
                     if '/dev/serial/by-id/' in line:
                         device_id = line.strip()
-                        devices.append({'id': device_id, 'name': 'USB Serial'})
+                        # 提取设备名（最后一段路径）
+                        short_name = os.path.basename(device_id)
+                        devices.append({'id': device_id, 'name': short_name, 'type': 'usb_serial'})
         except:
             pass
         
@@ -1484,7 +1483,7 @@ def detect_devices():
                     vid_pid_match = re.search(r'([0-9a-f]{4}:[0-9a-f]{4})', line, re.IGNORECASE)
                     if vid_pid_match:
                         vid_pid = vid_pid_match.group(1).lower()
-                        devices.append({'id': f'dfu:{vid_pid}', 'name': f'DFU Device ({vid_pid})'})
+                        devices.append({'id': f'dfu:{vid_pid}', 'name': f'DFU Device ({vid_pid})', 'type': 'dfu'})
                         found_dfu = True
             # 兜底：检测常见DFU设备（0483:df11）
             if not found_dfu:
@@ -1493,7 +1492,7 @@ def detect_devices():
                     shell=True, capture_output=True, text=True
                 )
                 if lsusb_result.stdout and '0483:df11' in lsusb_result.stdout:
-                    devices.append({'id': 'dfu', 'name': 'DFU Device (0483:df11)'})
+                    devices.append({'id': 'dfu', 'name': 'DFU Device (0483:df11)', 'type': 'dfu'})
         except:
             pass
         
@@ -1565,6 +1564,7 @@ def flash_firmware():
         flash_mode = data.get('flash_mode', 'DFU')
         dfu_address = data.get('dfu_address', '0x08000000')
         firmware_path = data.get('firmware_path', '')
+        katapult_serial = data.get('katapult_serial', '')
         
         # 确定固件路径（根据烧录模式选择合适的文件）
         if not firmware_path:
@@ -1592,26 +1592,29 @@ def flash_firmware():
             })
         
         if flash_mode == 'DFU':
-            # DFU烧录：先擦除再烧录
-            # 如果用户选择了设备ID，尝试使用它；否则使用默认0483:df11
-            # 支持格式: 'dfu' (自动), 'dfu:0483:df11' (指定VID:PID), 'rp2040_boot' (自动)
-            if device and device not in ('dfu', 'rp2040_boot'):
-                dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
-                safe_device = shlex.quote(dfu_vid_pid)
-                device_filter = f'-d {safe_device}'
+            # rp2040_boot 是 RP2040/RP2350 的 BOOTSEL 模式，应走 UF2 路径而非 STM32 DFU
+            if device == 'rp2040_boot':
+                flash_mode = 'UF2'
             else:
-                device_filter = '-d 0483:df11'
-            safe_address = shlex.quote(dfu_address)
-            erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
-            flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -D {shlex.quote(firmware_path)}'
+                # DFU烧录：先擦除再烧录
+                # 支持格式: 'dfu' (自动), 'dfu:0483:df11' (指定VID:PID)
+                if device and device != 'dfu':
+                    dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
+                    safe_device = shlex.quote(dfu_vid_pid)
+                    device_filter = f'-d {safe_device}'
+                else:
+                    device_filter = '-d 0483:df11'
+                safe_address = shlex.quote(dfu_address)
+                erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
+                flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -D {shlex.quote(firmware_path)}'
+                
+                erase_result = subprocess.run(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                flash_result = subprocess.run(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                
+                output = f"擦除: {erase_result.stdout + erase_result.stderr}\n烧录: {flash_result.stdout + flash_result.stderr}"
+                returncode = flash_result.returncode
             
-            erase_result = subprocess.run(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
-            flash_result = subprocess.run(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
-            
-            output = f"擦除: {erase_result.stdout + erase_result.stderr}\n烧录: {flash_result.stdout + flash_result.stderr}"
-            returncode = flash_result.returncode
-            
-        elif flash_mode in ('KAT', 'CAN'):
+        if flash_mode in ('KAT', 'CAN'):
             # Katapult 烧录（或 CAN Bus 烧录）- 自动判断 USB 或 CAN 方式
             klipper_owner, home_dir = get_klipper_owner()
                     
@@ -1619,6 +1622,7 @@ def flash_firmware():
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
                     
             import logging
+            import time
                     
             # 判断设备类型：CAN UUID（8-32位十六进制）或 USB 串口路径
             _is_can_uuid = bool(re.match(r'^[a-fA-F0-9]{8,32}$', device.replace('can0:', '')))
@@ -1629,35 +1633,58 @@ def flash_firmware():
                 # 第一步：发送重置命令，让设备进入 Katapult USB 模式
                 reset_cmd = f'{python_bin} {flashtool_script} -i can0 -r -u {shlex.quote(can_uuid)}'
                 logging.info(f'CAN 重置命令：{reset_cmd}')
-                reset_result = subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
                 
-                # 第二步：等待设备重新枚举
-                import time
+                # 第二步：轮询等待设备重新枚举（最多10秒），优先匹配 Katapult/Klipper 设备
                 logging.info('等待设备重新枚举...')
-                time.sleep(3)
+                new_device = None
+                katapult_device = None
+                for _ in range(20):  # 20 * 0.5s = 10s max
+                    time.sleep(0.5)
+                    find_result = subprocess.run(
+                        "ls /dev/serial/by-id/* 2>/dev/null",
+                        shell=True, capture_output=True, text=True, timeout=5
+                    )
+                    if find_result.stdout.strip():
+                        lines = [l.strip() for l in find_result.stdout.strip().split('\n') if l.strip()]
+                        # 优先选择 Katapult/Klipper 品牌的设备
+                        for line in lines:
+                            if re.search(r'(Klipper|Katapult|STM32)', line, re.IGNORECASE):
+                                katapult_device = line
+                                break
+                        # 退而求其次选任意设备
+                        if not katapult_device and lines:
+                            katapult_device = lines[0]
+                        if katapult_device:
+                            break
+                    logging.info(f'轮询中... ({_+1}/20)')
                 
-                # 第三步：查找新的 USB 串口设备
-                find_device_cmd = "ls /dev/serial/by-id/* 2>/dev/null | head -1"
-                device_result = subprocess.run(find_device_cmd, shell=True, capture_output=True, text=True, timeout=10)
-                
-                if device_result.stdout.strip():
+                if katapult_device:
                     # 成功进入 USB 模式，使用 USB 方式烧录
-                    new_device = device_result.stdout.strip()
+                    new_device = katapult_device
                     logging.info(f'找到设备：{new_device}')
                     cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(new_device)} -f {shlex.quote(firmware_path)}'
                     logging.info(f'USB 烧录命令：{cmd}')
                     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
                 else:
-                    # 降级方案：设备可能已经在 Katapult CAN 模式，直接 CAN 烧录
+                    # 降级方案：检查 flash_can.py 是否存在，存在则直接 CAN 烧录
                     logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
                     flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
-                    cmd = f'{python_bin} {flash_can_script} -i can0 -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
-                    logging.info(f'CAN 烧录命令：{cmd}')
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                    if os.path.exists(flash_can_script):
+                        cmd = f'{python_bin} {flash_can_script} -i can0 -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                        logging.info(f'CAN 烧录命令：{cmd}')
+                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                    else:
+                        # flash_can.py 不存在，回退到 flashtool.py CAN 模式
+                        logging.warning(f'flash_can.py 不存在: {flash_can_script}，回退到 flashtool.py CAN 模式')
+                        cmd = f'{python_bin} {flashtool_script} -i can0 -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                        logging.info(f'flashtool CAN 烧录命令：{cmd}')
+                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
             else:
-                # USB 方式：直接烧录
-                logging.info(f'USB 烧录命令：device={device}')
-                cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(device)} -f {shlex.quote(firmware_path)}'
+                # USB 方式：直接烧录，优先使用 katapult_serial 指定的串口路径
+                usb_device = katapult_serial if katapult_serial else device
+                logging.info(f'USB 烧录命令：device={usb_device}')
+                cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(usb_device)} -f {shlex.quote(firmware_path)}'
                 logging.info(f'USB 烧录命令：{cmd}')
                 result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
                     
@@ -1771,6 +1798,7 @@ def flash_bl_firmware():
         device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
         dfu_address = data.get('dfu_address', '0x08000000')
+        katapult_serial = data.get('katapult_serial', '')
         
         if not bl_firmware_path or not os.path.exists(bl_firmware_path):
             return jsonify({'error': f'BL固件文件不存在: {bl_firmware_path}'}), 400
@@ -1809,7 +1837,9 @@ def flash_bl_firmware():
             klipper_owner, home_dir = get_klipper_owner()
             python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
-            cmd = f'{python_bin} {flashtool_script} -d {device} -f {bl_firmware_path}' if device else f'{python_bin} {flashtool_script} -f {bl_firmware_path}'
+            # 优先使用 katapult_serial 指定的串口路径，其次使用 device
+            usb_device = katapult_serial if katapult_serial else device
+            cmd = f'{python_bin} {flashtool_script} -d {usb_device} -f {bl_firmware_path}' if usb_device else f'{python_bin} {flashtool_script} -f {bl_firmware_path}'
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
             
         elif flash_mode == 'st-flash':
@@ -1861,141 +1891,6 @@ def handle_config():
         else:
             return jsonify({'error': '保存配置失败'}), 500
 
-# ==================== Web 界面切换 API ====================
-@app.route('/api/system/web-ui', methods=['GET'])
-def get_web_ui_status():
-    """获取当前 Web界面状态"""
-    try:
-        # 检测哪个端口有服务在运行
-        fluidd_active = False
-        mainsail_active = False
-        
-        try:
-            # 检查端口 80（Fluidd）
-            result = subprocess.run(
-                'sudo ss -tlnp 2>/dev/null | grep ":80 " || sudo netstat -tlnp 2>/dev/null | grep ":80 "',
-                shell=True, capture_output=True, text=True
-            )
-            fluidd_active = ':80' in result.stdout and 'LISTEN' in result.stdout
-        except:
-            pass
-        
-        try:
-            # 检查端口 81（Mainsail）
-            result = subprocess.run(
-                'sudo ss -tlnp 2>/dev/null | grep ":81 " || sudo netstat -tlnp 2>/dev/null | grep ":81 "',
-                shell=True, capture_output=True, text=True
-            )
-            mainsail_active = ':81' in result.stdout and 'LISTEN' in result.stdout
-        except:
-            pass
-        
-        if fluidd_active:
-            return jsonify({'current_ui': 'fluidd', 'port': 80})
-        elif mainsail_active:
-            return jsonify({'current_ui': 'mainsail', 'port': 81})
-        else:
-            return jsonify({'current_ui': 'unknown', 'port': None})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/system/web-ui/switch', methods=['POST'])
-def switch_web_ui():
-    """切换 Web界面（Fluidd ↔ Mainsail）- 80 端口固定显示激活的界面"""
-    try:
-        data = request.get_json()
-        target = data.get('target', '')
-        
-        if not target or target not in ['fluidd', 'mainsail']:
-            return jsonify({'error': '无效的目标界面'}), 400
-        
-        # 目标端口（始终使用 80）
-        target_port = 80
-        other_port = 81
-        
-        messages = []
-        
-        # 1. 读取并修改 nginx 配置
-        nginx_configs = [
-            '/etc/nginx/sites-enabled/fluidd',
-            '/etc/nginx/sites-enabled/mainsail'
-        ]
-        
-        for config_file in nginx_configs:
-            if os.path.exists(config_file):
-                try:
-                    with open(config_file, 'r') as f:
-                        content = f.read()
-                    
-                    # 逐行处理 nginx 配置
-                    lines = content.split('\n')
-                    new_lines = []
-                    has_active_listen_80 = False
-                    has_active_listen_81 = False
-                    
-                    for line in lines:
-                        stripped = line.strip()
-                        
-                        # 检查是否是 listen 80 或 listen 81 的行（包括已注释的）
-                        if re.match(r'^#?\s*listen\s+80\s*;$', stripped):
-                            # 只有未注释的才算数
-                            if not stripped.startswith('#'):
-                                has_active_listen_80 = True
-                            
-                            if target in config_file:
-                                # 目标服务：应该在 80 运行
-                                new_lines.append('    listen 80;')
-                            else:
-                                # 非目标服务：禁用 80
-                                new_lines.append('    # listen 80;')
-                        elif re.match(r'^#?\s*listen\s+81\s*;$', stripped):
-                            # 只有未注释的才算数
-                            if not stripped.startswith('#'):
-                                has_active_listen_81 = True
-                            
-                            if target in config_file:
-                                # 目标服务：禁用 81
-                                new_lines.append('    # listen 81;')
-                            else:
-                                # 非目标服务：应该在 81 运行
-                                new_lines.append('    listen 81;')
-                        else:
-                            # 其他行保持不变
-                            new_lines.append(line)
-                    
-                    content = '\n'.join(new_lines)
-                    
-                    # 添加成功消息
-                    if target in config_file:
-                        messages.append(f'已启用 {target.capitalize()} (端口 80)')
-                    else:
-                        other_name = 'Mainsail' if target == 'fluidd' else 'Fluidd'
-                        messages.append(f'已配置 {other_name} (端口 81)')
-                    
-                    # 写回文件
-                    with open(config_file, 'w') as f:
-                        f.write(content)
-                except Exception as e:
-                    messages.append(f'配置文件处理失败：{str(e)}')
-        
-        # 2. 重新加载 nginx 配置
-        try:
-            result = subprocess.run('sudo nginx -t && sudo systemctl reload nginx', 
-                                  shell=True, capture_output=True, text=True)
-            if result.returncode == 0:
-                messages.append(f'Nginx 配置已重载，{target.capitalize()} 已在端口 80 就绪')
-            else:
-                messages.append(f'Nginx 重载失败：{result.stderr}')
-        except Exception as e:
-            messages.append(f'Nginx 重载失败：{str(e)}')
-        
-        return jsonify({
-            'success': True,
-            'message': f'已切换到 {target.capitalize()}（端口 80）',
-            'messages': messages
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 CAN_NETWORK_DIR = '/etc/systemd/network'
 CAN_INTERFACES_DIR = '/etc/network/interfaces.d'
 CAN_BITRATES = {
@@ -2556,87 +2451,6 @@ TxQueueLength={txqueuelen}
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ==================== JSON仓库更新 API ====================
-@app.route('/api/settings/update-json', methods=['POST'])
-def update_json_repo():
-    """从远程仓库更新JSON配置"""
-    try:
-        data = request.get_json() or {}
-        repo_url = data.get('json_repo_url', '') or config.get('json_repo_url', '')
-        if not repo_url:
-            return jsonify({'error': '未配置JSON仓库地址'}), 400
-        
-        # 使用git克隆或拉取
-        temp_dir = os.path.join(BASE_DIR, 'temp_bl_repo')
-        
-        # 清理临时目录
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-        
-        # 克隆仓库
-        result = subprocess.run(
-            f'git clone --depth 1 {repo_url} {temp_dir}',
-            shell=True, capture_output=True, text=True, timeout=60
-        )
-        
-        if result.returncode != 0:
-            return jsonify({'error': f'克隆仓库失败: {result.stderr}'}), 500
-        
-        # 合并JSON配置到本地
-        # 策略：复制所有文件，有冲突则覆盖（仓库优先）
-        source_configs = os.path.join(temp_dir, 'board_configs')
-        if not os.path.exists(source_configs):
-            # 如果仓库根目录就是配置，直接使用
-            source_configs = temp_dir
-        
-        updated_files = []
-        
-        # 递归复制所有文件
-        for root, dirs, files in os.walk(source_configs):
-            # 跳过.git目录
-            if '.git' in root:
-                continue
-            
-            # 计算相对路径
-            rel_path = os.path.relpath(root, source_configs)
-            if rel_path == '.':
-                rel_path = ''
-            
-            # 目标目录
-            target_dir = os.path.join(BOARD_CONFIGS_DIR, rel_path)
-            os.makedirs(target_dir, exist_ok=True)
-            
-            # 复制文件
-            for filename in files:
-                # 跳过非JSON文件和README
-                if filename.endswith('.md') or filename.startswith('.'):
-                    continue
-                
-                src = os.path.join(root, filename)
-                dst = os.path.join(target_dir, filename)
-                
-                if os.path.isfile(src):
-                    shutil.copy2(src, dst)
-                    updated_files.append(os.path.join(rel_path, filename) if rel_path else filename)
-        
-        # 清理临时目录
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-        
-        # 更新最后更新时间
-        config['last_json_update'] = datetime.now().isoformat()
-        save_config(config)
-        
-        return jsonify({
-            'success': True, 
-            'message': f'JSON配置已更新，共同步 {len(updated_files)} 个文件',
-            'files': updated_files
-        })
-            
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': '更新超时'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 # ==================== 时区设置 API ====================
 @app.route('/api/settings/timezone', methods=['GET', 'POST'])
@@ -3270,7 +3084,7 @@ def get_all_configs():
 
 
 @app.route('/api/config/save', methods=['POST'])
-def save_config():
+def save_board_config():
     """保存配置（支持更新）"""
     try:
         config_data = request.json
@@ -3474,7 +3288,7 @@ def get_versions():
 
 @app.route('/api/system/service', methods=['POST'])
 def control_service():
-    """控制服务（启动/停止/重启）"""
+    """控制服务（启动/停止/重启）- 委托给 manage_service 处理"""
     data = request.json
     service_name = data.get('service')
     action = data.get('action')
@@ -3485,11 +3299,10 @@ def control_service():
     if action not in ['start', 'stop', 'restart']:
         return jsonify({'success': False, 'error': '无效的操作'}), 400
     
+    # 委托给 manage_service 处理
     try:
-        # 使用 sudo systemctl 控制服务
-        cmd = ['sudo', 'systemctl', action, service_name]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        
+        result = subprocess.run(['sudo', 'systemctl', action, service_name],
+                              capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             return jsonify({'success': True, 'message': f'{service_name} {action} 成功'})
         else:
