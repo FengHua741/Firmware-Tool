@@ -1,0 +1,447 @@
+/* ==================== 配置管理器 - Fluidd 风格 ==================== */
+
+.config-manager-layout {
+    display: flex;
+    height: calc(100vh - 140px);
+    gap: 0;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+}
+
+/* 左侧文件树 */
+.cm-tree-sidebar {
+    width: 260px;
+    min-width: 260px;
+    background: #fafafa;
+    border-right: 1px solid var(--border-color, #e0e0e0);
+    display: flex;
+    flex-direction: column;
+}
+
+.cm-tree-toolbar {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    display: flex;
+    gap: 8px;
+    background: #f5f5f5;
+}
+
+.cm-tree-toolbar button {
+    padding: 4px 12px;
+    font-size: 13px;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cm-tree-toolbar button:hover {
+    background: #f0f0f0;
+    border-color: #aaa;
+}
+
+.cm-tree-toolbar button.primary {
+    background: var(--primary-color, #2196f3);
+    color: #fff;
+    border-color: var(--primary-color, #2196f3);
+}
+
+.cm-tree-toolbar button.primary:hover {
+    background: var(--primary-hover, #1976d2);
+}
+
+.cm-tree-search {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+.cm-tree-search input {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    font-size: 13px;
+    outline: none;
+}
+
+.cm-tree-search input:focus {
+    border-color: var(--primary-color, #2196f3);
+}
+
+#configFileTree {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+.cm-tree-loading, .cm-tree-empty {
+    padding: 20px;
+    text-align: center;
+    color: #999;
+    font-size: 13px;
+}
+
+.cm-tree-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    user-select: none;
+    transition: background 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cm-tree-item:hover {
+    background: #e8f4fd;
+}
+
+.cm-tree-item.selected {
+    background: #bbdefb;
+    color: #0d47a1;
+}
+
+.cm-tree-item.root {
+    font-weight: 600;
+    font-size: 14px;
+    color: #333;
+}
+
+.cm-tree-toggle {
+    display: inline-block;
+    width: 14px;
+    text-align: center;
+    font-size: 10px;
+    color: #888;
+    margin-right: 2px;
+}
+
+.cm-tree-icon {
+    margin-right: 6px;
+    font-size: 14px;
+}
+
+.cm-tree-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cm-tree-count {
+    font-size: 11px;
+    color: #999;
+    background: #e0e0e0;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 4px;
+}
+
+/* 右侧编辑器 */
+.cm-editor {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.cm-editor-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    background: #f8f9fa;
+}
+
+.cm-editor-path {
+    font-size: 13px;
+    color: #555;
+    font-family: monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cm-editor-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.cm-editor-actions button {
+    padding: 5px 14px;
+    font-size: 13px;
+    border-radius: 4px;
+    border: 1px solid #d0d0d0;
+    background: #fff;
+    cursor: pointer;
+}
+
+.cm-editor-actions button.save-btn {
+    background: var(--success-color, #4caf50);
+    color: #fff;
+    border-color: var(--success-color, #4caf50);
+}
+
+.cm-editor-actions button.save-btn:hover {
+    background: var(--success-hover, #43a047);
+}
+
+.cm-editor-actions button.danger-btn {
+    color: var(--danger-color, #f44336);
+    border-color: #ffcdd2;
+}
+
+.cm-editor-actions button.danger-btn:hover {
+    background: #ffebee;
+}
+
+/* 标签页 */
+.cm-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    background: #fff;
+}
+
+.cm-tab {
+    padding: 10px 20px;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    color: #666;
+    transition: all 0.2s;
+}
+
+.cm-tab:hover {
+    color: #333;
+    background: #f5f5f5;
+}
+
+.cm-tab.active {
+    color: var(--primary-color, #2196f3);
+    border-bottom-color: var(--primary-color, #2196f3);
+    font-weight: 500;
+}
+
+/* 编辑器内容区 */
+.cm-editor-content {
+    flex: 1;
+    overflow: auto;
+    background: #fff;
+}
+
+.cm-loading {
+    padding: 40px;
+    text-align: center;
+    color: #999;
+}
+
+.cm-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #999;
+    font-size: 14px;
+}
+
+/* 编辑器内部 */
+.cm-editor-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.cm-meta-bar {
+    display: flex;
+    gap: 16px;
+    padding: 8px 16px;
+    background: #f0f7ff;
+    border-bottom: 1px solid #e0e0e0;
+    font-size: 12px;
+    flex-wrap: wrap;
+}
+
+.cm-meta-item {
+    color: #555;
+}
+
+.cm-meta-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.cm-meta-badge.preset {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.cm-meta-badge.user {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.cm-panel {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+}
+
+/* JSON 编辑器 */
+.cm-json-editor {
+    width: 100%;
+    height: 100%;
+    min-height: 400px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 12px;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    resize: none;
+    outline: none;
+    background: #fafafa;
+    color: #333;
+    tab-size: 2;
+}
+
+.cm-json-editor:focus {
+    border-color: var(--primary-color, #2196f3);
+    background: #fff;
+}
+
+/* 表单样式 */
+.cm-form-grid {
+    max-width: 800px;
+}
+
+.cm-form-section {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.cm-form-section:last-child {
+    border-bottom: none;
+}
+
+.cm-form-section h4 {
+    margin: 0 0 14px 0;
+    font-size: 14px;
+    color: #333;
+    font-weight: 600;
+}
+
+.cm-form-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.cm-form-field {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.cm-form-field label {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 5px;
+    font-weight: 500;
+}
+
+.cm-input {
+    padding: 7px 10px;
+    border: 1px solid #d0d0d0;
+    border-radius: 5px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+    background: #fff;
+    color: #333;
+}
+
+.cm-input:focus {
+    border-color: var(--primary-color, #2196f3);
+}
+
+.cm-input[readonly] {
+    background: #f5f5f5;
+    color: #777;
+}
+
+select.cm-input {
+    cursor: pointer;
+    appearance: auto;
+}
+
+/* Checkbox 组 */
+.cm-checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding: 8px 0;
+}
+
+.cm-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+
+.cm-checkbox-item:hover {
+    background: #f5f5f5;
+}
+
+.cm-checkbox-item input[type="checkbox"] {
+    cursor: pointer;
+}
+
+/* Tags */
+.cm-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 0;
+}
+
+.cm-tag {
+    display: inline-block;
+    padding: 3px 10px;
+    background: #e3f2fd;
+    color: #1565c0;
+    border-radius: 12px;
+    font-size: 12px;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .config-manager-layout {
+        flex-direction: column;
+        height: auto;
+    }
+    .cm-tree-sidebar {
+        width: 100%;
+        max-height: 250px;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color, #e0e0e0);
+    }
+    .cm-form-row {
+        flex-direction: column;
+        gap: 10px;
+    }
+}
