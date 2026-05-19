@@ -174,6 +174,48 @@ async function refreshCanIfaces() {
     }
 }
 
+// CAN 网络诊断
+async function diagnoseCanNetwork() {
+    const container = document.getElementById('canDevices');
+    const errDiv = document.getElementById('canSearchError');
+    if (errDiv) errDiv.style.display = 'none';
+
+    container.innerHTML = '<p class="empty">正在诊断CAN网络...</p>';
+    try {
+        const response = await fetch('/api/system/can-diagnose');
+        const data = await response.json();
+
+        let html = '<div style="font-size:13px;line-height:1.8;">';
+        html += '<h4 style="margin:0 0 8px 0;color:#333;">CAN 网络诊断结果</h4>';
+
+        html += `<div>内核CAN支持: <b>${data.kernel_support ? '✅ 支持' : '❌ 不支持'}</b></div>`;
+        html += `<div>CAN硬件设备: <b>${data.can_device_exists ? '✅ 已检测到' : '❌ 未检测到'}</b></div>`;
+        if (data.can_device_info) {
+            html += `<div style="font-size:11px;color:#666;margin-left:12px;">${data.can_device_info}</div>`;
+        }
+
+        html += `<div>can0接口: <b>${data.can0_exists ? '✅ 存在' : '❌ 不存在'}</b></div>`;
+        if (data.can0_state) {
+            const stateColor = data.can0_state === 'UP' ? '#4caf50' : '#ff9800';
+            html += `<div style="margin-left:12px;">状态: <span style="color:${stateColor};font-weight:600;">${data.can0_state}</span></div>`;
+        }
+        if (data.can0_bitrate) {
+            html += `<div style="margin-left:12px;font-size:11px;color:#666;">${data.can0_bitrate}</div>`;
+        }
+
+        if (data.errors && data.errors.length > 0) {
+            html += '<div style="margin-top:8px;color:#d32f2f;">';
+            html += data.errors.map(e => `<div>❌ ${e}</div>`).join('');
+            html += '</div>';
+        }
+
+        html += '</div>';
+        container.innerHTML = html;
+    } catch (error) {
+        container.innerHTML = `<p class="empty">诊断失败: ${error.message}</p>`;
+    }
+}
+
 // CAN UUID搜索
 async function searchCanUuid() {
     const select = document.getElementById('canIfaceSelect');
@@ -210,12 +252,15 @@ async function searchCanUuid() {
             }
             html += data.uuids.map(d => {
                 const appColor = d.app === 'Klipper' ? '#4caf50' : d.app === 'Katapult' ? '#ff9800' : d.app === 'Klipper (config)' ? '#1976d2' : '#999';
+                // 从 mcu_model 提取可读型号（如 stm32f407xx → STM32F407）
+                const mcuLabel = d.mcu_model ? ` / ${d.mcu_model.toUpperCase()}` : '';
+                const freqLabel = d.mcu_freq ? ` @ ${d.mcu_freq}` : '';
                 return `
                 <div class="id-item">
                     <span class="id-text">
                         <span style="font-weight:600;">${d.uuid}</span>
+                        <span style="font-size:11px;color:${appColor};margin-left:8px;">[${d.app}${mcuLabel}${freqLabel}]</span>
                         ${d.section ? `<span style="font-size:11px;color:#666;margin-left:6px;">${d.section}</span>` : ''}
-                        <span style="font-size:11px;color:${appColor};margin-left:8px;">[${d.app}]</span>
                     </span>
                     <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${d.uuid}')">复制</button>
                 </div>

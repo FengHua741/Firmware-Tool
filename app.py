@@ -347,14 +347,15 @@ def get_serial_devices():
 def get_can_interfaces():
     """获取可用CAN接口列表（模仿FlyTools getCanIface）"""
     try:
+        # 尝试 JSON 输出（需要 iproute2 >= 4.12）
         output = subprocess.check_output(
             ['ip', '-d', '-j', 'link', 'show', 'type', 'can'],
             text=True, timeout=5
         )
         import json as _json
-        ifaces = _json.loads(output) if output.strip() else []
+        ifaces_data = _json.loads(output) if output.strip() else []
         result = []
-        for iface in ifaces:
+        for iface in ifaces_data:
             if isinstance(iface, dict) and iface.get('ifname'):
                 result.append({
                     'ifname': iface.get('ifname', ''),
@@ -362,10 +363,28 @@ def get_can_interfaces():
                     'flags': iface.get('flags', []),
                 })
         return jsonify({'ifaces': result})
-    except subprocess.CalledProcessError:
-        return jsonify({'ifaces': []})
-    except Exception as e:
-        return jsonify({'ifaces': [], 'error': str(e)})
+    except (subprocess.CalledProcessError, Exception):
+        # JSON 模式失败，回退到纯文本解析
+        try:
+            text_output = subprocess.check_output(
+                ['ip', '-d', 'link', 'show', 'type', 'can'],
+                text=True, timeout=5
+            )
+            result = []
+            for line in text_output.split('\n'):
+                # 匹配行如: "2: can0: <NOARP,UP,LOWER_UP> ... state UP ..."
+                m = re.match(r'^\d+:\s+(\S+):\s+<[^>]*>.*\bstate\s+(\S+)', line)
+                if m:
+                    ifname = m.group(1)
+                    state = m.group(2).upper()
+                    result.append({
+                        'ifname': ifname,
+                        'operstate': state,
+                        'flags': [],
+                    })
+            return jsonify({'ifaces': result})
+        except Exception as e:
+            return jsonify({'ifaces': [], 'error': str(e)})
 
 # ==================== CAN UUID 搜索辅助函数 ====================
 
@@ -443,6 +462,50 @@ def read_printer_cfg_direct():
             except:
                 continue
     return [], False
+
+
+def _scan_can_uuids(iface='can0'):
+    """统一的 CAN UUID 扫描函数 — 使用 Klipper canbus_query.py 进行精确匹配
+    返回 (devices: list, error: str|None)"""
+    try:
+        klipper_owner, home_dir = get_klipper_owner()
+        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
+        canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
+
+        output = subprocess.run(
+            f'{python_bin} {canbus_script} {iface} 2>&1',
+            shell=True, capture_output=True, text=True, timeout=10
+        )
+
+        devices = []
+        error = None
+        seen_uuids = set()
+
+        if output.stdout:
+            for line in output.stdout.strip().split('\n'):
+                # 捕获错误行
+                if 'Error' in line or 'Traceback' in line:
+                    if not error:
+                        error = line.strip()
+                    continue
+                # 仅精确匹配 canbus_uuid= 格式
+                if 'canbus_uuid' in line:
+                    match = re.search(r'canbus_uuid=([a-fA-F0-9]+)', line)
+                    if match:
+                        uuid = match.group(1)
+                        if uuid not in seen_uuids:
+                            seen_uuids.add(uuid)
+                            app_type = 'Klipper' if 'Klipper' in line else \
+                                       'Katapult' if 'Katapult' in line else 'Unknown'
+                            devices.append({'uuid': uuid, 'app': app_type, 'raw': line.strip()})
+
+        if not devices and not error:
+            error = '未找到CAN设备，请确认CAN接口已启用且设备处于Katapult/Klipper模式'
+        return devices, error
+    except subprocess.TimeoutExpired:
+        return [], 'CAN查询超时'
+    except Exception as e:
+        return [], str(e)
 
 
 def verify_mcu_connection_status(uuids):
@@ -546,11 +609,19 @@ def verify_mcu_connection_status(uuids):
                 continue
 
             if mcu_status.get('mcu_version'):
-                verified_uuids.append(can_uuid_map[sname])
+                entry = dict(can_uuid_map[sname])
+                # 注入 MCU 型号信息（从 Moonraker 的 mcu_constants 中提取）
+                mcu_constants = mcu_status.get('mcu_constants', {})
+                mcu_model = mcu_constants.get('MCU', '')
+                if mcu_model:
+                    entry['mcu_model'] = mcu_model.lower()
+                entry['mcu_version'] = mcu_status.get('mcu_version', '')
+                entry['mcu_freq'] = mcu_constants.get('CLOCK_FREQ', '')
+                verified_uuids.append(entry)
                 logger.info(
                     f"MCU 验证: [{sname}] 通过 CAN 已连接 "
                     f"(UUID={can_uuid_map[sname]['uuid']}, "
-                    f"MCU={mcu_status.get('mcu_constants',{}).get('MCU','?')}, "
+                    f"MCU={mcu_constants.get('MCU','?')}, "
                     f"klipper_state={webhooks_state})"
                 )
             else:
@@ -686,41 +757,14 @@ def get_communication_options():
 # ==================== CAN 烧录搜索 API ====================
 @app.route('/api/firmware/detect-can')
 def detect_can_for_flash():
-    """为固件烧录搜索 CAN UUID 设备"""
-    try:
-        klipper_owner, home_dir = get_klipper_owner()
-        
-        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
-        canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
-        
-        output = subprocess.run(
-            f'{python_bin} {canbus_script} can0 2>&1',
-            shell=True, capture_output=True, text=True, timeout=10
-        )
-        
-        devices = []
-        error = None
-        seen_uuids = set()
-        
-        if output.stdout:
-            for line in output.stdout.strip().split('\n'):
-                if 'Error' in line or 'Traceback' in line:
-                    if not error:
-                        error = line
-                    continue
-                match = re.search(r'\b([a-f0-9]{8,})\b', line)
-                if match:
-                    uuid = match.group(1)
-                    if uuid not in seen_uuids:
-                        seen_uuids.add(uuid)
-                        devices.append({'uuid': uuid})
-        
-        if not devices and not error:
-            error = '未找到CAN设备，请确认CAN接口已启用且设备处于Katapult/DFU模式'
-        
-        return jsonify({'devices': devices, 'error': error})
-    except Exception as e:
-        return jsonify({'devices': [], 'error': str(e)})
+    """为固件烧录搜索 CAN UUID 设备（支持 ?iface=can1 参数）"""
+    iface = request.args.get('iface', 'can0')
+    if not iface.startswith('can'):
+        return jsonify({'devices': [], 'error': f'无效的CAN接口: {iface}'})
+    devices, error = _scan_can_uuids(iface)
+    # 移除 app/raw 字段，保持返回格式简洁（仅 uuid）
+    simple_devices = [{'uuid': d['uuid']} for d in devices]
+    return jsonify({'devices': simple_devices, 'error': error})
 
 # ==================== ID搜索 API ====================
 @app.route('/api/system/ids')
@@ -758,39 +802,14 @@ def get_all_ids():
         except:
             pass
         
-        # CAN设备 - 使用Klipper的 canbus_query.py
+        # CAN设备 - 使用统一扫描函数
         try:
-            klipper_owner, home_dir = get_klipper_owner()
-                    
-            python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
-            canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
-                    
-            output = subprocess.run(
-                f'{python_bin} {canbus_script} can0 2>&1',
-                shell=True, capture_output=True, text=True, timeout=10
-            )
-            seen_uuids = set()
-            can_error = None
-            if output.stdout:
-                for line in output.stdout.strip().split('\n'):
-                    # 捕获错误信息
-                    if 'Error' in line or 'Traceback' in line or 'DeprecationWarning' in line:
-                        if 'Error' in line and not can_error:
-                            can_error = line.strip()
-                        continue
-                    # 解析 UUID (8 位或更长的十六进制)
-                    match = re.search(r'\b([a-f0-9]{8,})\b', line)
-                    if match:
-                        uuid = match.group(1)
-                        if uuid in seen_uuids:
-                            continue
-                        seen_uuids.add(uuid)
-                        formatted = f"canbus_uuid: {uuid}"
-                        result['can'].append({'raw': uuid, 'formatted': formatted})
-            if not result['can'] and can_error:
-                result['can_error'] = can_error
-            elif not result['can']:
-                result['can_error'] = '未找到CAN设备，请确认CAN接口已启用且设备处于Katapult模式'
+            devices, error = _scan_can_uuids('can0')
+            for d in devices:
+                formatted = f"canbus_uuid: {d['uuid']}"
+                result['can'].append({'raw': d['uuid'], 'formatted': formatted, 'app': d.get('app', 'Unknown')})
+            if error:
+                result['can_error'] = error
         except Exception as e:
             import logging
             logging.error(f'CAN设备检测失败：{e}')
@@ -1526,32 +1545,12 @@ def detect_devices():
 # ==================== CAN设备搜索 API ====================
 @app.route('/api/firmware/can/scan')
 def scan_can_devices():
-    """扫描CAN设备 - 使用Klipper的canbus_query.py"""
-    try:
-        klipper_owner, home_dir = get_klipper_owner()
-        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
-        canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
-
-        result = subprocess.run(
-            f'{python_bin} {canbus_script} can0 2>/dev/null || echo ""',
-            shell=True, capture_output=True, text=True, timeout=10
-        )
-        
-        devices = []
-        if result.stdout:
-            for line in result.stdout.strip().split('\n'):
-                if 'uuid' in line.lower():
-                    # 解析UUID
-                    match = re.search(r'([a-f0-9]{8,})', line)
-                    if match:
-                        devices.append({
-                            'uuid': match.group(1),
-                            'raw': line.strip()
-                        })
-        
-        return jsonify({'devices': devices})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    """扫描CAN设备 - 使用统一扫描函数（支持 ?iface=can1 参数）"""
+    iface = request.args.get('iface', 'can0')
+    if not iface.startswith('can'):
+        return jsonify({'error': f'无效的CAN接口: {iface}'}), 400
+    devices, error = _scan_can_uuids(iface)
+    return jsonify({'devices': devices, 'error': error})
 
 # ==================== 固件烧录 API ====================
 @app.route('/api/firmware/flash', methods=['POST'])

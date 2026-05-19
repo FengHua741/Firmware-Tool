@@ -13,6 +13,27 @@ async function initFirmwarePage() {
     console.log('初始化固件编译页面...');
     await loadCompileMcuDatabase();
     await loadCompilePresetManufacturers();
+    await refreshFlashCanIfaces();
+}
+
+// 刷新固件烧录页的CAN接口列表
+async function refreshFlashCanIfaces() {
+    const select = document.getElementById('flashCanIface');
+    if (!select) return;
+    try {
+        const response = await fetch('/api/system/can-iface');
+        const data = await response.json();
+        select.innerHTML = '<option value="can0">can0</option>';
+        if (data.ifaces && data.ifaces.length > 0) {
+            data.ifaces.forEach(iface => {
+                if (iface.ifname !== 'can0') {
+                    select.innerHTML += `<option value="${iface.ifname}">${iface.ifname}</option>`;
+                }
+            });
+        }
+    } catch (error) {
+        select.innerHTML = '<option value="can0">can0</option>';
+    }
 }
 
 // 加载 MCU 数据库
@@ -775,17 +796,26 @@ async function compileFirmware() {
     }
 }
 
-// 刷新设备 ID 列表（含CAN检测）
+// 刷新设备 ID 列表（USB + CAN，CAN使用与资源页相同的搜索方式）
 async function refreshDeviceIds() {
     const select = document.getElementById('flashDeviceId');
+    const canIfaceSelect = document.getElementById('flashCanIface');
+    const canErrDiv = document.getElementById('flashCanSearchError');
     const previousValue = select.value;
+    const canIface = canIfaceSelect ? canIfaceSelect.value : 'can0';
+
+    if (canErrDiv) canErrDiv.style.display = 'none';
     select.innerHTML = '<option value="">-- 正在扫描 --</option>';
     
     try {
-        // 并行扫描USB和CAN设备
+        // 并行：USB检测 + CAN UUID搜索（使用与资源页相同的 /api/system/can-uuid）
         const [usbResp, canResp] = await Promise.allSettled([
             fetch('/api/firmware/detect'),
-            fetch('/api/firmware/detect-can')
+            fetch('/api/system/can-uuid', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ iface: canIface })
+            })
         ]);
         
         select.innerHTML = '<option value="">-- 选择设备 --</option>';
@@ -800,17 +830,23 @@ async function refreshDeviceIds() {
             }
         }
         
-        // CAN设备
+        // CAN设备（与资源页相同的返回格式：uuids[].uuid, uuids[].app）
         if (canResp.status === 'fulfilled') {
             const canData = await canResp.value.json();
-            if (canData.devices && canData.devices.length > 0) {
-                canData.devices.forEach(device => {
-                    select.innerHTML += `<option value="${device.uuid}">CAN: ${device.uuid}</option>`;
+            if (canData.uuids && canData.uuids.length > 0) {
+                canData.uuids.forEach(d => {
+                    const appLabel = d.app === 'Klipper' ? 'Klipper' : d.app === 'Katapult' ? 'Katapult' : d.app || '';
+                    const label = appLabel ? `CAN/${appLabel}: ${d.uuid}` : `CAN: ${d.uuid}`;
+                    select.innerHTML += `<option value="${d.uuid}">${label}</option>`;
                 });
             }
-            // 显示CAN错误
-            if (canData.error) {
-                console.warn('CAN检测提示:', canData.error);
+            // 显示来源提示
+            if (canData.source === 'printer_cfg' && canData.skipped > 0 && canErrDiv) {
+                canErrDiv.style.display = 'block';
+                canErrDiv.innerHTML = `<div style="margin-top:6px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">ℹ ${canData.skipped} 个配置文件中的设备未连接，已自动过滤</div>`;
+            } else if (canData.error && canErrDiv) {
+                canErrDiv.style.display = 'block';
+                canErrDiv.innerHTML = `<div style="margin-top:6px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">⚠️ ${canData.error}</div>`;
             }
         }
         

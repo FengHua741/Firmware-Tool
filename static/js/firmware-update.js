@@ -478,14 +478,18 @@ async function scanDeviceIdForUpdate() {
     
     try {
         if (mode === 'CAN') {
-            // 扫描CAN设备
-            const response = await fetch('/api/firmware/can/scan');
+            // 扫描CAN设备 — 使用与资源页相同的 /api/system/can-uuid
+            const response = await fetch('/api/system/can-uuid', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ iface: 'can0' })
+            });
             const data = await response.json();
-            if (data.devices && data.devices.length > 0) {
-                deviceIdInput.value = data.devices[0].uuid;
-                showSuccess(`找到 ${data.devices.length} 个CAN设备`);
+            if (data.uuids && data.uuids.length > 0) {
+                deviceIdInput.value = data.uuids[0].uuid;
+                showSuccess(`找到 ${data.uuids.length} 个CAN设备`);
             } else {
-                showError('未找到CAN设备');
+                showError(data.error || '未找到CAN设备');
             }
         } else {
             // 扫描USB设备

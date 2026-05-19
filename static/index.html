@@ -125,7 +125,10 @@
                     <div class="card resource-can-combo">
                         <div class="card-header">
                             <h3>CAN 总线</h3>
-                            <button class="btn btn-sm btn-secondary" onclick="loadCanHostConfig()">刷新</button>
+                            <div style="display:flex;gap:6px;">
+                                <button class="btn btn-sm btn-info" onclick="diagnoseCanNetwork()" title="诊断CAN网络状态">诊断</button>
+                                <button class="btn btn-sm btn-secondary" onclick="loadCanHostConfig()">刷新</button>
+                            </div>
                         </div>
                         <div class="card-body can-section">
                             <div class="can-section-header">上位机 CAN 配置</div>
@@ -295,8 +298,12 @@
                                     <select class="form-control form-select" id="flashDeviceId">
                                         <option value="">-- 点击刷新扫描 --</option>
                                     </select>
+                                    <select id="flashCanIface" class="form-control" style="width:auto;min-width:100px;" title="CAN接口选择">
+                                        <option value="can0">can0</option>
+                                    </select>
                                     <button class="btn btn-secondary" onclick="refreshDeviceIds()">🔄</button>
                                 </div>
+                                <div id="flashCanSearchError" style="display:none;"></div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">💾 烧录模式</label>

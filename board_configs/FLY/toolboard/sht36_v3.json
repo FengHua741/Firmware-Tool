@@ -1,32 +1,34 @@
 {
-  "type": "toolboard",
-  "name": "FLY-SHT36 V3",
-  "platform": "RP2040",
-  "mcu": "rp2040",
+  "bl_default_flash": "UF2",
+  "bl_flash_support": "支持",
   "bl_offset": "16384",
+  "boot_pins": "!gpio5",
+  "can_gpio": {
+    "rx": 1,
+    "tx": 0
+  },
   "connections": [
     "CANBUS",
     "USB"
   ],
   "default_connection": "CAN bus",
+  "default_flash": "KAT",
+  "firmware_update": {
+    "custom_config": "",
+    "device_id": "",
+    "enabled": false,
+    "flash_mode": "KAT",
+    "katapult_mode": "USB"
+  },
   "flash_modes": [
+    "CAN",
     "UF2"
   ],
-  "default_flash": "UF2",
-  "boot_pins": "!gpio5",
-  "bl_flash_support": "支持",
-  "bl_default_flash": "UF2",
   "id": "sht36_v3",
-  "can_gpio": {
-    "rx": 1,
-    "tx": 0
-  },
-  "firmware_update": {
-    "enabled": false,
-    "katapult_mode": "USB",
-    "device_id": "",
-    "flash_mode": "KAT",
-    "custom_config": ""
-  },
-  "manufacturer": "FLY"
+  "manufacturer": "FLY",
+  "mcu": "rp2040",
+  "name": "FLY-SHT36 V3",
+  "platform": "RP2040",
+  "type": "toolboard",
+  "crystal": "12000000"
 }
