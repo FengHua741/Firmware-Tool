@@ -33,6 +33,7 @@ function switchPage(pageId) {
     // 页面特定初始化
     if (pageId === 'resources') {
         startResourceMonitoring();
+        loadCanHostConfig();
     } else if (pageId === 'firmware') {
         if (typeof initFirmwarePage === 'function') {
             initFirmwarePage();
@@ -65,6 +66,35 @@ function startResourceMonitoring() {
     resourceInterval = setInterval(updateResources, 1000);
 }
 
+// 更新进度条填充（带 2% 迟滞防止闪烁）
+function setProgressFill(elementId, percent) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    
+    el.style.width = Math.min(percent, 100) + '%';
+    
+    // 获取当前颜色类
+    const prevClass = el.dataset.prevColor || 'green';
+    let newClass;
+    if (percent >= 90) {
+        newClass = 'red';
+    } else if (percent >= 70) {
+        newClass = 'yellow';
+    } else {
+        newClass = 'green';
+    }
+    
+    // 2% 迟滞：只有当变化超过阈值时才切换
+    if (newClass !== prevClass) {
+        const threshold = newClass === 'green' ? 68 : (newClass === 'yellow' ? 70 : 88);
+        const diff = Math.abs(percent - threshold);
+        if (diff > 2) {
+            el.classList.remove('green', 'yellow', 'red');
+            el.classList.add(newClass);
+            el.dataset.prevColor = newClass;
+        }
+    }
+}
 
 function updateNetworkDisplay(network) {
     const container = document.getElementById('networkInterfaces');
@@ -164,15 +194,30 @@ async function searchCanUuid() {
         });
         const data = await response.json();
         if (data.uuids && data.uuids.length > 0) {
-            container.innerHTML = data.uuids.map(d => `
+            let html = '';
+            // printer.cfg 来源时显示说明
+            if (data.source === 'printer_cfg') {
+                html += '<div style="margin-bottom:10px;font-size:12px;color:#666;background:#f5f5f5;padding:6px 10px;border-radius:4px;">以下设备来自 Klipper 配置文件 (printer.cfg)</div>';
+                // 显示连接状态验证结果
+                if (data.verified === false) {
+                    html += '<div style="margin-bottom:8px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">⚠ Moonraker 不可达，无法验证设备连接状态</div>';
+                } else if (data.skipped > 0) {
+                    html += `<div style="margin-bottom:8px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">ℹ ${data.skipped} 个配置文件中的设备未连接，已自动过滤</div>`;
+                }
+            }
+            html += data.uuids.map(d => {
+                const appColor = d.app === 'Klipper' ? '#4caf50' : d.app === 'Katapult' ? '#ff9800' : d.app === 'Klipper (config)' ? '#1976d2' : '#999';
+                return `
                 <div class="id-item">
                     <span class="id-text">
                         <span style="font-weight:600;">${d.uuid}</span>
-                        <span style="font-size:11px;color:${d.app === 'Klipper' ? '#4caf50' : d.app === 'Katapult' ? '#ff9800' : '#999'};margin-left:8px;">[${d.app}]</span>
+                        ${d.section ? `<span style="font-size:11px;color:#666;margin-left:6px;">${d.section}</span>` : ''}
+                        <span style="font-size:11px;color:${appColor};margin-left:8px;">[${d.app}]</span>
                     </span>
                     <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${d.uuid}')">复制</button>
                 </div>
-            `).join('');
+            `}).join('');
+            container.innerHTML = html;
         } else {
             container.innerHTML = '<p class="empty">未找到CAN设备</p>';
             if (data.error && errDiv) {
@@ -209,6 +254,175 @@ async function searchCamera() {
         }
     } catch (error) {
         container.innerHTML = `<p class="empty">搜索失败: ${error.message}</p>`;
+    }
+}
+
+// ==================== 上位机 CAN 配置 ====================
+
+function formatBitrate(val) {
+    if (val === 1000000) return '1M';
+    if (val === 500000) return '500K';
+    if (val === 250000) return '250K';
+    if (val >= 1000000) return (val / 1000000) + 'M';
+    if (val >= 1000) return (val / 1000) + 'K';
+    return String(val);
+}
+
+async function loadCanHostConfig() {
+    const body = document.getElementById('canHostConfigBody');
+    if (!body) return;
+    body.innerHTML = '<p class="empty">加载中...</p>';
+
+    try {
+        const res = await fetch('/api/system/can-config');
+        const data = await res.json();
+
+        let html = '';
+
+        if (data.system === 'flyos_fast') {
+            // FlyOS-FAST: 只读占位
+            const liveBitrate = data.live && data.live.bitrate ? formatBitrate(data.live.bitrate) : (data.bitrate_display || '--');
+            const liveState = data.live && data.live.exists ? (data.live.state || '--') : '--';
+            html = `
+                <div style="padding:4px 0;">
+                    <div style="background:rgba(33,150,243,0.08);padding:12px;border-radius:6px;border-left:4px solid #2196F3;margin-bottom:12px;font-size:13px;">
+                        FlyOS-Fast 系统，CAN 通过 /config/config.txt 配置
+                    </div>
+                    <div class="status-info" style="margin-bottom:12px;">
+                        <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;">
+                            <span>接口状态: <strong>${liveState}</strong></span>
+                            <span>当前速率: <strong>${liveBitrate}</strong></span>
+                        </div>
+                    </div>
+                    <div style="font-size:12px;color:#888;padding:8px;background:var(--bg-color);border-radius:4px;">
+                        FlyOS-Fast 系统 CAN 速率修改将在后续版本支持，当前为只读
+                    </div>
+                </div>`;
+        } else if (data.system === 'systemd' || data.system === 'interfaces') {
+            // 已配置: 可编辑
+            const liveState = data.live && data.live.exists ? (data.live.state || '--') : '不存在';
+            const liveBitrate = data.live && data.live.bitrate ? formatBitrate(data.live.bitrate) : '--';
+            const cfgBitrate = data.bitrate_display || '--';
+            const cfgTxqueue = data.txqueuelen || '1024';
+            const configLabel = data.system === 'systemd' ? 'systemd-networkd' : 'interfaces.d';
+            const configFile = data.network_file || data.interfaces_file || '--';
+
+            const bitrateOptions = [1000000, 500000, 250000];
+            const bitrateLabels = { 1000000: '1M', 500000: '500K', 250000: '250K' };
+            const currentBitrate = data.bitrate || 1000000;
+
+            html = `
+                <div style="padding:4px 0;">
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:13px;">
+                        <span>配置方式: <strong>${configLabel}</strong></span>
+                        <span style="color:#666;font-size:12px;">${configFile}</span>
+                    </div>
+                    <div style="background:rgba(76,175,80,0.06);padding:10px 14px;border-radius:6px;border-left:4px solid #4caf50;margin-bottom:14px;font-size:13px;display:flex;gap:20px;flex-wrap:wrap;">
+                        <span>接口: <strong>${data.live && data.live.interface || 'can0'}</strong></span>
+                        <span>状态: <strong>${liveState}</strong></span>
+                        <span>实际速率: <strong>${liveBitrate}</strong></span>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">修改速率</label>
+                            <select class="form-control form-select" id="canHostRate" style="min-width:140px;">
+                                ${bitrateOptions.map(v => `
+                                    <option value="${v}" ${v === currentBitrate ? 'selected' : ''}>${bitrateLabels[v]}</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">缓存大小 (TxQueueLen)</label>
+                            <input type="number" class="form-control" id="canHostTxqueue" value="${cfgTxqueue}" min="128" max="8192" style="max-width:140px;">
+                            <span class="form-hint">范围: 128-8192</span>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-sm btn-primary" onclick="applyCanHostConfig()">应用修改</button>
+                    <div id="canHostApplyStatus" style="margin-top:8px;"></div>
+
+                    <div style="margin-top:12px;font-size:12px;color:#888;padding:8px;background:var(--bg-color);border-radius:4px;">
+                        上位机 CAN 速率必须与工具板固件的 CAN 速率一致
+                    </div>
+                </div>`;
+        } else {
+            // 无配置: 自动生成
+            const liveExists = data.live && data.live.exists;
+            const liveState = data.live && data.live.state ? data.live.state : 'DOWN';
+            const liveDetail = liveExists ? `can0 (${liveState})` : '无 CAN 接口';
+            const usbInfo = data.usb_can_count > 0 ? `检测到 ${data.usb_can_count} 个 USB CAN 适配器` : '未检测到 USB CAN 适配器';
+
+            html = `
+                <div style="padding:4px 0;">
+                    <div style="background:rgba(255,152,0,0.08);padding:12px;border-radius:6px;border-left:4px solid #ff9800;margin-bottom:12px;font-size:13px;">
+                        未检测到 CAN 配置文件
+                        <div style="margin-top:4px;font-size:12px;color:#666;">${usbInfo} | 接口: ${liveDetail}</div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">选择速率</label>
+                            <select class="form-control form-select" id="canHostRate" style="min-width:140px;">
+                                <option value="1000000" selected>1M</option>
+                                <option value="500000">500K</option>
+                                <option value="250000">250K</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">缓存大小 (TxQueueLen)</label>
+                            <input type="number" class="form-control" id="canHostTxqueue" value="1024" min="128" max="8192" style="max-width:140px;">
+                            <span class="form-hint">范围: 128-8192</span>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-sm btn-success" onclick="applyCanHostConfig()">生成并应用配置</button>
+                    <div id="canHostApplyStatus" style="margin-top:8px;"></div>
+                </div>`;
+        }
+
+        body.innerHTML = html;
+    } catch (error) {
+        body.innerHTML = `<p class="empty">加载失败: ${error.message}</p>`;
+    }
+}
+
+async function applyCanHostConfig() {
+    const statusDiv = document.getElementById('canHostApplyStatus');
+    if (!statusDiv) return;
+
+    const rateSelect = document.getElementById('canHostRate');
+    const txqueueInput = document.getElementById('canHostTxqueue');
+
+    if (!rateSelect || !txqueueInput) return;
+
+    const bitrate = parseInt(rateSelect.value);
+    const txqueuelen = parseInt(txqueueInput.value);
+
+    if (isNaN(txqueuelen) || txqueuelen < 128 || txqueuelen > 8192) {
+        statusDiv.innerHTML = '<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">缓存大小必须在 128-8192 之间</div>';
+        return;
+    }
+
+    statusDiv.innerHTML = '<div style="padding:10px;font-size:13px;color:#666;">正在应用...</div>';
+
+    try {
+        const res = await fetch('/api/system/can-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bitrate, txqueuelen })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(76,175,80,0.1);color:#4caf50;border:1px solid rgba(76,175,80,0.3);padding:10px;border-radius:6px;font-size:13px;">${data.message}</div>`;
+            // 刷新状态
+            setTimeout(loadCanHostConfig, 1500);
+        } else {
+            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">${data.error || '应用失败'}</div>`;
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">请求失败: ${error.message}</div>`;
     }
 }
 
@@ -303,6 +517,10 @@ async function loadSettings() {
             if (kp) kp.value = config.klipper_path || '~/klipper';
             const ktp = document.getElementById('settingsKatapultPath');
             if (ktp) ktp.value = config.katapult_path || '~/katapult';
+            const mrHost = document.getElementById('settingsMoonrakerHost');
+            if (mrHost) mrHost.value = config.moonraker_host || '127.0.0.1';
+            const mrPort = document.getElementById('settingsMoonrakerPort');
+            if (mrPort) mrPort.value = config.moonraker_port || 7125;
         }
     } catch (error) {
         console.error('加载设置失败:', error);
@@ -316,9 +534,13 @@ async function loadSettings() {
 async function saveSettings() {
     const kp = document.getElementById('settingsKlipperPath');
     const ktp = document.getElementById('settingsKatapultPath');
+    const mrHost = document.getElementById('settingsMoonrakerHost');
+    const mrPort = document.getElementById('settingsMoonrakerPort');
     const settings = {
         klipper_path: kp ? kp.value : '~/klipper',
-        katapult_path: ktp ? ktp.value : '~/katapult'
+        katapult_path: ktp ? ktp.value : '~/katapult',
+        moonraker_host: mrHost ? mrHost.value : '127.0.0.1',
+        moonraker_port: mrPort ? parseInt(mrPort.value) || 7125 : 7125,
     };
     
     try {
@@ -672,6 +894,11 @@ async function updateResources() {
         if (diskDetail && disk.used !== undefined && disk.total !== undefined) {
             diskDetail.textContent = disk.used.toFixed(1) + ' / ' + disk.total.toFixed(1) + ' GB';
         }
+        
+        // 更新进度条
+        setProgressFill('cpuProgressFill', cpuPercent);
+        setProgressFill('memProgressFill', memPercent);
+        setProgressFill('diskProgressFill', diskPercent);
         
         // 更新网络状态
         if (current.network) {

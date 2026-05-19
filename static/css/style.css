@@ -147,28 +147,40 @@ body {
     gap: 20px;
 }
 
-/* 资源页面响应式网格 - FlyTools风格 */
+/* 资源页面响应式网格 */
 .resource-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 20px;
 }
 
-@media screen and (max-width: 1920px) {
-    .resource-grid {
-        grid-template-columns: repeat(3, 1fr);
-    }
+.resource-monitor {
+    grid-column: span 2;
+}
+
+.resource-can-combo {
+    grid-column: 1 / -1;
 }
 
 @media screen and (max-width: 1200px) {
     .resource-grid {
         grid-template-columns: repeat(2, 1fr);
     }
+    .resource-monitor {
+        grid-column: 1 / -1;
+    }
+    .resource-can-combo {
+        grid-column: 1 / -1;
+    }
 }
 
 @media screen and (max-width: 768px) {
     .resource-grid {
         grid-template-columns: 1fr;
+    }
+    .resource-monitor,
+    .resource-can-combo {
+        grid-column: auto;
     }
 }
 
@@ -1097,6 +1109,94 @@ body {
     font-size: 0.95rem;
     color: var(--text-secondary);
     margin-left: auto;
+}
+
+/* ==================== 资源监控进度条 ==================== */
+
+.monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.monitor-item {
+    background: var(--bg-color);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+}
+
+.monitor-item .monitor-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    display: block;
+    margin-bottom: 6px;
+}
+
+.monitor-item .monitor-value {
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: block;
+    margin-bottom: 8px;
+}
+
+.monitor-item .monitor-detail {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 10px;
+}
+
+.monitor-progress {
+    width: 100%;
+    height: 6px;
+    background: #e0e0e0;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.monitor-progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease, background-color 0.3s ease;
+}
+
+.monitor-progress-fill.green {
+    background: linear-gradient(90deg, #4CAF50, #66BB6A);
+}
+
+.monitor-progress-fill.yellow {
+    background: linear-gradient(90deg, #FF9800, #FFB74D);
+}
+
+.monitor-progress-fill.red {
+    background: linear-gradient(90deg, #F44336, #EF5350);
+}
+
+/* ==================== CAN 组合卡样式 ==================== */
+
+.can-section {
+    padding: 16px 20px;
+}
+
+.can-section + .can-divider {
+    border: none;
+    border-top: 1px dashed var(--border-color);
+    margin: 0;
+}
+
+.can-section-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0 0 10px 0;
+    border-left: 3px solid var(--primary-color);
+    padding-left: 10px;
+    margin-bottom: 10px;
 }
 
 /* ==================== 固件编译功能样式 ==================== */

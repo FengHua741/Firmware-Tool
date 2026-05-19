@@ -47,31 +47,39 @@
                 </div>
                 
                 <div class="resource-grid">
-                    <!-- 实时资源监控 -->
-                    <div class="card">
+                    <!-- Row 1: 实时资源监控 (span 2) + 网络状态 -->
+                    <div class="card resource-monitor">
                         <div class="card-header"><h3>实时资源监控</h3></div>
                         <div class="card-body">
-                            <div class="resource-values-large">
-                                <div class="resource-item-large">
-                                    <span class="resource-label">CPU</span>
-                                    <span class="resource-percent" id="cpuPercentText">--%</span>
-                                    <span class="resource-detail" id="cpuDetailText">--</span>
+                            <div class="monitor-grid">
+                                <div class="monitor-item">
+                                    <span class="monitor-label">CPU</span>
+                                    <span class="monitor-value" id="cpuPercentText">--%</span>
+                                    <span class="monitor-detail" id="cpuDetailText">--</span>
+                                    <div class="monitor-progress">
+                                        <div class="monitor-progress-fill green" id="cpuProgressFill" style="width:0%"></div>
+                                    </div>
                                 </div>
-                                <div class="resource-item-large">
-                                    <span class="resource-label">内存</span>
-                                    <span class="resource-percent" id="memPercentText">--%</span>
-                                    <span class="resource-detail" id="memDetailText">--</span>
+                                <div class="monitor-item">
+                                    <span class="monitor-label">内存</span>
+                                    <span class="monitor-value" id="memPercentText">--%</span>
+                                    <span class="monitor-detail" id="memDetailText">--</span>
+                                    <div class="monitor-progress">
+                                        <div class="monitor-progress-fill green" id="memProgressFill" style="width:0%"></div>
+                                    </div>
                                 </div>
-                                <div class="resource-item-large">
-                                    <span class="resource-label">磁盘</span>
-                                    <span class="resource-percent" id="diskPercentText">--%</span>
-                                    <span class="resource-detail" id="diskDetailText">--</span>
+                                <div class="monitor-item">
+                                    <span class="monitor-label">磁盘</span>
+                                    <span class="monitor-value" id="diskPercentText">--%</span>
+                                    <span class="monitor-detail" id="diskDetailText">--</span>
+                                    <div class="monitor-progress">
+                                        <div class="monitor-progress-fill green" id="diskProgressFill" style="width:0%"></div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- 网络状态 -->
                     <div class="card">
                         <div class="card-header"><h3>网络状态</h3></div>
                         <div class="card-body">
@@ -79,18 +87,7 @@
                         </div>
                     </div>
 
-                    <!-- 摄像头 -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h3>摄像头</h3>
-                            <button class="btn btn-sm btn-primary" onclick="searchCamera()">搜索</button>
-                        </div>
-                        <div class="card-body">
-                            <div id="cameraDevices" class="id-list"><p class="empty">点击搜索按钮</p></div>
-                        </div>
-                    </div>
-
-                    <!-- USB 设备 -->
+                    <!-- Row 2: USB + 串口 + 摄像头 -->
                     <div class="card">
                         <div class="card-header">
                             <h3>USB 设备</h3>
@@ -104,7 +101,6 @@
                         </div>
                     </div>
 
-                    <!-- 串口设备 -->
                     <div class="card">
                         <div class="card-header">
                             <h3>串口设备</h3>
@@ -115,12 +111,29 @@
                         </div>
                     </div>
 
-                    <!-- CAN 设备 -->
                     <div class="card">
                         <div class="card-header">
-                            <h3>CAN 设备</h3>
+                            <h3>摄像头</h3>
+                            <button class="btn btn-sm btn-primary" onclick="searchCamera()">搜索</button>
                         </div>
                         <div class="card-body">
+                            <div id="cameraDevices" class="id-list"><p class="empty">点击搜索按钮</p></div>
+                        </div>
+                    </div>
+
+                    <!-- Row 3: CAN 总线合并卡 (span 3) -->
+                    <div class="card resource-can-combo">
+                        <div class="card-header">
+                            <h3>CAN 总线</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="loadCanHostConfig()">刷新</button>
+                        </div>
+                        <div class="card-body can-section">
+                            <div class="can-section-header">上位机 CAN 配置</div>
+                            <div id="canHostConfigBody"><p class="empty">加载中...</p></div>
+                        </div>
+                        <hr class="can-divider">
+                        <div class="card-body can-section">
+                            <div class="can-section-header">CAN 设备 UUID 搜索</div>
                             <div class="device-card-actions">
                                 <select id="canIfaceSelect" class="form-control">
                                     <option value="">选择CAN接口</option>
@@ -610,6 +623,18 @@
                             <div class="form-group">
                                 <label class="form-label">Katapult 路径</label>
                                 <input type="text" class="form-control" id="settingsKatapultPath" value="~/katapult">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Moonraker 地址</label>
+                                <input type="text" class="form-control" id="settingsMoonrakerHost" value="127.0.0.1" placeholder="127.0.0.1">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Moonraker 端口</label>
+                                <input type="number" class="form-control" id="settingsMoonrakerPort" value="7125" min="1" max="65535">
                             </div>
                         </div>
                         <div class="form-row">

@@ -16,6 +16,7 @@ import glob
 import shutil
 import requests
 import threading
+import urllib.parse
 from datetime import datetime
 from collections import deque
 import logging
@@ -355,6 +356,205 @@ def get_can_interfaces():
     except Exception as e:
         return jsonify({'ifaces': [], 'error': str(e)})
 
+# ==================== CAN UUID 搜索辅助函数 ====================
+
+def read_mcu_uuids_from_printer_cfg(content):
+    """从 printer.cfg 内容中提取所有 MCU 段落的 canbus_uuid"""
+    uuids = []
+    current_section = None
+    for line in content.split('\n'):
+        line_stripped = line.strip()
+        # 跳过空行和注释
+        if not line_stripped or line_stripped.startswith('#'):
+            continue
+        # 检测段落头 [mcu], [mcu SHT36], [mcu ERCF] 等
+        m = re.match(r'^\[mcu(\s+.+)?\]$', line_stripped, re.IGNORECASE)
+        if m:
+            current_section = m.group(0)  # 如 "[mcu SHT36]"
+            continue
+        # 在 MCU 段落中查找 canbus_uuid
+        if current_section:
+            m = re.match(r'^canbus_uuid\s*[:=]\s*([a-fA-F0-9]+)\s*$', line_stripped)
+            if m:
+                uuid_val = m.group(1).lower()
+                uuids.append({
+                    'uuid': uuid_val,
+                    'app': 'Klipper (config)',
+                    'section': current_section,
+                })
+                current_section = None  # 一个段落只取一个 UUID
+    return uuids
+
+
+def query_moonraker_printer_cfg():
+    """通过 Moonraker HTTP API 读取 printer.cfg 并提取 MCU UUID"""
+    host = config.get('moonraker_host', '127.0.0.1')
+    port = config.get('moonraker_port', 7125)
+    base = f'http://{host}:{port}'
+
+    try:
+        # 健康检查
+        r = requests.get(f'{base}/server/info', timeout=3)
+        if r.status_code != 200:
+            return [], False, None
+
+        # 读取 printer.cfg
+        r = requests.get(f'{base}/server/files/config/printer.cfg', timeout=5)
+        if r.status_code != 200:
+            return [], True, None
+
+        uuids = read_mcu_uuids_from_printer_cfg(r.text)
+        return uuids, True, None
+    except requests.ConnectionError:
+        return [], False, 'Moonraker 连接失败'
+    except requests.Timeout:
+        return [], False, 'Moonraker 超时'
+    except Exception as e:
+        return [], True, str(e)
+
+
+def read_printer_cfg_direct():
+    """直接读取文件系统中的 printer.cfg（后备方案）"""
+    _, home_dir = get_klipper_owner()
+    candidates = [
+        os.path.join(home_dir, 'printer_data', 'config', 'printer.cfg'),
+        os.path.join(home_dir, 'klipper_config', 'printer.cfg'),
+        os.path.join(home_dir, 'printer.cfg'),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    content = f.read()
+                uuids = read_mcu_uuids_from_printer_cfg(content)
+                if uuids:
+                    return uuids, True
+            except:
+                continue
+    return [], False
+
+
+def verify_mcu_connection_status(uuids):
+    """通过 Moonraker 验证各 MCU 实际使用的传输方式，仅返回真正通过 CAN 连接的 UUID
+
+    判断逻辑（一个 MCU 只能配置一种传输方式）:
+      1. 查 configfile.settings 看该 section 实际配置了什么传输方式
+      2. 如果 active config 中 serial 有值 → MCU 用串口 → canbus_uuid 是残留 → 跳过
+      3. 如果 active config 中 canbus_uuid 有值 → 再检查 Klipper 是否连接了该 MCU
+      4. 仅当：配置为 CAN + Klipper 已连接 → 返回 UUID
+    """
+    if not uuids:
+        return [], True
+
+    host = config.get('moonraker_host', '127.0.0.1')
+    port = config.get('moonraker_port', 7125)
+    base = f'http://{host}:{port}'
+
+    try:
+        # 先检查 Moonraker 是否可达
+        r = requests.get(f'{base}/server/info', timeout=3)
+        if r.status_code != 200:
+            return uuids, False  # Moonraker 不可达，跳过验证
+
+        # 收集所有需要查询的 MCU section 名称（去重，保持顺序）
+        section_names = list(dict.fromkeys(
+            u.get('section', '').strip('[]') for u in uuids if u.get('section')
+        ))
+        if not section_names:
+            return uuids, True  # 没有 section 信息，无法验证
+
+        # 第一步：查询活跃配置，确定每个 MCU 实际配置了什么传输方式
+        r = requests.get(f'{base}/printer/objects/query?configfile', timeout=5)
+        if r.status_code != 200:
+            return uuids, True
+        config_settings = r.json().get('result', {}).get('status', {}).get('configfile', {}).get('settings', {})
+
+        # 第二步：筛选出真正配置了 CAN 的 MCU，再检查 Klipper 是否已连接
+        can_sections = []
+        can_uuid_map = {}  # section -> 对应的 uuid 信息
+        for u in uuids:
+            sname = u.get('section', '').strip('[]')
+            if not sname:
+                continue
+            sec_cfg = config_settings.get(sname, {})
+            serial = sec_cfg.get('serial')
+            canbus = sec_cfg.get('canbus_uuid')
+
+            if serial:
+                # MCU 配置了串口传输 → canbus_uuid 是残留
+                logger.info(
+                    f"MCU 验证: [{sname}] active config 为串口(serial={serial}), "
+                    f"canbus_uuid={canbus} 为残留，已跳过"
+                )
+                continue
+
+            if canbus:
+                can_sections.append(sname)
+                can_uuid_map[sname] = u
+
+        if not can_sections:
+            return [], True  # 没有 MCU 实际配置了 CAN
+
+        # 第二步：查询 webhooks 了解 Klipper 实时状态
+        # 关键判断：mcu_version 是 Moonraker 缓存的，Klipper shutdown 后仍会保留
+        r = requests.get(f'{base}/printer/objects/query?webhooks', timeout=5)
+        webhooks_state = 'unknown'
+        lost_mcus = []
+        if r.status_code == 200:
+            wh = r.json().get('result', {}).get('status', {}).get('webhooks', {})
+            webhooks_state = wh.get('state', 'unknown')
+            msg = wh.get('state_message', '')
+            # 解析 state_message，找出断连的 MCU，如 "Lost communication with MCU 'mcu'"
+            import re as _re
+            for m in _re.finditer(r"Lost communication with MCU '([^']+)'", msg):
+                lost_mcus.append(m.group(1))
+
+        # 第三步：查询这些 CAN MCU 的 Moonraker 缓存状态
+        query_str = '&'.join(urllib.parse.quote(s) for s in can_sections)
+        r = requests.get(f'{base}/printer/objects/query?{query_str}', timeout=5)
+        if r.status_code != 200:
+            return uuids, True
+
+        mcu_statuses = r.json().get('result', {}).get('status', {})
+
+        verified_uuids = []
+        for sname in can_sections:
+            mcu_status = mcu_statuses.get(sname, {})
+
+            # 判断 MCU 是否实际在线（不被 Klipper 断连消息覆盖）
+            is_klipper_ready = (webhooks_state == 'ready')
+            is_mcu_lost = sname in lost_mcus
+
+            if not is_klipper_ready and is_mcu_lost:
+                # Klipper 明确报告此 MCU 已断连，mcu_version 是缓存数据
+                logger.info(
+                    f"MCU 验证: [{sname}] Klipper 已断连 (state={webhooks_state}), "
+                    f"mcu_version={mcu_status.get('mcu_version','?')} 为缓存数据，已跳过 "
+                    f"(UUID={can_uuid_map[sname]['uuid']})"
+                )
+                continue
+
+            if mcu_status.get('mcu_version'):
+                verified_uuids.append(can_uuid_map[sname])
+                logger.info(
+                    f"MCU 验证: [{sname}] 通过 CAN 已连接 "
+                    f"(UUID={can_uuid_map[sname]['uuid']}, "
+                    f"MCU={mcu_status.get('mcu_constants',{}).get('MCU','?')}, "
+                    f"klipper_state={webhooks_state})"
+                )
+            else:
+                logger.info(
+                    f"MCU 验证: [{sname}] 配置了 CAN 但 Klipper 未连接，已跳过 "
+                    f"(UUID={can_uuid_map[sname]['uuid']})"
+                )
+
+        return verified_uuids, True
+    except requests.ConnectionError:
+        logger.warning("MCU 连接验证: Moonraker 连接失败，跳过验证")
+        return uuids, False
+    except Exception as e:
+        logger.warning(f"MCU 连接验证出错: {e}")
+        return uuids, True
 # ==================== CAN UUID搜索 API ====================
 @app.route('/api/system/can-uuid', methods=['POST'])
 def search_can_uuid():
@@ -386,8 +586,46 @@ def search_can_uuid():
             elif 'Error' in line or 'error' in line:
                 if not error:
                     error = line.strip()
-        if not uuids and error:
-            return jsonify({'uuids': [], 'error': error})
+        if not uuids:
+            error_msg = error  # 保存原始错误，后备尝试后一起返回
+            
+            # 后备方案A：通过 Moonraker 读取 printer.cfg
+            mr_uuids, mr_available, mr_error = query_moonraker_printer_cfg()
+            if mr_uuids:
+                # 验证 UUID 对应的 MCU 是否实际连接
+                verified_uuids, _ = verify_mcu_connection_status(mr_uuids)
+                for u in verified_uuids:
+                    u['source'] = 'moonraker'
+                return jsonify({
+                    'uuids': verified_uuids,
+                    'source': 'printer_cfg',
+                    'moonraker_available': True,
+                    'verified': True,
+                    'skipped': len(mr_uuids) - len(verified_uuids),
+                })
+            
+            # 后备方案B：直接读取文件系统
+            fs_uuids, fs_available = read_printer_cfg_direct()
+            if fs_uuids:
+                # 验证 UUID 对应的 MCU 是否实际连接
+                verified_uuids, verifier_available = verify_mcu_connection_status(fs_uuids)
+                for u in verified_uuids:
+                    u['source'] = 'filesystem'
+                return jsonify({
+                    'uuids': verified_uuids,
+                    'source': 'printer_cfg',
+                    'moonraker_available': verifier_available,
+                    'verified': verifier_available,
+                    'skipped': len(fs_uuids) - len(verified_uuids),
+                })
+            
+            # 两个方案都失败
+            return jsonify({
+                'uuids': [],
+                'source': 'none',
+                'moonraker_available': mr_available,
+                'error': error_msg or 'Moonraker 不可达且无法读取 printer.cfg',
+            })
         return jsonify({'uuids': uuids})
     except subprocess.TimeoutExpired:
         return jsonify({'uuids': [], 'error': 'CAN查询超时'})
@@ -1233,6 +1471,29 @@ def detect_devices():
         except:
             pass
         
+        # UF2/RP2040 BOOT设备检测
+        try:
+            # 方法1: 通过lsblk检测RP2040 BOOT块设备
+            lsblk_output = subprocess.run(
+                'lsblk -o NAME,MODEL 2>/dev/null | grep -i "RP2"',
+                shell=True, capture_output=True, text=True
+            )
+            if lsblk_output.stdout.strip():
+                for line in lsblk_output.stdout.strip().split('\n'):
+                    if line.strip():
+                        devices.append({'id': 'rp2040_boot', 'name': f'RP2040 UF2 ({line.strip()})'})
+            
+            # 方法2: 通过lsusb检测Raspberry Pi RP2 Boot设备 (2e8a:0003)
+            if not any(d['id'] == 'rp2040_boot' for d in devices):
+                lsusb_output = subprocess.run(
+                    'lsusb | grep -i "2e8a:" 2>/dev/null || echo ""',
+                    shell=True, capture_output=True, text=True
+                )
+                if lsusb_output.stdout.strip() and '2e8a:' in lsusb_output.stdout:
+                    devices.append({'id': 'rp2040_boot', 'name': 'RP2040 UF2 (USB 2e8a)'})
+        except:
+            pass
+        
         return jsonify({'devices': devices})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1500,7 +1761,7 @@ def handle_config():
     else:
         data = request.json
         # 更新配置
-        for key in ['klipper_path', 'katapult_path', 'json_repo_url', 'port']:
+        for key in ['klipper_path', 'katapult_path', 'json_repo_url', 'port', 'moonraker_host', 'moonraker_port']:
             if key in data:
                 config[key] = data[key]
         
@@ -1654,208 +1915,324 @@ def switch_web_ui():
         return jsonify({'error': str(e)}), 500
 CAN_NETWORK_DIR = '/etc/systemd/network'
 CAN_INTERFACES_DIR = '/etc/network/interfaces.d'
+CAN_BITRATES = {
+    1000000: '1M',
+    500000: '500K',
+    250000: '250K',
+}
+BITRATE_VALUES = sorted(CAN_BITRATES.keys(), reverse=True)  # [1000000, 500000, 250000]
 
-def detect_can_config_type():
-    """检测CAN配置类型"""
-    # 检测systemd-networkd配置
+
+def format_bitrate(bitrate):
+    """将 bitrate 数值转为友好显示格式"""
+    for val, label in CAN_BITRATES.items():
+        if bitrate == val:
+            return label
+    # 兜底：转 K/M 单位
+    if bitrate >= 1000000:
+        return f"{bitrate // 1000000}M"
+    elif bitrate >= 1000:
+        return f"{bitrate // 1000}K"
+    return str(bitrate)
+
+
+def sudo_write_file(path, content):
+    """使用 sudo 写入文件内容（避免shell转义问题）"""
+    proc = subprocess.Popen(
+        ['sudo', 'tee', path],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE
+    )
+    stdout, stderr = proc.communicate(content.encode())
+    if proc.returncode != 0:
+        raise Exception(f'写入文件失败 {path}: {stderr.decode()}')
+
+
+def sudo_mkdir(path):
+    """使用 sudo 创建目录"""
+    subprocess.run(['sudo', 'mkdir', '-p', path], capture_output=True, check=True, timeout=10)
+
+
+def get_can_live_status():
+    """获取当前 CAN0 接口实时状态（直接从内核读取）"""
+    result = {
+        'interface': 'can0',
+        'exists': False,
+        'state': None,
+        'bitrate': None,
+        'txqueuelen': None,
+    }
+    try:
+        r = subprocess.run(
+            'ip -details link show can0 2>/dev/null',
+            shell=True, capture_output=True, text=True, timeout=5
+        )
+        output = r.stdout.strip()
+        if not output:
+            return result
+        result['exists'] = True
+        # 解析 state: "state UP" / "state DOWN"
+        m = re.search(r'state\s+(\S+)', output)
+        if m:
+            result['state'] = m.group(1).upper()
+        # 解析 bitrate
+        m = re.search(r'bitrate\s+(\d+)', output)
+        if m:
+            result['bitrate'] = int(m.group(1))
+        # 解析 txqueuelen
+        m = re.search(r'txqueuelen\s+(\d+)', output)
+        if m:
+            result['txqueuelen'] = int(m.group(1))
+    except:
+        pass
+    return result
+
+
+def detect_os_type():
+    """检测系统类型（Debian系 vs 其他）"""
+    try:
+        with open('/etc/os-release', 'r') as f:
+            content = f.read()
+            if 'Debian' in content or 'Ubuntu' in content:
+                return 'debian'
+    except:
+        pass
+    try:
+        with open('/etc/issue', 'r') as f:
+            content = f.read()
+            if 'Debian' in content or 'Ubuntu' in content:
+                return 'debian'
+    except:
+        pass
+    return 'other'
+
+
+def detect_can_config():
+    """智能检测 CAN 配置（三模式：flyos_fast / systemd / interfaces / none）
+
+    检测优先级：FlyOS-FAST > systemd-networkd > 传统interfaces
+    三种模式互斥，一旦命中即返回。
+    """
+    result = {
+        'system': 'none',
+        'network_file': None,
+        'link_file': None,
+        'interfaces_file': None,
+        'bitrate': None,
+        'txqueuelen': None,
+    }
+
+    # 1. 检测 FlyOS-FAST
+    try:
+        with open('/etc/issue', 'r') as f:
+            if 'FlyOS-Fast' in f.read():
+                result['system'] = 'flyos_fast'
+                config_txt = '/config/config.txt'
+                if os.path.exists(config_txt):
+                    with open(config_txt, 'r') as f2:
+                        for line in f2:
+                            m = re.match(r'canbus_bitrate\s*=\s*(\d+)', line.strip())
+                            if m:
+                                result['bitrate'] = int(m.group(1))
+                                break
+                return result
+    except:
+        pass
+
+    # 2. 检测 systemd-networkd
     if os.path.exists(CAN_NETWORK_DIR):
-        for filename in os.listdir(CAN_NETWORK_DIR):
-            if 'can' in filename.lower() and filename.endswith('.network'):
-                return 'systemd', os.path.join(CAN_NETWORK_DIR, filename)
-    
-    # 检测传统interfaces配置
+        files = os.listdir(CAN_NETWORK_DIR)
+        # 查找 *can*.network
+        for fname in files:
+            if 'can' in fname.lower() and fname.endswith('.network'):
+                result['network_file'] = os.path.join(CAN_NETWORK_DIR, fname)
+                break
+        # 查找 *can*.link
+        for fname in files:
+            if 'can' in fname.lower() and fname.endswith('.link'):
+                result['link_file'] = os.path.join(CAN_NETWORK_DIR, fname)
+                break
+
+    if result['network_file']:
+        result['system'] = 'systemd'
+        try:
+            with open(result['network_file'], 'r') as f:
+                content = f.read()
+            m = re.search(r'BitRate\s*=\s*(\d+)', content)
+            if m:
+                bitrate_val = int(m.group(1))
+                if bitrate_val == 1:
+                    result['bitrate'] = 1000000
+                elif bitrate_val == 500:
+                    result['bitrate'] = 500000
+                elif bitrate_val == 250:
+                    result['bitrate'] = 250000
+                else:
+                    result['bitrate'] = bitrate_val
+        except:
+            pass
+        if result['link_file']:
+            try:
+                with open(result['link_file'], 'r') as f:
+                    link_content = f.read()
+                m = re.search(r'TxQueueLength\s*=\s*(\d+)', link_content)
+                if m:
+                    result['txqueuelen'] = int(m.group(1))
+            except:
+                pass
+        return result
+
+    # 3. 检测传统 interfaces
     if os.path.exists(CAN_INTERFACES_DIR):
-        for filename in os.listdir(CAN_INTERFACES_DIR):
-            if 'can' in filename.lower():
-                return 'interfaces', os.path.join(CAN_INTERFACES_DIR, filename)
-    
-    return None, None
+        for fname in os.listdir(CAN_INTERFACES_DIR):
+            if fname.lower().startswith('can'):
+                result['interfaces_file'] = os.path.join(CAN_INTERFACES_DIR, fname)
+                result['system'] = 'interfaces'
+                try:
+                    with open(result['interfaces_file'], 'r') as f:
+                        content = f.read()
+                    m = re.search(r'bitrate\s+(\d+)', content)
+                    if m:
+                        result['bitrate'] = int(m.group(1))
+                    m = re.search(r'txqueuelen\s+(\d+)', content)
+                    if m:
+                        result['txqueuelen'] = int(m.group(1))
+                except:
+                    pass
+                return result
+
+    return result
+
+
+def get_usb_can_count():
+    """检测 USB CAN 适配器数量"""
+    try:
+        r = subprocess.run(
+            'lsusb | grep "1d50:" || echo ""',
+            shell=True, capture_output=True, text=True, timeout=5
+        )
+        devices = []
+        for line in r.stdout.strip().split('\n'):
+            if not line.strip():
+                continue
+            if 'stm32f072' in line.lower() or 'stm32f446' in line.lower():
+                continue
+            devices.append(line)
+        return len(devices)
+    except:
+        return 0
 
 @app.route('/api/system/can-config', methods=['GET'])
 def get_can_config():
-    """获取当前CAN配置"""
+    """获取当前CAN配置（三模式自适应）"""
     try:
-        config_type, config_path = detect_can_config_type()
-        
-        if not config_type:
-            return jsonify({
-                'exists': False,
-                'message': '未检测到CAN配置文件'
-            })
-        
-        # 读取配置内容
-        with open(config_path, 'r') as f:
-            content = f.read()
-        
-        # 解析配置
-        config = {
-            'exists': True,
-            'type': config_type,
-            'path': config_path,
-            'content': content
+        config = detect_can_config()
+        live = get_can_live_status()
+
+        result = {
+            'exists': config['system'] != 'none',
+            'system': config['system'],
+            'bitrate': config['bitrate'],
+            'txqueuelen': config['txqueuelen'],
+            'network_file': config['network_file'],
+            'link_file': config['link_file'],
+            'interfaces_file': config['interfaces_file'],
+            'live': live,
         }
-        
-        # 解析速率
-        if config_type == 'systemd':
-            # 解析 BitRate=1000000 或 BitRate=1M
-            import re
-            bitrate_match = re.search(r'BitRate\s*=\s*(\d+)', content)
-            if bitrate_match:
-                bitrate_val = int(bitrate_match.group(1))
-                # 转换M单位到完整数值
-                if bitrate_val == 1:
-                    config['bitrate'] = 1000000
-                elif bitrate_val == 500:
-                    config['bitrate'] = 500000
-                elif bitrate_val == 250:
-                    config['bitrate'] = 250000
-                else:
-                    config['bitrate'] = bitrate_val
-            
-            # 解析 TxQueueLength（从.link文件）
-            link_file = os.path.join(CAN_NETWORK_DIR, '99-can.link')
-            if os.path.exists(link_file):
-                with open(link_file, 'r') as f:
-                    link_content = f.read()
-                txqueue_match = re.search(r'TxQueueLength\s*=\s*(\d+)', link_content)
-                if txqueue_match:
-                    config['txqueuelen'] = int(txqueue_match.group(1))
-        else:
-            # 解析传统配置 bitrate 1000000
-            import re
-            bitrate_match = re.search(r'bitrate\s+(\d+)', content)
-            if bitrate_match:
-                config['bitrate'] = int(bitrate_match.group(1))
-        
-        # 获取当前CAN0状态
-        try:
-            result = subprocess.run(
-                'ip -details link show can0 2>/dev/null || echo "CAN0 not found"',
-                shell=True, capture_output=True, text=True
-            )
-            config['status'] = result.stdout
-        except:
-            config['status'] = '无法获取CAN0状态'
-        
-        # 检测 USB CAN设备数量 (OpenMoko CAN 适配器 1d50:xxxx)
-        try:
-            lsusb_result = subprocess.run(
-                'lsusb | grep "1d50:" || echo ""',
-                shell=True, capture_output=True, text=True
-            )
-            # 过滤掉已知的非 CAN设备（如 stm32f072xb、stm32f446 等 Klipper 主板）
-            usb_devices = []
-            for line in lsusb_result.stdout.strip().split('\n'):
-                if not line.strip():
-                    continue
-                # 排除主板设备，只保留 CAN 适配器
-                # 常见主板ID: 614e(stm32f072), 6018(stm32f446), 等
-                # CAN 适配器通常是 606f 或其他
-                if 'stm32f072' in line.lower() or 'stm32f446' in line.lower():
-                    continue
-                usb_devices.append(line)
-                    
-            config['usb_can_count'] = len(usb_devices)
-            config['usb_can_devices'] = usb_devices
-        except:
-            config['usb_can_count'] = 0
-            config['usb_can_devices'] = []
-        
-        return jsonify(config)
-        
+
+        # 配置值友好显示
+        if config['bitrate']:
+            result['bitrate_display'] = format_bitrate(config['bitrate'])
+        if live['bitrate']:
+            result['live']['bitrate_display'] = format_bitrate(live['bitrate'])
+
+        # FlyOS-FAST 特殊信息
+        if config['system'] == 'flyos_fast':
+            result['config_txt'] = '/config/config.txt'
+            result['flyos_readonly'] = True
+            result['message'] = 'FlyOS-Fast 系统 CAN 配置修改将在后续版本支持'
+
+        # USB CAN 设备检测
+        result['usb_can_count'] = get_usb_can_count()
+
+        return jsonify(result)
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/system/can-config', methods=['POST'])
 def set_can_config():
-    """设置CAN配置"""
+    """设置CAN配置（三模式自适应，支持自动生成）"""
     try:
         data = request.get_json()
         bitrate = data.get('bitrate', 1000000)
         txqueuelen = data.get('txqueuelen', 1024)
-        config_type = data.get('type', 'systemd')
-        
-        # 检测是否为Fast系统
-        is_fast = False
-        try:
-            with open('/etc/issue', 'r') as f:
-                if 'FlyOS-Fast' in f.read():
-                    is_fast = True
-        except:
-            pass
-        
-        if is_fast:
+
+        # 校验速率：仅支持 250K / 500K / 1M
+        if bitrate not in CAN_BITRATES:
+            return jsonify({
+                'error': f'不支持的速率: {bitrate}，仅支持 {", ".join(CAN_BITRATES.values())}'
+            }), 400
+
+        # 校验缓存
+        txqueuelen = int(txqueuelen)
+        if txqueuelen < 128 or txqueuelen > 8192:
+            return jsonify({'error': '缓存大小范围: 128-8192'}), 400
+
+        bitrate_str = CAN_BITRATES[bitrate]
+
+        # 检测当前配置
+        config = detect_can_config()
+
+        # FlyOS-FAST：预留只读
+        if config['system'] == 'flyos_fast':
             return jsonify({
                 'success': False,
-                'message': 'FlyOS-Fast系统已预设CAN配置，无需修改'
+                'message': 'FlyOS-Fast 系统 CAN 配置修改将在后续版本支持，当前为只读'
             })
-        
-        if config_type == 'systemd':
-            # 创建systemd-networkd配置
-            os.makedirs(CAN_NETWORK_DIR, exist_ok=True)
-            
-            # 查找或创建配置文件
-            config_file = None
-            for filename in os.listdir(CAN_NETWORK_DIR):
-                if 'can' in filename.lower() and filename.endswith('.network'):
-                    config_file = os.path.join(CAN_NETWORK_DIR, filename)
-                    break
-            
-            if not config_file:
-                config_file = os.path.join(CAN_NETWORK_DIR, '99-can.network')
-            
-            # 写入配置 - 转换bitrate为M格式
-            if bitrate >= 1000000:
-                bitrate_str = f"{bitrate // 1000000}M"
-            elif bitrate >= 1000:
-                bitrate_str = f"{bitrate // 1000}K"
-            else:
-                bitrate_str = str(bitrate)
-            
-            # 使用sudo tee写入配置文件
-            config_content = f"""[Match]
+
+        # 写入 systemd 或 interfaces 配置
+        systemd_mode = config['system'] in ('systemd', 'none')
+
+        if systemd_mode:
+            # ---- systemd-networkd 模式 ----
+            network_file = config.get('network_file')
+            if not network_file:
+                network_file = os.path.join(CAN_NETWORK_DIR, '99-can.network')
+            link_file = config.get('link_file')
+            if not link_file:
+                link_file = os.path.join(CAN_NETWORK_DIR, '99-can.link')
+
+            sudo_mkdir(CAN_NETWORK_DIR)
+
+            # 写入 network 文件
+            network_content = f"""[Match]
 Name=can*
 
 [CAN]
 BitRate={bitrate_str}
 """
-            subprocess.run(f'echo "{config_content}" | sudo tee {config_file} > /dev/null', 
-                         shell=True, capture_output=True, check=True)
-            
-            # 创建link配置文件
+            sudo_write_file(network_file, network_content)
+
+            # 写入 link 文件
             link_content = f"""[Match]
 OriginalName=can*
 
 [Link]
 TxQueueLength={txqueuelen}
 """
-            link_file = os.path.join(CAN_NETWORK_DIR, '99-can.link')
-            subprocess.run(f'echo "{link_content}" | sudo tee {link_file} > /dev/null', 
-                         shell=True, capture_output=True, check=True)
-            
-            # 重启systemd-networkd
-            subprocess.run('sudo systemctl restart systemd-networkd', shell=True, capture_output=True)
-            
-            # 立即应用配置到can0接口（如果存在）
-            try:
-                can0_check = subprocess.run('ip link show can0 2>&1', 
-                                           shell=True, capture_output=True, text=True)
-                if 'does not exist' not in can0_check.stdout:
-                    # can0存在，立即应用新配置
-                    subprocess.run('sudo ip link set can0 down', shell=True, capture_output=True)
-                    subprocess.run(f'sudo ip link set can0 type can bitrate {bitrate}', 
-                                 shell=True, capture_output=True)
-                    subprocess.run(f'sudo ip link set can0 txqueuelen {txqueuelen}', 
-                                 shell=True, capture_output=True)
-                    subprocess.run('sudo ip link set can0 up', shell=True, capture_output=True)
-            except:
-                pass
-            
+            sudo_write_file(link_file, link_content)
+
         else:
-            # 创建传统interfaces配置
-            subprocess.run(f'sudo mkdir -p {CAN_INTERFACES_DIR}', shell=True, capture_output=True)
-            config_file = os.path.join(CAN_INTERFACES_DIR, 'can0')
-            
+            # ---- 传统 interfaces 模式 ----
+            interfaces_file = config.get('interfaces_file')
+            if not interfaces_file:
+                interfaces_file = os.path.join(CAN_INTERFACES_DIR, 'can0')
+
+            sudo_mkdir(CAN_INTERFACES_DIR)
+
             interfaces_content = f"""allow-hotplug can0
 iface can0 can static
     bitrate {bitrate}
@@ -1863,14 +2240,54 @@ iface can0 can static
     pre-up ip link set can0 type can bitrate {bitrate}
     pre-up ip link set can0 txqueuelen {txqueuelen}
 """
-            subprocess.run(f'echo "{interfaces_content}" | sudo tee {config_file} > /dev/null',
-                         shell=True, capture_output=True, check=True)
-        
+            sudo_write_file(interfaces_file, interfaces_content)
+
+        # ---- 根据模式生效配置 ----
+        if systemd_mode:
+            # systemd 模式：重启 networkd 让它根据新配置接管接口
+            subprocess.run(
+                'sudo systemctl restart systemd-networkd',
+                shell=True, capture_output=True, timeout=30
+            )
+            # 等待 networkd 完成初始化
+            time.sleep(3)
+        else:
+            # interfaces 模式：手动翻转让新配置生效
+            try:
+                subprocess.run('sudo ip link set can0 down',
+                               shell=True, capture_output=True, timeout=10)
+                time.sleep(0.5)
+                subprocess.run(f'sudo ip link set can0 type can bitrate {bitrate}',
+                               shell=True, capture_output=True, timeout=10)
+                time.sleep(0.3)
+                subprocess.run(f'sudo ip link set can0 txqueuelen {txqueuelen}',
+                               shell=True, capture_output=True, timeout=10)
+                time.sleep(0.3)
+            except:
+                pass
+
+        # 确保 can0 接口已启动（只 up，不做 down/up 翻转，避免冲突）
+        try:
+            check = subprocess.run(
+                'ip link show can0 2>&1',
+                shell=True, capture_output=True, text=True, timeout=5
+            )
+            if 'does not exist' not in check.stdout:
+                detail = subprocess.run(
+                    'ip -details link show can0 2>/dev/null',
+                    shell=True, capture_output=True, text=True, timeout=5
+                )
+                if 'state DOWN' in detail.stdout or 'state UNKNOWN' in detail.stdout:
+                    subprocess.run('sudo ip link set can0 up',
+                                   shell=True, capture_output=True, timeout=10)
+        except:
+            pass
+
         return jsonify({
             'success': True,
-            'message': f'CAN配置已更新，速率: {bitrate_str}，已立即生效'
+            'message': f'CAN配置已更新，速率: {bitrate_str}，缓存: {txqueuelen}'
         })
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
