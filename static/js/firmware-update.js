@@ -275,7 +275,11 @@ function toggleUpdateSelection(configId) {
 // 全选/全不选
 function selectAllUpdateable(select) {
     if (select) {
-        updateableConfigs.forEach(c => selectedUpdateConfigs.add(c.id));
+        updateableConfigs.forEach(c => {
+            if (c.enabled !== false) {
+                selectedUpdateConfigs.add(c.id);
+            }
+        });
     } else {
         selectedUpdateConfigs.clear();
     }
@@ -302,7 +306,7 @@ function updateSelectedUpdateList() {
         if (config) {
             html += `
                 <span class="selected-item">
-                    ${config.name}
+                    ${config.name || config.id}
                     <span class="remove" onclick="toggleUpdateSelection('${id}')">×</span>
                 </span>
             `;
@@ -369,7 +373,7 @@ function openUpdateSettingsForNewConfig(boardConfig) {
 }
 
 // 打开更新设置弹窗（用于编辑现有配置）
-function openUpdateSettings(configId) {
+async function openUpdateSettings(configId) {
     const config = updateableConfigs.find(c => c.id === configId);
     if (!config) return;
     
@@ -382,13 +386,36 @@ function openUpdateSettings(configId) {
     document.getElementById('updateSettingKatapultSerial').value = config.katapult_serial || '';
     
     // 显示关联的主板配置信息
+    const linkedInfoDiv = document.getElementById('linkedBoardConfigInfo');
     if (config.board_config) {
-        document.getElementById('linkedBoardConfigInfo').innerHTML = `
+        linkedInfoDiv.innerHTML = `
             <div style="background:#e3f2fd;padding:10px;border-radius:8px;margin-bottom:15px;">
                 <strong>关联主板配置:</strong> ${config.board_config.name}<br>
                 <small>${config.board_config.platform} ${config.board_config.mcu} | ${config.board_config.type}</small>
             </div>
         `;
+    } else if (config.board_config_id) {
+        // 后端未嵌入 board_config，主动获取
+        linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#666;">加载关联配置信息...</div>`;
+        try {
+            const mfr = config._manufacturer || config.manufacturer;
+            const bcResponse = await fetch(`/api/config/get/${mfr}/${config.board_config_id}`);
+            const boardConfig = await bcResponse.json();
+            if (boardConfig && !boardConfig.error) {
+                linkedInfoDiv.innerHTML = `
+                    <div style="background:#e3f2fd;padding:10px;border-radius:8px;margin-bottom:15px;">
+                        <strong>关联主板配置:</strong> ${boardConfig.name || config.board_config_id}<br>
+                        <small>${boardConfig.platform || ''} ${boardConfig.mcu || ''} | ${boardConfig.type || ''}</small>
+                    </div>
+                `;
+            } else {
+                linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#888;">关联配置: ${config.board_config_id}</div>`;
+            }
+        } catch (e) {
+            linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#888;">关联配置: ${config.board_config_id}</div>`;
+        }
+    } else {
+        linkedInfoDiv.innerHTML = '';
     }
     
     // 根据启用状态显示/隐藏选项
@@ -561,25 +588,46 @@ async function compileAllSelected() {
     const total = configs.length;
     
     for (const config of configs) {
-        updateBatchStatus(`正在编译: ${config.name}...`);
-        addBatchResult(config.name, 'running', '编译中...');
+        const displayName = config.name || config.id;
+        updateBatchStatus(`正在编译: ${displayName}...`);
+        addBatchResult(displayName, 'running', '编译中...');
+        
+        if (!config.board_config_id) {
+            addBatchResult(displayName, 'error', '未关联主板配置，无法编译');
+            completed++;
+            updateBatchProgress(completed, total);
+            continue;
+        }
         
         try {
-            const response = await fetch('/api/firmware/compile', {
+            // 先获取完整的主板配置
+            const mfr = config._manufacturer || config.manufacturer;
+            const bcResponse = await fetch(`/api/config/get/${mfr}/${config.board_config_id}`);
+            const boardConfig = await bcResponse.json();
+            
+            if (boardConfig.error) {
+                addBatchResult(displayName, 'error', '获取主板配置失败: ' + boardConfig.error);
+                completed++;
+                updateBatchProgress(completed, total);
+                continue;
+            }
+            
+            // 使用完整的主板配置进行编译
+            const compileResponse = await fetch('/api/firmware/compile', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ config: config })
+                body: JSON.stringify({ config: boardConfig })
             });
             
-            const result = await response.json();
+            const result = await compileResponse.json();
             
             if (result.success) {
-                addBatchResult(config.name, 'success', '编译成功');
+                addBatchResult(displayName, 'success', '编译成功');
             } else {
-                addBatchResult(config.name, 'error', result.error || '编译失败');
+                addBatchResult(displayName, 'error', result.error || '编译失败');
             }
         } catch (error) {
-            addBatchResult(config.name, 'error', error.message);
+            addBatchResult(displayName, 'error', error.message);
         }
         
         completed++;
@@ -621,37 +669,57 @@ async function flashAllSelected() {
     
     for (const config of configs) {
         const mode = config.mode || 'CAN';
+        const displayName = config.name || config.id;
         
-        updateBatchStatus(`正在更新: ${config.name}...`);
-        addBatchResult(config.name, 'running', '编译中...');
+        updateBatchStatus(`正在更新: ${displayName}...`);
+        addBatchResult(displayName, 'running', '编译中...');
+        
+        if (!config.board_config_id) {
+            addBatchResult(displayName, 'error', '未关联主板配置，无法编译');
+            completed++;
+            updateBatchProgress(completed, total);
+            continue;
+        }
         
         try {
-            // 1. 先编译
-            const compileResponse = await fetch('/api/firmware/compile', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ config: config })
-            });
+            // 1. 先获取完整的主板配置
+            const mfr = config._manufacturer || config.manufacturer;
+            const bcResponse = await fetch(`/api/config/get/${mfr}/${config.board_config_id}`);
+            const boardConfig = await bcResponse.json();
             
-            const compileResult = await compileResponse.json();
-            
-            if (!compileResult.success) {
-                addBatchResult(config.name, 'error', '编译失败: ' + (compileResult.error || '未知错误'));
+            if (boardConfig.error) {
+                addBatchResult(displayName, 'error', '获取主板配置失败: ' + boardConfig.error);
                 completed++;
                 updateBatchProgress(completed, total);
                 continue;
             }
             
-            // 2. 根据模式处理
+            // 2. 使用完整的主板配置进行编译
+            const compileResponse = await fetch('/api/firmware/compile', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ config: boardConfig })
+            });
+            
+            const compileResult = await compileResponse.json();
+            
+            if (!compileResult.success) {
+                addBatchResult(displayName, 'error', '编译失败: ' + (compileResult.error || '未知错误'));
+                completed++;
+                updateBatchProgress(completed, total);
+                continue;
+            }
+            
+            // 3. 根据模式处理
             if (mode === 'TF') {
                 // TF卡模式：提供下载
-                addBatchResult(config.name, 'success', '编译成功，请下载firmware.bin到TF卡');
+                addBatchResult(displayName, 'success', '编译成功，请下载firmware.bin到TF卡');
                 // 自动触发下载
                 const downloadUrl = `/api/firmware/download?path=${encodeURIComponent(compileResult.firmware_path)}`;
                 window.open(downloadUrl, '_blank');
             } else if (mode === 'UF2') {
                 // UF2模式：直接烧录
-                addBatchResult(config.name, 'running', 'UF2烧录中...');
+                addBatchResult(displayName, 'running', 'UF2烧录中...');
                 const flashResponse = await fetch('/api/firmware/flash', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -663,13 +731,13 @@ async function flashAllSelected() {
                 });
                 const flashResult = await flashResponse.json();
                 if (flashResult.success) {
-                    addBatchResult(config.name, 'success', 'UF2烧录成功');
+                    addBatchResult(displayName, 'success', 'UF2烧录成功');
                 } else {
-                    addBatchResult(config.name, 'error', 'UF2烧录失败: ' + (flashResult.error || '未知错误'));
+                    addBatchResult(displayName, 'error', 'UF2烧录失败: ' + (flashResult.error || '未知错误'));
                 }
             } else if (mode === 'HOST') {
                 // HOST模式：复制到klipper目录
-                addBatchResult(config.name, 'running', '安装到上位机...');
+                addBatchResult(displayName, 'running', '安装到上位机...');
                 const installResponse = await fetch('/api/firmware/install-host', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -679,13 +747,13 @@ async function flashAllSelected() {
                 });
                 const installResult = await installResponse.json();
                 if (installResult.success) {
-                    addBatchResult(config.name, 'success', '安装成功，请重启Klipper');
+                    addBatchResult(displayName, 'success', '安装成功，请重启Klipper');
                 } else {
-                    addBatchResult(config.name, 'error', '安装失败: ' + (installResult.error || '未知错误'));
+                    addBatchResult(displayName, 'error', '安装失败: ' + (installResult.error || '未知错误'));
                 }
             } else {
                 // 其他模式：烧录
-                addBatchResult(config.name, 'running', '烧录中...');
+                addBatchResult(displayName, 'running', '烧录中...');
                 
                 // 将新模式映射到旧的flash_mode
                 const modeToFlashMode = {
@@ -711,14 +779,14 @@ async function flashAllSelected() {
                 const flashResult = await flashResponse.json();
                 
                 if (flashResult.success) {
-                    addBatchResult(config.name, 'success', '更新成功');
+                    addBatchResult(displayName, 'success', '更新成功');
                 } else {
-                    addBatchResult(config.name, 'error', '烧录失败: ' + (flashResult.error || '未知错误'));
+                    addBatchResult(displayName, 'error', '烧录失败: ' + (flashResult.error || '未知错误'));
                 }
             }
             
         } catch (error) {
-            addBatchResult(config.name, 'error', error.message);
+            addBatchResult(displayName, 'error', error.message);
         }
         
         completed++;

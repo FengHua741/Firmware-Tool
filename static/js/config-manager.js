@@ -393,9 +393,6 @@ function renderFormPanel(data) {
         return `<option value="${mode}" ${selected}>${label}</option>`;
     }).join('');
 
-    // 连接方式（简化显示）
-    const connHtml = (data.connections || []).map(c => `<span class="cm-tag">${c}</span>`).join(' ') || '-';
-
     return `
         <div class="cm-form-grid">
             <!-- 基本信息 -->
@@ -465,7 +462,16 @@ function renderFormPanel(data) {
                     </div>
                     <div class="cm-form-field">
                         <label>通信接口</label>
-                        <div class="cm-tags" id="cmConnTags">${connHtml}</div>
+                        <div class="cm-connections-editor">
+                            <div class="cm-tags" id="cmConnTags">
+                                ${connections.map((c, i) => `<span class="cm-tag">${escapeHtml(c)} <span class="cm-tag-remove" onclick="removeConnection(${i})" style="cursor:pointer;margin-left:4px;">×</span></span>`).join(' ') || '<span style="color:#999;">暂无</span>'}
+                            </div>
+                            <div style="display:flex;gap:6px;margin-top:6px;">
+                                <input type="text" id="cmNewConnection" class="cm-input" placeholder="输入连接方式名称" style="flex:1;padding:4px 8px;font-size:13px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addConnection()}">
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="addConnection()" style="white-space:nowrap;">添加</button>
+                            </div>
+                            <input type="hidden" id="cmConnections" value='${escapeHtml(JSON.stringify(connections))}'>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -727,6 +733,48 @@ function toggleCmFwUpdateOptions() {
     document.getElementById('cmFwUpdateOptions').style.display = enabled ? 'block' : 'none';
 }
 
+// 添加通信接口
+function addConnection() {
+    const input = document.getElementById('cmNewConnection');
+    const name = input.value.trim();
+    if (!name) return;
+    const hiddenInput = document.getElementById('cmConnections');
+    let connections = [];
+    try { connections = JSON.parse(hiddenInput.value || '[]'); } catch(e) {}
+    if (!connections.includes(name)) {
+        connections.push(name);
+        hiddenInput.value = JSON.stringify(connections);
+        renderConnTags(connections);
+    }
+    input.value = '';
+    input.focus();
+    syncFormToJson();
+}
+
+// 删除通信接口
+function removeConnection(index) {
+    const hiddenInput = document.getElementById('cmConnections');
+    let connections = [];
+    try { connections = JSON.parse(hiddenInput.value || '[]'); } catch(e) {}
+    connections.splice(index, 1);
+    hiddenInput.value = JSON.stringify(connections);
+    renderConnTags(connections);
+    syncFormToJson();
+}
+
+// 渲染通信接口标签
+function renderConnTags(connections) {
+    const tagsEl = document.getElementById('cmConnTags');
+    if (!tagsEl) return;
+    if (connections.length === 0) {
+        tagsEl.innerHTML = '<span style="color:#999;">暂无</span>';
+        return;
+    }
+    tagsEl.innerHTML = connections.map((c, i) =>
+        `<span class="cm-tag">${escapeHtml(c)} <span class="cm-tag-remove" onclick="removeConnection(${i})" style="cursor:pointer;margin-left:4px;">×</span></span>`
+    ).join(' ');
+}
+
 // ==================== 同步 ====================
 
 function collectFormData() {
@@ -760,6 +808,16 @@ function collectFormData() {
 
     // 烧录方式
     data.flash_modes = Array.from(document.querySelectorAll('input[name="cmFlashMode"]:checked')).map(cb => cb.value);
+
+    // 通信接口（从隐藏字段读取JSON数组）
+    const connInput = document.getElementById('cmConnections');
+    if (connInput) {
+        try {
+            data.connections = JSON.parse(connInput.value || '[]');
+        } catch (e) {
+            data.connections = [];
+        }
+    }
 
     // 固件更新
     const fwEnabled = getVal('cmFwUpdateEnabled') === 'true';

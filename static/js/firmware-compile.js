@@ -822,18 +822,6 @@ async function refreshDeviceIds() {
     }
 }
 
-// 固件来源变化
-function onFirmwareSourceChange() {
-    const source = document.getElementById('firmwareSource').value;
-    const uploadArea = document.getElementById('firmwareUploadArea');
-    
-    if (source === 'upload') {
-        uploadArea.style.display = 'block';
-    } else {
-        uploadArea.style.display = 'none';
-    }
-}
-
 // 烧录模式变化处理
 function onFlashModeChange() {
     const flashModeEl = document.getElementById('flashMode');
