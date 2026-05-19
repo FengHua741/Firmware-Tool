@@ -29,7 +29,7 @@ def get_board_types(manufacturer):
     if os.path.exists(manufacturer_dir):
         for item in os.listdir(manufacturer_dir):
             item_path = os.path.join(manufacturer_dir, item)
-            if os.path.isdir(item_path) and item in ['mainboard', 'toolboard', 'extensionboard']:
+            if os.path.isdir(item_path) and item in ['mainboard', 'toolboard', 'expansion']:
                 types.append(item)
     return sorted(types)
 
@@ -51,7 +51,13 @@ def normalize_config(config):
         'can_gpio': 'can_gpio',
         'BL烧录': 'bl_flash_support',
         'BL默认方式': 'bl_default_method',
-        'id': 'id'
+        'id': 'id',
+        '启动引脚': 'boot_pins',
+        'MCU型号': 'mcu',
+        'can_gpio_rx': 'can_gpio_rx',
+        'can_gpio_tx': 'can_gpio_tx',
+        'BL固件': 'bl_firmware',
+        'BL烧录配置': 'bl_flash_config',
     }
     
     normalized = {}

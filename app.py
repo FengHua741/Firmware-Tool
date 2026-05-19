@@ -8,6 +8,7 @@ from flask import Flask, jsonify, request, send_from_directory, send_file, Respo
 from flask_cors import CORS
 import subprocess
 import os
+import shlex
 import re
 import json
 import time
@@ -24,7 +25,6 @@ import sys
 
 # 导入主板配置
 from board_config_loader import load_all_boards, load_board_config, get_manufacturers, get_board_types, get_bl_firmwares
-from firmware_compiler import FirmwareCompiler
 from kconfig_can_parser import parse_can_options
 
 # 配置日志
@@ -74,6 +74,18 @@ def expand_klipper_path(path):
     return home_dir + path[1:]
 
 
+def sanitize_manufacturer(mfr):
+    """清理厂家名称，防止路径遍历"""
+    if not mfr:
+        return ''
+    # 移除路径遍历字符和特殊字符
+    safe = os.path.basename(os.path.normpath(mfr))
+    # 只允许字母、数字、连字符、下划线
+    import re
+    safe = re.sub(r'[^a-zA-Z0-9_-]', '', safe)
+    return safe
+
+
 app = Flask(__name__, static_folder='static')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 CORS(app)
@@ -121,7 +133,6 @@ def save_config(config):
         return False
 
 config = load_config()
-compiler = FirmwareCompiler(config.get('klipper_path', '~/klipper'))
 PORT = config.get('port', 9999)
 
 # 历史数据存储
@@ -565,7 +576,7 @@ def search_can_uuid():
         return jsonify({'uuids': [], 'error': '无效的CAN接口'})
     try:
         klipper_owner, home_dir = get_klipper_owner()
-        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python')
+        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
         canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
         output = subprocess.run(
             f'{python_bin} {canbus_script} {iface}',
@@ -679,7 +690,7 @@ def detect_can_for_flash():
     try:
         klipper_owner, home_dir = get_klipper_owner()
         
-        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python')
+        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
         canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
         
         output = subprocess.run(
@@ -702,7 +713,7 @@ def detect_can_for_flash():
                     uuid = match.group(1)
                     if uuid not in seen_uuids:
                         seen_uuids.add(uuid)
-                        devices.append(uuid)
+                        devices.append({'uuid': uuid})
         
         if not devices and not error:
             error = '未找到CAN设备，请确认CAN接口已启用且设备处于Katapult/DFU模式'
@@ -753,7 +764,7 @@ def get_all_ids():
         try:
             klipper_owner, home_dir = get_klipper_owner()
                     
-            python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python')
+            python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
             canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
                     
             output = subprocess.run(
@@ -1411,16 +1422,16 @@ def download_firmware():
     """下载固件文件"""
     try:
         firmware_path = request.args.get('path', '')
-        klipper_path = os.path.expanduser(config.get('klipper_path', '~/klipper'))
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         
         if not firmware_path:
             # 默认使用klipper/out/klipper.bin
             firmware_path = os.path.join(klipper_path, 'out', 'klipper.bin')
         
-        firmware_path = os.path.expanduser(firmware_path)
+        firmware_path = expand_klipper_path(firmware_path)
         
         # 安全检查：使用配置中的 klipper_path 而不是依赖运行时用户的 home 目录
-        klipper_out = os.path.join(os.path.expanduser(config.get('klipper_path', '~/klipper')), 'out')
+        klipper_out = os.path.join(expand_klipper_path(config.get('klipper_path', '~/klipper')), 'out')
         allowed_paths = [
             klipper_out,
             '/data/klipper/out',
@@ -1460,14 +1471,29 @@ def detect_devices():
         except:
             pass
         
-        # DFU设备
+        # DFU设备 - 使用dfu-util检测所有DFU设备
         try:
-            result = subprocess.run(
-                'lsusb | grep "0483:df11" || echo ""',
+            dfu_result = subprocess.run(
+                'dfu-util -l 2>/dev/null || echo ""',
                 shell=True, capture_output=True, text=True
             )
-            if result.stdout and '0483:df11' in result.stdout:
-                devices.append({'id': 'dfu', 'name': 'DFU Device (0483:df11)'})
+            found_dfu = False
+            if dfu_result.stdout:
+                # 解析dfu-util输出，匹配 VID:PID 模式
+                for line in dfu_result.stdout.strip().split('\n'):
+                    vid_pid_match = re.search(r'([0-9a-f]{4}:[0-9a-f]{4})', line, re.IGNORECASE)
+                    if vid_pid_match:
+                        vid_pid = vid_pid_match.group(1).lower()
+                        devices.append({'id': f'dfu:{vid_pid}', 'name': f'DFU Device ({vid_pid})'})
+                        found_dfu = True
+            # 兜底：检测常见DFU设备（0483:df11）
+            if not found_dfu:
+                lsusb_result = subprocess.run(
+                    'lsusb | grep -i "0483:df11" || echo ""',
+                    shell=True, capture_output=True, text=True
+                )
+                if lsusb_result.stdout and '0483:df11' in lsusb_result.stdout:
+                    devices.append({'id': 'dfu', 'name': 'DFU Device (0483:df11)'})
         except:
             pass
         
@@ -1503,8 +1529,12 @@ def detect_devices():
 def scan_can_devices():
     """扫描CAN设备 - 使用Klipper的canbus_query.py"""
     try:
+        klipper_owner, home_dir = get_klipper_owner()
+        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
+        canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
+
         result = subprocess.run(
-            '~/klippy-env/bin/python ~/klipper/scripts/canbus_query.py can0 2>/dev/null || echo ""',
+            f'{python_bin} {canbus_script} can0 2>/dev/null || echo ""',
             shell=True, capture_output=True, text=True, timeout=10
         )
         
@@ -1530,7 +1560,7 @@ def flash_firmware():
     """烧录固件"""
     try:
         data = request.json
-        klipper_path = os.path.expanduser(config.get('klipper_path', '~/klipper'))
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
         dfu_address = data.get('dfu_address', '0x08000000')
@@ -1563,8 +1593,17 @@ def flash_firmware():
         
         if flash_mode == 'DFU':
             # DFU烧录：先擦除再烧录
-            erase_cmd = f'sudo dfu-util -a 0 -d 0483:df11 --dfuse-address {dfu_address} -e'
-            flash_cmd = f'sudo dfu-util -a 0 -d 0483:df11 --dfuse-address {dfu_address} -D {firmware_path}'
+            # 如果用户选择了设备ID，尝试使用它；否则使用默认0483:df11
+            # 支持格式: 'dfu' (自动), 'dfu:0483:df11' (指定VID:PID), 'rp2040_boot' (自动)
+            if device and device not in ('dfu', 'rp2040_boot'):
+                dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
+                safe_device = shlex.quote(dfu_vid_pid)
+                device_filter = f'-d {safe_device}'
+            else:
+                device_filter = '-d 0483:df11'
+            safe_address = shlex.quote(dfu_address)
+            erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
+            flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -D {shlex.quote(firmware_path)}'
             
             erase_result = subprocess.run(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
             flash_result = subprocess.run(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
@@ -1572,8 +1611,8 @@ def flash_firmware():
             output = f"擦除: {erase_result.stdout + erase_result.stderr}\n烧录: {flash_result.stdout + flash_result.stderr}"
             returncode = flash_result.returncode
             
-        elif flash_mode == 'KAT':
-            # Katapult 烧录 - 自动判断 USB 或 CAN 方式
+        elif flash_mode in ('KAT', 'CAN'):
+            # Katapult 烧录（或 CAN Bus 烧录）- 自动判断 USB 或 CAN 方式
             klipper_owner, home_dir = get_klipper_owner()
                     
             python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
@@ -1581,13 +1620,14 @@ def flash_firmware():
                     
             import logging
                     
-            # 判断设备类型
-            if 'can0:' in device or (len(device) == 12 and all(c in '0123456789abcdef' for c in device.lower())):  # CAN UUID
+            # 判断设备类型：CAN UUID（8-32位十六进制）或 USB 串口路径
+            _is_can_uuid = bool(re.match(r'^[a-fA-F0-9]{8,32}$', device.replace('can0:', '')))
+            if 'can0:' in device or _is_can_uuid:
                 # CAN 方式：先尝试重置进入 USB 烧录模式
                 can_uuid = device.replace('can0:', '') if 'can0:' in device else device
                 
                 # 第一步：发送重置命令，让设备进入 Katapult USB 模式
-                reset_cmd = f'{python_bin} {flashtool_script} -i can0 -r -u {can_uuid}'
+                reset_cmd = f'{python_bin} {flashtool_script} -i can0 -r -u {shlex.quote(can_uuid)}'
                 logging.info(f'CAN 重置命令：{reset_cmd}')
                 reset_result = subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
                 
@@ -1604,20 +1644,20 @@ def flash_firmware():
                     # 成功进入 USB 模式，使用 USB 方式烧录
                     new_device = device_result.stdout.strip()
                     logging.info(f'找到设备：{new_device}')
-                    cmd = f'{python_bin} {flashtool_script} -d {new_device} -f {firmware_path}'
+                    cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(new_device)} -f {shlex.quote(firmware_path)}'
                     logging.info(f'USB 烧录命令：{cmd}')
                     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
                 else:
                     # 降级方案：设备可能已经在 Katapult CAN 模式，直接 CAN 烧录
                     logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
                     flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
-                    cmd = f'{python_bin} {flash_can_script} -i can0 -u {can_uuid} -f {firmware_path}'
+                    cmd = f'{python_bin} {flash_can_script} -i can0 -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                     logging.info(f'CAN 烧录命令：{cmd}')
                     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
             else:
                 # USB 方式：直接烧录
                 logging.info(f'USB 烧录命令：device={device}')
-                cmd = f'{python_bin} {flashtool_script} -d {device} -f {firmware_path}'
+                cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(device)} -f {shlex.quote(firmware_path)}'
                 logging.info(f'USB 烧录命令：{cmd}')
                 result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
                     
@@ -1633,10 +1673,7 @@ def flash_firmware():
                 return jsonify({'error': 'rp2040_flash工具不存在，请检查Klipper安装'}), 500
             
             # 先卸载RP2040 BOOT设备（避免设备占用）
-            import time
-            subprocess.run('sudo umount /dev/sda1 2>/dev/null || true', shell=True, capture_output=True, timeout=10)
-            subprocess.run('sudo umount /dev/sda 2>/dev/null || true', shell=True, capture_output=True, timeout=10)
-            time.sleep(0.5)
+            _umount_rp2040_boot()
             
             cmd = f'sudo {rp2040_flash_tool} {firmware_path}'
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
@@ -1671,13 +1708,13 @@ def install_host_firmware():
         if not firmware_path:
             return jsonify({'error': '固件路径不能为空'}), 400
         
-        firmware_path = os.path.expanduser(firmware_path)
+        firmware_path = expand_klipper_path(firmware_path)
         
         if not os.path.exists(firmware_path):
             return jsonify({'error': f'固件文件不存在: {firmware_path}'}), 400
         
         # 复制到 klipper/out/klipper.elf
-        klipper_path = os.path.expanduser(config.get('klipper_path', '~/klipper'))
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         target_path = os.path.join(klipper_path, 'out', 'klipper.elf')
         
         # 确保目录存在
@@ -1699,6 +1736,31 @@ def install_host_firmware():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ==================== RP2040 BOOT设备卸载辅助 ====================
+def _umount_rp2040_boot():
+    """动态查找并卸载RP2040 BOOT设备"""
+    import time
+    try:
+        # 通过lsblk查找RP2040 BOOT设备的挂载点
+        result = subprocess.run(
+            'lsblk -o NAME,MOUNTPOINT,MODEL 2>/dev/null | grep -i "rp2"',
+            shell=True, capture_output=True, text=True, timeout=10
+        )
+        if result.stdout:
+            for line in result.stdout.strip().split('\n'):
+                parts = line.split()
+                if len(parts) >= 2:
+                    mount_point = parts[1]
+                    if mount_point and mount_point != '':
+                        subprocess.run(
+                            f'sudo umount {mount_point} 2>/dev/null || true',
+                            shell=True, capture_output=True, timeout=10
+                        )
+        # fallback 已移除：lsblk 检测 rp2 已足够安全
+    except:
+        pass
+    time.sleep(0.5)
+
 # ==================== BL固件烧录 API ====================
 @app.route('/api/firmware/bl/flash', methods=['POST'])
 def flash_bl_firmware():
@@ -1708,44 +1770,65 @@ def flash_bl_firmware():
         bl_firmware_path = data.get('bl_firmware_path', '')
         device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
+        dfu_address = data.get('dfu_address', '0x08000000')
         
         if not bl_firmware_path or not os.path.exists(bl_firmware_path):
             return jsonify({'error': f'BL固件文件不存在: {bl_firmware_path}'}), 400
         
-        # BL固件默认从0x08000000开始（无偏移）
-        dfu_address = '0x08000000'
+        import time
         
         if flash_mode == 'DFU':
-            cmd = f'sudo dfu-util -a 0 -d 0483:df11 --dfuse-address {dfu_address} -D {bl_firmware_path}'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            # 使用设备ID（如果提供），否则使用默认0483:df11
+            device_filter = f'-d {device}' if device else '-d 0483:df11'
+            # 先擦除再烧录
+            erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {dfu_address} -e'
+            flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {dfu_address} -D {bl_firmware_path}'
+            
+            subprocess.run(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
             
         elif flash_mode == 'UF2':
             # UF2烧录（RP2040/RP2350）- 使用rp2040_flash工具
-            klipper_path = os.path.expanduser(config.get('klipper_path', '~/klipper'))
+            klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
             rp2040_flash_tool = os.path.join(klipper_path, 'lib/rp2040_flash/rp2040_flash')
             
             if not os.path.exists(rp2040_flash_tool):
                 return jsonify({'error': 'rp2040_flash工具不存在，请检查Klipper安装'}), 500
             
-            # 先卸载RP2040 BOOT设备
-            import time
-            subprocess.run('sudo umount /dev/sda1 2>/dev/null || true', shell=True, capture_output=True, timeout=10)
-            subprocess.run('sudo umount /dev/sda 2>/dev/null || true', shell=True, capture_output=True, timeout=10)
+            # 动态查找并卸载RP2040 BOOT设备
+            _umount_rp2040_boot()
             time.sleep(0.5)
             
             cmd = f'sudo {rp2040_flash_tool} {bl_firmware_path}'
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
             
+            if result.returncode == 0 and 'No rp2040 in BOOTSEL mode was found' in (result.stdout + result.stderr):
+                return jsonify({'success': False, 'error': '未找到处于 BOOTSEL 模式的 RP2040 设备', 'output': result.stdout + result.stderr}), 500
+            
         elif flash_mode == 'KAT':
-            cmd = f'python3 ~/katapult/scripts/flashtool.py -d {device}'
+            klipper_owner, home_dir = get_klipper_owner()
+            python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
+            flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
+            cmd = f'{python_bin} {flashtool_script} -d {device} -f {bl_firmware_path}' if device else f'{python_bin} {flashtool_script} -f {bl_firmware_path}'
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            
+        elif flash_mode == 'st-flash':
+            # 使用st-flash烧录
+            stflash_cmd = f'sudo st-flash --reset write {bl_firmware_path} {dfu_address}'
+            result = subprocess.run(stflash_cmd, shell=True, capture_output=True, text=True, timeout=60)
+            
+        elif flash_mode == 'openocd':
+            # 使用OpenOCD烧录 - 使用通用配置
+            openocd_cmd = f'sudo openocd -f interface/stlink.cfg -f target/stm32f1x.cfg -c "program {bl_firmware_path} {dfu_address} verify reset exit"'
+            result = subprocess.run(openocd_cmd, shell=True, capture_output=True, text=True, timeout=120)
+            
         else:
             return jsonify({'error': f'不支持的BL烧录方式: {flash_mode}'}), 400
         
         if result.returncode == 0:
-            return jsonify({'success': True, 'message': 'BL固件烧录成功', 'output': result.stdout})
+            return jsonify({'success': True, 'message': 'BL固件烧录成功', 'output': result.stdout + result.stderr})
         else:
-            return jsonify({'success': False, 'error': 'BL固件烧录失败', 'output': result.stderr}), 500
+            return jsonify({'success': False, 'error': 'BL固件烧录失败', 'output': result.stdout + result.stderr}), 500
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2677,6 +2760,9 @@ def auto_update_json():
 def list_configs(manufacturer):
     """获取指定厂家的所有配置"""
     try:
+        manufacturer = sanitize_manufacturer(manufacturer)
+        if not manufacturer:
+            return jsonify({'error': '无效的厂家名称'}), 400
         configs = []
         board_types = []
         
@@ -2711,6 +2797,9 @@ def list_configs(manufacturer):
 def get_config(manufacturer, config_id):
     """获取单个配置详情"""
     try:
+        manufacturer = sanitize_manufacturer(manufacturer)
+        if not manufacturer:
+            return jsonify({'error': '无效的厂家名称'}), 400
         mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
         for board_type in ['mainboard', 'toolboard', 'expansion']:
             filepath = os.path.join(mfr_dir, board_type, f"{config_id}.json")
@@ -2763,6 +2852,9 @@ def create_config(manufacturer):
 def delete_config(manufacturer, config_id):
     """删除配置"""
     try:
+        manufacturer = sanitize_manufacturer(manufacturer)
+        if not manufacturer:
+            return jsonify({'error': '无效的厂家名称'}), 400
         mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
         
         # 在所有类型目录中查找
@@ -3264,6 +3356,9 @@ def list_firmware_update_configs():
 def get_firmware_update_config(manufacturer, config_id):
     """获取固件更新配置"""
     try:
+        manufacturer = sanitize_manufacturer(manufacturer)
+        if not manufacturer:
+            return jsonify({'success': False, 'error': '无效的厂家名称'}), 400
         filepath = os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'firmware_update', f"{config_id}.json")
         
         if not os.path.exists(filepath):
@@ -3292,6 +3387,9 @@ def get_firmware_update_config(manufacturer, config_id):
 def save_firmware_update_config(manufacturer, config_id):
     """保存固件更新配置"""
     try:
+        manufacturer = sanitize_manufacturer(manufacturer)
+        if not manufacturer:
+            return jsonify({'success': False, 'error': '无效的厂家名称'}), 400
         config_data = request.json
         
         # 确保目录存在
@@ -3321,6 +3419,9 @@ def save_firmware_update_config(manufacturer, config_id):
 def delete_firmware_update_config(manufacturer, config_id):
     """删除固件更新配置"""
     try:
+        manufacturer = sanitize_manufacturer(manufacturer)
+        if not manufacturer:
+            return jsonify({'success': False, 'error': '无效的厂家名称'}), 400
         filepath = os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'firmware_update', f"{config_id}.json")
         
         if not os.path.exists(filepath):

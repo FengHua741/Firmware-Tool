@@ -322,7 +322,7 @@ function inferUpdateMode(boardConfig) {
     const hasUsb = conn.includes('USB') && !conn.includes('转');
 
     if (flashMode === 'UF2') {
-        return 'TF';
+        return 'UF2';
     }
 
     if (isBridge) {
@@ -454,7 +454,7 @@ async function scanDeviceIdForUpdate() {
             // 扫描CAN设备
             const response = await fetch('/api/firmware/can/scan');
             const data = await response.json();
-            if (data.success && data.devices && data.devices.length > 0) {
+            if (data.devices && data.devices.length > 0) {
                 deviceIdInput.value = data.devices[0].uuid;
                 showSuccess(`找到 ${data.devices.length} 个CAN设备`);
             } else {
@@ -465,10 +465,10 @@ async function scanDeviceIdForUpdate() {
             const response = await fetch('/api/firmware/detect');
             const data = await response.json();
             if (data.devices && data.devices.length > 0) {
-                // 查找匹配的USB设备
-                const usbDevice = data.devices.find(d => d.includes('by-id'));
+                // 查找匹配的USB设备（devices是对象数组，含id/name/path字段）
+                const usbDevice = data.devices.find(d => (d.id || '').includes('by-id') || (d.name || '').includes('by-id'));
                 if (usbDevice) {
-                    deviceIdInput.value = usbDevice;
+                    deviceIdInput.value = usbDevice.id || usbDevice.path || usbDevice.name || '';
                     showSuccess('找到USB设备');
                 } else {
                     showError('未找到USB设备');
@@ -598,7 +598,7 @@ async function flashAllSelected() {
     }
     
     const configs = updateableConfigs.filter(c => 
-        selectedUpdateConfigs.has(c.id) && c.firmware_update?.enabled
+        selectedUpdateConfigs.has(c.id) && c.enabled !== false
     );
     
     if (configs.length === 0) {
@@ -620,8 +620,7 @@ async function flashAllSelected() {
     const total = configs.length;
     
     for (const config of configs) {
-        const updateSettings = config.firmware_update;
-        const mode = updateSettings.mode || 'CAN';
+        const mode = config.mode || 'CAN';
         
         updateBatchStatus(`正在更新: ${config.name}...`);
         addBatchResult(config.name, 'running', '编译中...');
@@ -650,6 +649,24 @@ async function flashAllSelected() {
                 // 自动触发下载
                 const downloadUrl = `/api/firmware/download?path=${encodeURIComponent(compileResult.firmware_path)}`;
                 window.open(downloadUrl, '_blank');
+            } else if (mode === 'UF2') {
+                // UF2模式：直接烧录
+                addBatchResult(config.name, 'running', 'UF2烧录中...');
+                const flashResponse = await fetch('/api/firmware/flash', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        device_id: config.device_id || '',
+                        flash_mode: 'UF2',
+                        firmware_path: compileResult.firmware_path
+                    })
+                });
+                const flashResult = await flashResponse.json();
+                if (flashResult.success) {
+                    addBatchResult(config.name, 'success', 'UF2烧录成功');
+                } else {
+                    addBatchResult(config.name, 'error', 'UF2烧录失败: ' + (flashResult.error || '未知错误'));
+                }
             } else if (mode === 'HOST') {
                 // HOST模式：复制到klipper目录
                 addBatchResult(config.name, 'running', '安装到上位机...');
@@ -684,10 +701,10 @@ async function flashAllSelected() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        device_id: updateSettings.device_id,
+                        device_id: config.device_id || '',
                         flash_mode: modeToFlashMode[mode] || 'KAT',
                         firmware_path: compileResult.firmware_path,
-                        katapult_serial: updateSettings.katapult_serial
+                        katapult_serial: config.katapult_serial || ''
                     })
                 });
                 

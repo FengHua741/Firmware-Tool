@@ -11,7 +11,19 @@ from pathlib import Path
 
 class KlipperKconfigParser:
     def __init__(self, klipper_path='~/klipper'):
-        self.klipper_path = os.path.expanduser(klipper_path)
+        # 处理 ~ 路径，避免 systemd root 下扩展到 /root
+        if klipper_path.startswith('~'):
+            home = os.path.expanduser('~')
+            if home == '/root':
+                # 尝试查找实际用户的 klipper 目录
+                for user_dir in os.listdir('/home'):
+                    candidate = os.path.join('/home', user_dir, 'klipper')
+                    if os.path.exists(candidate):
+                        klipper_path = candidate
+                        break
+            else:
+                klipper_path = os.path.expanduser(klipper_path)
+        self.klipper_path = klipper_path
         self.src_path = os.path.join(self.klipper_path, 'src')
         self.mcu_database = {}
         
@@ -36,8 +48,17 @@ class KlipperKconfigParser:
     
     def _parse_kconfig(self, kconfig_path, platform_dir):
         """解析单个 Kconfig 文件"""
-        with open(kconfig_path, 'r') as f:
-            content = f.read()
+        try:
+            with open(kconfig_path, 'r') as f:
+                content = f.read()
+        except (IOError, OSError) as e:
+            print(f"警告: 无法读取 Kconfig 文件 {kconfig_path}: {e}")
+            return {
+                'platform': platform_dir,
+                'mcus': {},
+                'flash_modes': [],
+                'default_connections': []
+            }
         
         result = {
             'platform': platform_dir,

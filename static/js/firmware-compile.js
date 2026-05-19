@@ -53,7 +53,8 @@ async function loadCompilePresetManufacturers() {
 
 // 编译模式切换
 function onCompileModeChange() {
-    const mode = document.querySelector('input[name="compileMode"]:checked').value;
+    const modeEl = document.querySelector('input[name="compileMode"]:checked');
+    const mode = modeEl ? modeEl.value : 'preset';
     const presetSection = document.getElementById('compilePresetSection');
     const customSection = document.getElementById('compileCustomSection');
     
@@ -136,7 +137,8 @@ async function displayCompileMcuDetails(data) {
     
     // 晶振选项 - RP2040/RP2350 固定时钟，隐藏选择
     const crystalSelect = document.getElementById('compileCrystal');
-    const crystalGroup = crystalSelect.closest('.form-group');
+    const crystalGroup = crystalSelect ? crystalSelect.closest('.form-group') : null;
+    if (!crystalSelect) return;
     crystalSelect.innerHTML = '';
     mcu.crystals.forEach(freq => {
         const label = formatCompileFrequency(freq);
@@ -284,7 +286,9 @@ function onCompileConnectionChange() {
     if (!commType || !_commGroupedOptions[commType]) return;
     
     const options = _commGroupedOptions[commType];
-    const connGroup = document.getElementById('compileConnection').closest('.form-group');
+    const connEl = document.getElementById('compileConnection');
+    const connGroup = connEl ? connEl.closest('.form-group') : null;
+    if (!connGroup) return;
     
     // 多个选项时显示第二级选择
     if (options.length > 1) {
@@ -305,7 +309,7 @@ function onCompileConnectionChange() {
         const detailSelect = document.getElementById('compileConnectionDetail');
         detailSelect.innerHTML = `<option value="">-- 选择${label} --</option>`;
         options.forEach(opt => {
-            detailSelect.innerHTML += `<option value="${opt.config_symbol}" data-comm='${JSON.stringify(opt)}'>${opt.display}</option>`;
+            detailSelect.innerHTML += `<option value="${opt.config_symbol}" data-comm='${JSON.stringify(opt).replace(/'/g, '&apos;')}'>${opt.display}</option>`;
         });
     }
     
@@ -372,7 +376,7 @@ function _showRp2040CanGpioSelector(connGroup) {
 }
 
 function onCompileConnectionDetailChange() {
-    // 预留扩展
+    // 编译时读取 detailSelect.value（见 compileFirmware 方法）
 }
 
 // 预设厂家选择变化
@@ -424,7 +428,7 @@ async function onCompilePresetTypeChange() {
         if (data.configs) {
             const configs = data.configs.filter(c => c.type === type);
             configs.forEach(config => {
-                modelSelect.innerHTML += `<option value="${config.id}" data-config='${JSON.stringify(config)}'>${config.name}</option>`;
+                modelSelect.innerHTML += `<option value="${config.id}" data-config='${JSON.stringify(config).replace(/'/g, '&apos;')}'>${config.name}</option>`;
             });
             modelSelect.disabled = false;
         }
@@ -630,7 +634,8 @@ function _autoSelectPresetConnection(config) {
 
 // 编译固件
 async function compileFirmware() {
-    const mode = document.querySelector('input[name="compileMode"]:checked').value;
+    const modeEl = document.querySelector('input[name="compileMode"]:checked');
+    const mode = modeEl ? modeEl.value : 'preset';
     
     let compileParams = {
         klipper_path: document.getElementById('klipperPath')?.value || '~/klipper'
@@ -661,7 +666,14 @@ async function compileFirmware() {
         // 检查是否有覆盖的连接方式
         const overrideConnection = document.getElementById('compilePresetConnection').value;
         if (overrideConnection) {
-            config.default_connection = overrideConnection;
+            // 将简单值映射到Kconfig符号格式
+            const connMap = {
+                'USB': 'USB (on PA11/PA12)',
+                'CAN': 'CAN bus (on PB8/PB9)',
+                'SERIAL': 'Serial (on USART1 PA10/PA9)',
+                'CAN_BRIDGE': 'USB to CAN bus bridge (USB on PA11/PA12)'
+            };
+            config.default_connection = connMap[overrideConnection] || overrideConnection;
         }
         
         // 检查是否有启动引脚
@@ -792,7 +804,7 @@ async function refreshDeviceIds() {
             const canData = await canResp.value.json();
             if (canData.devices && canData.devices.length > 0) {
                 canData.devices.forEach(device => {
-                    select.innerHTML += `<option value="${device.uuid}">CAN: ${device.uuid}${device.app ? ' [' + device.app + ']' : ''}</option>`;
+                    select.innerHTML += `<option value="${device.uuid}">CAN: ${device.uuid}</option>`;
                 });
             }
             // 显示CAN错误
@@ -824,10 +836,13 @@ function onFirmwareSourceChange() {
 
 // 烧录模式变化处理
 function onFlashModeChange() {
-    const flashMode = document.getElementById('flashMode').value;
+    const flashModeEl = document.getElementById('flashMode');
+    if (!flashModeEl) return;
+    const flashMode = flashModeEl.value;
     const tfCardSection = document.getElementById('tfCardSection');
     const flashBtn = document.getElementById('flashFirmwareBtn');
-    const deviceIdGroup = document.getElementById('flashDeviceId').closest('.form-group');
+    const deviceIdEl = document.getElementById('flashDeviceId');
+    const deviceIdGroup = deviceIdEl ? deviceIdEl.closest('.form-group') : null;
     
     if (flashMode === 'TF') {
         // TF卡模式：显示下载区域，隐藏烧录按钮和设备选择
@@ -887,6 +902,7 @@ async function flashFirmware() {
     
     if (flashMode === 'TF') {
         // TF卡模式不需要烧录
+        showSuccess('TF卡模式：编译后可下载固件复制到TF卡');
         return;
     }
     
@@ -900,7 +916,7 @@ async function flashFirmware() {
         return await flashHostFirmware(firmwarePath);
     }
     
-    if (!deviceId) {
+    if (!deviceId && (flashMode === 'KAT' || flashMode === 'CAN')) {
         showError('请选择设备 ID');
         return;
     }
@@ -1054,9 +1070,10 @@ async function flashBootloader() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                bl_file: blFile,
-                address: address,
-                tool: tool
+                bl_firmware_path: blFile,
+                dfu_address: address,
+                flash_mode: tool === 'dfu-util' ? 'DFU' : tool === 'st-flash' ? 'st-flash' : 'openocd',
+                device_id: document.getElementById('flashDeviceId').value || ''
             })
         });
         
@@ -1125,6 +1142,7 @@ function resetCompileForm() {
     
     compiledFirmwarePath = null;
     currentCompileMcu = null;
+    window._fromPreset = false;
 }
 
 // 格式化频率
