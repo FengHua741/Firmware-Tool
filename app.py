@@ -280,13 +280,20 @@ def get_system_resources():
 def get_lsusb():
     """获取 lsusb 完整输出"""
     search = request.args.get('search', '')
+    # 默认排除列表（始终过滤）
+    default_exclude = ['Linux Foundation']
     try:
         output = subprocess.check_output(['lsusb'], text=True)
         devices = []
         for line in output.strip().split('\n'):
             if not line.strip():
                 continue
-            if search and search.lower() not in line.lower():
+            line_lower = line.lower()
+            # 默认排除
+            if any(ex.lower() in line_lower for ex in default_exclude):
+                continue
+            # 用户自定义排除
+            if search and search.lower() in line_lower:
                 continue
             match = re.match(r'Bus\s+(\d+)\s+Device\s+(\d+):\s+ID\s+(\S+)\s+(.*)', line)
             if match:
@@ -323,14 +330,32 @@ def get_serial_devices():
                     k, v = line.split('=', 1)
                     info[k] = v
             devlinks = info.get('DEVLINKS', '').split()
-            link = ''
+            # 找到 by-id 链接
+            by_id_link = ''
             for dl in devlinks:
-                if dl != path:
-                    link = dl
+                if '/dev/serial/by-id/' in dl:
+                    by_id_link = dl
                     break
+            # 判断是否优先显示 by-id：
+            # Klipper/Katapult/CanBoot 等 USB 虚拟串口设备用 by-id（含序列号，更稳定）
+            # ch341/CP210x/FTDI 等 USB转串口芯片用 by-path
+            prefer_by_id = False
+            if by_id_link:
+                by_id_lower = by_id_link.lower()
+                prefer_by_id = any(kw in by_id_lower for kw in [
+                    'klipper', 'katapult', 'canboot', 'stm32', 'stm32f',
+                    'atmel', 'samd', 'same', 'lpc', 'rp2040', 'raspberry'
+                ])
+            # 选择推荐显示路径
+            if prefer_by_id and by_id_link:
+                display_path = by_id_link
+            else:
+                display_path = path
             devices.append({
                 'path': path,
-                'link': link,
+                'by_id': by_id_link,
+                'display_path': display_path,
+                'prefer_by_id': prefer_by_id,
                 'devname': info.get('DEVNAME', ''),
                 'model': info.get('ID_MODEL', ''),
                 'vendor': info.get('ID_VENDOR', ''),
@@ -340,6 +365,17 @@ def get_serial_devices():
             })
         except Exception:
             continue
+    # 按 devname 去重（同一物理设备可能通过 USB2/USB3 出现多次）
+    seen = {}
+    for d in devices:
+        key = d['devname'] or d['by_id'] or d['path']
+        if key not in seen:
+            seen[key] = d
+        else:
+            # 优先保留 prefer_by_id 的记录
+            if d['prefer_by_id'] and not seen[key]['prefer_by_id']:
+                seen[key] = d
+    devices = list(seen.values())
     return jsonify({'devices': devices})
 
 # ==================== CAN接口列表 API ====================
@@ -496,7 +532,7 @@ def _scan_can_uuids(iface='can0'):
                         if uuid not in seen_uuids:
                             seen_uuids.add(uuid)
                             app_type = 'Klipper' if 'Klipper' in line else \
-                                       'Katapult' if 'Katapult' in line else 'Unknown'
+                                       'Katapult' if ('Katapult' in line or 'CanBoot' in line) else 'Unknown'
                             devices.append({'uuid': uuid, 'app': app_type, 'raw': line.strip()})
 
         if not devices and not error:
@@ -662,7 +698,7 @@ def search_can_uuid():
                 if match:
                     uuid_val = match.group(1)
                     app = 'Klipper' if 'Klipper' in line else \
-                          'Katapult' if 'Katapult' in line else 'Unknown'
+                          'Katapult' if ('Katapult' in line or 'CanBoot' in line) else 'Unknown'
                     if not any(u['uuid'] == uuid_val for u in uuids):
                         uuids.append({'uuid': uuid_val, 'app': app})
             elif 'Error' in line or 'error' in line:
@@ -1473,8 +1509,9 @@ def detect_devices():
     try:
         devices = []
         
-        # USB设备
+        # USB设备 - 检测多种USB串口设备
         try:
+            # 1. 检测 /dev/serial/by-id/* (标准USB串口设备)
             result = subprocess.run(
                 'ls /dev/serial/by-id/* 2>/dev/null || echo ""',
                 shell=True, capture_output=True, text=True
@@ -1486,24 +1523,82 @@ def detect_devices():
                         # 提取设备名（最后一段路径）
                         short_name = os.path.basename(device_id)
                         devices.append({'id': device_id, 'name': short_name, 'type': 'usb_serial'})
+            
+            # 2. 检测 /dev/ttyACM* (Katapult/CDC ACM设备)
+            acm_result = subprocess.run(
+                'ls /dev/ttyACM* 2>/dev/null || echo ""',
+                shell=True, capture_output=True, text=True
+            )
+            if acm_result.stdout:
+                for line in acm_result.stdout.strip().split('\n'):
+                    if line.strip():
+                        device_id = line.strip()
+                        short_name = os.path.basename(device_id)
+                        # 检查是否已存在，避免重复
+                        if not any(d['id'] == device_id for d in devices):
+                            devices.append({'id': device_id, 'name': f'{short_name} (ACM)', 'type': 'usb_acm'})
+            
+            # 3. 检测 /dev/ttyUSB* (USB转串口设备)
+            usb_result = subprocess.run(
+                'ls /dev/ttyUSB* 2>/dev/null || echo ""',
+                shell=True, capture_output=True, text=True
+            )
+            if usb_result.stdout:
+                for line in usb_result.stdout.strip().split('\n'):
+                    if line.strip():
+                        device_id = line.strip()
+                        short_name = os.path.basename(device_id)
+                        # 检查是否已存在，避免重复
+                        if not any(d['id'] == device_id for d in devices):
+                            devices.append({'id': device_id, 'name': f'{short_name} (USB)', 'type': 'usb_ftdi'})
         except:
             pass
         
         # DFU设备 - 使用dfu-util检测所有DFU设备
         try:
             dfu_result = subprocess.run(
-                'dfu-util -l 2>/dev/null || echo ""',
+                'sudo dfu-util -l 2>/dev/null || echo ""',
                 shell=True, capture_output=True, text=True
             )
             found_dfu = False
             if dfu_result.stdout:
-                # 解析dfu-util输出，匹配 VID:PID 模式
+                # 按 devnum+serial 去重（一个 DFU 设备会有多个 alt 行）
+                seen_dfu = set()
                 for line in dfu_result.stdout.strip().split('\n'):
-                    vid_pid_match = re.search(r'([0-9a-f]{4}:[0-9a-f]{4})', line, re.IGNORECASE)
-                    if vid_pid_match:
-                        vid_pid = vid_pid_match.group(1).lower()
-                        devices.append({'id': f'dfu:{vid_pid}', 'name': f'DFU Device ({vid_pid})', 'type': 'dfu'})
-                        found_dfu = True
+                    if 'Found DFU' not in line:
+                        continue
+                    # 提取 VID:PID
+                    vid_pid_match = re.search(r'\[([0-9a-f]{4}:[0-9a-f]{4})\]', line, re.IGNORECASE)
+                    if not vid_pid_match:
+                        continue
+                    vid_pid = vid_pid_match.group(1).lower()
+                    # 提取 devnum 用于去重
+                    devnum_match = re.search(r'devnum=(\d+)', line)
+                    devnum = devnum_match.group(1) if devnum_match else ''
+                    # 提取 serial 用于显示
+                    serial_match = re.search(r'serial="([^"]+)"', line)
+                    serial = serial_match.group(1) if serial_match else ''
+                    # 提取 alt=0 的 name（Internal Flash）
+                    alt_match = re.search(r'alt=0,\s*name="([^"]+)"', line)
+                    flash_name = alt_match.group(1) if alt_match else ''
+                    # 按 devnum 去重
+                    dedup_key = f'{vid_pid}:{devnum}'
+                    if dedup_key in seen_dfu:
+                        continue
+                    seen_dfu.add(dedup_key)
+                    # 构造显示名
+                    display_parts = [f'DFU ({vid_pid})']
+                    if serial:
+                        display_parts.append(f'SN:{serial}')
+                    devices.append({
+                        'id': f'dfu:{vid_pid}',
+                        'name': ' '.join(display_parts),
+                        'type': 'dfu',
+                        'vid_pid': vid_pid,
+                        'serial': serial,
+                        'devnum': devnum
+                    })
+                    found_dfu = True
             # 兜底：检测常见DFU设备（0483:df11）
             if not found_dfu:
                 lsusb_result = subprocess.run(
@@ -1511,7 +1606,7 @@ def detect_devices():
                     shell=True, capture_output=True, text=True
                 )
                 if lsusb_result.stdout and '0483:df11' in lsusb_result.stdout:
-                    devices.append({'id': 'dfu', 'name': 'DFU Device (0483:df11)', 'type': 'dfu'})
+                    devices.append({'id': 'dfu:0483:df11', 'name': 'DFU Device (0483:df11)', 'type': 'dfu', 'vid_pid': '0483:df11', 'serial': '', 'devnum': ''})
         except:
             pass
         
@@ -1594,6 +1689,7 @@ def flash_firmware():
             # rp2040_boot 是 RP2040/RP2350 的 BOOTSEL 模式，应走 UF2 路径而非 STM32 DFU
             if device == 'rp2040_boot':
                 flash_mode = 'UF2'
+                # 继续走下面的 UF2 分支
             else:
                 # DFU烧录：先擦除再烧录
                 # 支持格式: 'dfu' (自动), 'dfu:0483:df11' (指定VID:PID)
@@ -1612,7 +1708,12 @@ def flash_firmware():
                 
                 output = f"擦除: {erase_result.stdout + erase_result.stderr}\n烧录: {flash_result.stdout + flash_result.stderr}"
                 returncode = flash_result.returncode
-            
+                
+                if returncode == 0:
+                    return jsonify({'success': True, 'message': '烧录成功', 'output': output})
+                else:
+                    return jsonify({'success': False, 'error': '烧录失败', 'output': output}), 500
+        
         if flash_mode in ('KAT', 'CAN'):
             # Katapult 烧录（或 CAN Bus 烧录）- 自动判断 USB 或 CAN 方式
             klipper_owner, home_dir = get_klipper_owner()
@@ -1806,10 +1907,16 @@ def flash_bl_firmware():
         
         if flash_mode == 'DFU':
             # 使用设备ID（如果提供），否则使用默认0483:df11
-            device_filter = f'-d {device}' if device else '-d 0483:df11'
+            # device 可能是 "dfu:0483:df11" 格式，需要去掉前缀
+            if device and device != 'dfu':
+                dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
+                device_filter = f'-d {dfu_vid_pid}'
+            else:
+                device_filter = '-d 0483:df11'
+            safe_address = shlex.quote(dfu_address)
             # 先擦除再烧录
-            erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {dfu_address} -e'
-            flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {dfu_address} -D {bl_firmware_path}'
+            erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
+            flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -D {shlex.quote(bl_firmware_path)}'
             
             subprocess.run(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
             result = subprocess.run(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)

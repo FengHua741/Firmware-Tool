@@ -132,11 +132,13 @@ async function searchSerial() {
             container.innerHTML = data.devices.map(d => {
                 const info = [d.model, d.vendor].filter(Boolean).join(' - ');
                 const ids = [d.vid, d.pid].filter(Boolean).join(':');
-                const copyVal = (d.link || d.devname || d.path).replace(/'/g, "\\'");
+                // 使用后端推荐的 display_path（USB虚拟串口用 by-id，USB转串口用 by-path）
+                const displayVal = d.display_path || d.by_id || d.path;
+                const copyVal = displayVal.replace(/'/g, "\\'");
                 return `
                     <div class="id-item" style="flex-direction:column;align-items:flex-start;">
                         <div style="display:flex;justify-content:space-between;width:100%;align-items:center;">
-                            <span class="id-text" style="font-weight:600;">${d.link || d.devname || d.path}</span>
+                            <span class="id-text" style="font-weight:600;">${displayVal}</span>
                             <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${copyVal}')">复制</button>
                         </div>
                         <div style="font-size:11px;color:#888;margin-top:3px;">
@@ -251,6 +253,7 @@ async function searchCanUuid() {
                 }
             }
             html += data.uuids.map(d => {
+                const appDisplay = d.app === 'Unknown' ? '未知' : d.app;
                 const appColor = d.app === 'Klipper' ? '#4caf50' : d.app === 'Katapult' ? '#ff9800' : d.app === 'Klipper (config)' ? '#1976d2' : '#999';
                 // 从 mcu_model 提取可读型号（如 stm32f407xx → STM32F407）
                 const mcuLabel = d.mcu_model ? ` / ${d.mcu_model.toUpperCase()}` : '';
@@ -259,7 +262,7 @@ async function searchCanUuid() {
                 <div class="id-item">
                     <span class="id-text">
                         <span style="font-weight:600;">${d.uuid}</span>
-                        <span style="font-size:11px;color:${appColor};margin-left:8px;">[${d.app}${mcuLabel}${freqLabel}]</span>
+                        <span style="font-size:11px;color:${appColor};margin-left:8px;">[${appDisplay}${mcuLabel}${freqLabel}]</span>
                         ${d.section ? `<span style="font-size:11px;color:#666;margin-left:6px;">${d.section}</span>` : ''}
                     </span>
                     <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${d.uuid}')">复制</button>

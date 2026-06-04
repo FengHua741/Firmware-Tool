@@ -14,25 +14,39 @@ async function initFirmwarePage() {
     await loadCompileMcuDatabase();
     await loadCompilePresetManufacturers();
     await refreshFlashCanIfaces();
+    // 初始化时根据默认烧录模式隐藏 CAN 接口选择框
+    onFlashModeChange();
 }
 
 // 刷新固件烧录页的CAN接口列表
+// 返回 true 表示有多个CAN接口
 async function refreshFlashCanIfaces() {
     const select = document.getElementById('flashCanIface');
-    if (!select) return;
+    if (!select) return false;
     try {
         const response = await fetch('/api/system/can-iface');
         const data = await response.json();
-        select.innerHTML = '<option value="can0">can0</option>';
+        select.innerHTML = '';
+        let ifaceCount = 0;
         if (data.ifaces && data.ifaces.length > 0) {
             data.ifaces.forEach(iface => {
-                if (iface.ifname !== 'can0') {
-                    select.innerHTML += `<option value="${iface.ifname}">${iface.ifname}</option>`;
-                }
+                select.innerHTML += `<option value="${iface.ifname}">${iface.ifname}</option>`;
+                ifaceCount++;
             });
         }
+        // 至少保证有 can0
+        if (ifaceCount === 0) {
+            select.innerHTML = '<option value="can0">can0</option>';
+            ifaceCount = 1;
+        }
+        // 只有一个CAN接口时隐藏选择框，默认用第一个
+        const hasMultiple = ifaceCount > 1;
+        select.style.display = hasMultiple ? '' : 'none';
+        return hasMultiple;
     } catch (error) {
         select.innerHTML = '<option value="can0">can0</option>';
+        select.style.display = 'none';
+        return false;
     }
 }
 
@@ -808,46 +822,129 @@ async function refreshDeviceIds() {
     select.innerHTML = '<option value="">-- 正在扫描 --</option>';
     
     try {
-        // 并行：USB检测 + CAN UUID搜索（使用与资源页相同的 /api/system/can-uuid）
-        const [usbResp, canResp] = await Promise.allSettled([
-            fetch('/api/firmware/detect'),
-            fetch('/api/system/can-uuid', {
+        // 根据烧录模式决定是否需要扫描 CAN 设备
+        const currentFlashMode = document.getElementById('flashMode')?.value || '';
+        const needCan = (currentFlashMode === 'KAT' || currentFlashMode === 'CAN');
+        
+        // 并行：USB检测 + (可选)CAN UUID搜索
+        const fetches = [fetch('/api/firmware/detect')];
+        if (needCan) {
+            fetches.push(fetch('/api/system/can-uuid', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ iface: canIface })
-            })
-        ]);
+            }));
+        }
+        const results = await Promise.allSettled(fetches);
+        const [usbResp, canResp] = results;
         
         select.innerHTML = '<option value="">-- 选择设备 --</option>';
         
-        // USB设备
+        let usbCount = 0;
+        let canCount = 0;
+        
+        // USB设备 - 添加分组标题
         if (usbResp.status === 'fulfilled') {
             const usbData = await usbResp.value.json();
             if (usbData.devices && usbData.devices.length > 0) {
-                usbData.devices.forEach(device => {
-                    select.innerHTML += `<option value="${device.id}">USB: ${device.name} (${device.id})</option>`;
+                // 根据烧录模式过滤USB设备类型
+                const filteredDevices = usbData.devices.filter(device => {
+                    if (currentFlashMode === 'DFU') {
+                        // DFU模式：只显示DFU设备
+                        return device.type === 'dfu';
+                    } else if (currentFlashMode === 'UF2') {
+                        // UF2模式：只显示UF2设备
+                        return device.id === 'rp2040_boot';
+                    } else if (currentFlashMode === 'KAT') {
+                        // KAT模式：只显示 by-id 串口设备（完整路径），过滤 ttyACM/ttyUSB
+                        return device.type === 'usb_serial';
+                    } else if (currentFlashMode === 'CAN') {
+                        // CAN模式：不显示USB设备（只用CAN UUID）
+                        return false;
+                    }
+                    return true;
                 });
+                
+                if (filteredDevices.length > 0) {
+                    // 添加USB分组标题（禁用选项）
+                    select.innerHTML += `<option disabled>━━━━━━━━ USB 设备 ━━━━━━━━</option>`;
+                    
+                    filteredDevices.forEach(device => {
+                    // 根据设备类型显示不同图标
+                    let icon = '🔌';
+                    let typeLabel = '';
+                    
+                    if (device.type === 'usb_serial') {
+                        icon = '🔌';
+                        typeLabel = 'USB';
+                    } else if (device.type === 'usb_acm') {
+                        icon = '📡';
+                        typeLabel = 'ACM';
+                    } else if (device.type === 'usb_ftdi') {
+                        icon = '🔧';
+                        typeLabel = 'FTDI';
+                    } else if (device.type === 'dfu') {
+                        icon = '⚡';
+                        typeLabel = 'DFU';
+                    } else if (device.id === 'rp2040_boot') {
+                        icon = '💾';
+                        typeLabel = 'UF2';
+                    }
+                    
+                    // 简化显示：类型 + 设备名
+                    const shortName = device.name.length > 40 ? device.name.substring(0, 40) + '...' : device.name;
+                    select.innerHTML += `<option value="${device.id}">${icon} [${typeLabel}] ${shortName}</option>`;
+                    usbCount++;
+                });
+                } // end if filteredDevices.length > 0
             }
         }
         
-        // CAN设备（与资源页相同的返回格式：uuids[].uuid, uuids[].app）
-        if (canResp.status === 'fulfilled') {
+        // CAN设备 - 仅在 KAT/CAN 模式下且有设备时显示分组
+        if (canResp && canResp.status === 'fulfilled') {
             const canData = await canResp.value.json();
+            
+            // 只在有CAN设备时才显示CAN分组标题和设备
             if (canData.uuids && canData.uuids.length > 0) {
+                // 添加CAN分组标题（禁用选项）
+                select.innerHTML += `<option disabled>━━━━━━━━ CAN 设备 (${canIface}) ━━━━━━━━</option>`;
+                
                 canData.uuids.forEach(d => {
-                    const appLabel = d.app === 'Klipper' ? 'Klipper' : d.app === 'Katapult' ? 'Katapult' : d.app || '';
-                    const label = appLabel ? `CAN/${appLabel}: ${d.uuid}` : `CAN: ${d.uuid}`;
-                    select.innerHTML += `<option value="${d.uuid}">${label}</option>`;
+                    // 根据应用类型显示不同图标
+                    let icon = '';
+                    let appLabel = '';
+                    
+                    if (d.app === 'Klipper') {
+                        icon = '';
+                        appLabel = 'Klipper';
+                    } else if (d.app === 'Katapult') {
+                        icon = '';
+                        appLabel = 'Katapult';
+                    } else if (d.app && d.app !== 'Unknown') {
+                        icon = '';
+                        appLabel = d.app;
+                    } else {
+                        appLabel = '';
+                    }
+                    
+                    const label = appLabel ? `[${appLabel}] ${d.uuid}` : `[CAN] ${d.uuid}`;
+                    select.innerHTML += `<option value="${d.uuid}">${icon} ${label}</option>`;
+                    canCount++;
                 });
             }
+            
             // 显示来源提示
             if (canData.source === 'printer_cfg' && canData.skipped > 0 && canErrDiv) {
                 canErrDiv.style.display = 'block';
-                canErrDiv.innerHTML = `<div style="margin-top:6px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">ℹ ${canData.skipped} 个配置文件中的设备未连接，已自动过滤</div>`;
-            } else if (canData.error && canErrDiv) {
-                canErrDiv.style.display = 'block';
-                canErrDiv.innerHTML = `<div style="margin-top:6px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">⚠️ ${canData.error}</div>`;
+                canErrDiv.innerHTML = `<div style="margin-top:6px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">${canData.skipped} 个配置文件中的设备未连接，已自动过滤</div>`;
             }
+        }
+
+        // 添加统计信息
+        if (usbCount > 0 || canCount > 0) {
+            select.innerHTML += `<option disabled>━━━━━━━━━━━━━━━━━━━━━━━━</option>`;
+            const statsText = `共找到 ${usbCount + canCount} 个设备 (USB: ${usbCount}, CAN: ${canCount})`;
+            select.innerHTML += `<option disabled style="color:#6c757d;font-style:italic;">${statsText}</option>`;
         }
         
         if (select.options.length === 1) {
@@ -878,6 +975,8 @@ function onFlashModeChange() {
     const flashBtn = document.getElementById('flashFirmwareBtn');
     const deviceIdEl = document.getElementById('flashDeviceId');
     const deviceIdGroup = deviceIdEl ? deviceIdEl.closest('.form-group') : null;
+    const canIfaceEl = document.getElementById('flashCanIface');
+    const needCan = (flashMode === 'KAT' || flashMode === 'CAN');
     
     if (flashMode === 'TF') {
         // TF卡模式：显示下载区域，隐藏烧录按钮和设备选择
@@ -895,6 +994,15 @@ function onFlashModeChange() {
         flashBtn.style.display = 'inline-block';
         deviceIdGroup.style.display = 'block';
     }
+    // CAN接口选择框只在 KAT/CAN 模式 且 有多个接口时显示
+    if (canIfaceEl && needCan) {
+        const optionCount = canIfaceEl.options ? canIfaceEl.options.length : 0;
+        canIfaceEl.style.display = optionCount > 1 ? '' : 'none';
+    } else if (canIfaceEl) {
+        canIfaceEl.style.display = 'none';
+    }
+    // 切换模式后刷新设备列表（过滤 CAN/USB 设备显示）
+    refreshDeviceIds();
 }
 
 // 下载 firmware.bin 用于 TF 卡烧录
@@ -990,6 +1098,7 @@ async function flashFirmware() {
                 <div class="status-error">
                     <p>❌ 烧录失败</p>
                     <pre>${result.error || '未知错误'}</pre>
+                    ${result.output ? '<details><summary>详细输出</summary><pre>' + result.output + '</pre></details>' : ''}
                 </div>
             `;
             showError('烧录失败: ' + (result.error || '未知错误'));
@@ -1126,6 +1235,7 @@ async function flashBootloader() {
                 <div class="status-error">
                     <p>❌ BL 烧录失败</p>
                     <pre>${result.error || '未知错误'}</pre>
+                    ${result.output ? '<details><summary>详细输出</summary><pre>' + result.output + '</pre></details>' : ''}
                 </div>
             `;
             showError('BL 烧录失败: ' + (result.error || '未知错误'));
