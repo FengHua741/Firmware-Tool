@@ -38,6 +38,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 常见 DFU 设备 VID:PID 映射
+DFU_KNOWN_DEVICES = {
+    '0483:df11': 'STM32',
+    '314b:0106': 'APM32',
+}
+DFU_KNOWN_VIDPIDS = list(DFU_KNOWN_DEVICES.keys())
+
 def get_klipper_owner(klipper_path=None):
     """获取 Klipper 安装用户的用户名和家目录"""
     import pwd
@@ -834,7 +841,24 @@ def get_all_ids():
                 shell=True, capture_output=True, text=True
             )
             if output.stdout and 'Found DFU' in output.stdout:
-                result['dfu'] = [{'raw': 'dfu', 'formatted': 'DFU模式设备 (0483:df11)'}]
+                # 解析找到的 DFU 设备
+                dfu_devices = []
+                seen = set()
+                for line in output.stdout.strip().split('\n'):
+                    if 'Found DFU' not in line:
+                        continue
+                    vid_pid_match = re.search(r'\[([0-9a-f]{4}:[0-9a-f]{4})\]', line, re.IGNORECASE)
+                    if not vid_pid_match:
+                        continue
+                    vid_pid = vid_pid_match.group(1).lower()
+                    if vid_pid in seen:
+                        continue
+                    seen.add(vid_pid)
+                    chip_name = DFU_KNOWN_DEVICES.get(vid_pid, '')
+                    label = f'{chip_name} DFU ({vid_pid})' if chip_name else f'DFU ({vid_pid})'
+                    dfu_devices.append({'raw': f'dfu:{vid_pid}', 'formatted': label})
+                if dfu_devices:
+                    result['dfu'] = dfu_devices
         except:
             pass
         
@@ -1587,7 +1611,10 @@ def detect_devices():
                         continue
                     seen_dfu.add(dedup_key)
                     # 构造显示名
-                    display_parts = [f'DFU ({vid_pid})']
+                    chip_name = DFU_KNOWN_DEVICES.get(vid_pid, '')
+                    display_parts = [f'{chip_name} DFU' if chip_name else f'DFU ({vid_pid})']
+                    if not chip_name:
+                        pass  # 未知芯片已显示 VID:PID
                     if serial:
                         display_parts.append(f'SN:{serial}')
                     devices.append({
@@ -1599,14 +1626,16 @@ def detect_devices():
                         'devnum': devnum
                     })
                     found_dfu = True
-            # 兜底：检测常见DFU设备（0483:df11）
+            # 兜底：检测常见DFU设备（STM32/APM32等）
             if not found_dfu:
-                lsusb_result = subprocess.run(
-                    'lsusb | grep -i "0483:df11" || echo ""',
-                    shell=True, capture_output=True, text=True
-                )
-                if lsusb_result.stdout and '0483:df11' in lsusb_result.stdout:
-                    devices.append({'id': 'dfu:0483:df11', 'name': 'DFU Device (0483:df11)', 'type': 'dfu', 'vid_pid': '0483:df11', 'serial': '', 'devnum': ''})
+                for vidpid, chip_name in DFU_KNOWN_DEVICES.items():
+                    lsusb_result = subprocess.run(
+                        f'lsusb | grep -i "{vidpid}" || echo ""',
+                        shell=True, capture_output=True, text=True
+                    )
+                    if lsusb_result.stdout and vidpid in lsusb_result.stdout:
+                        devices.append({'id': f'dfu:{vidpid}', 'name': f'DFU Device ({chip_name} {vidpid})', 'type': 'dfu', 'vid_pid': vidpid, 'serial': '', 'devnum': ''})
+                        found_dfu = True
         except:
             pass
         
@@ -1692,13 +1721,14 @@ def flash_firmware():
                 # 继续走下面的 UF2 分支
             else:
                 # DFU烧录：先擦除再烧录
-                # 支持格式: 'dfu' (自动), 'dfu:0483:df11' (指定VID:PID)
+                # 支持格式: 'dfu:0483:df11' (指定VID:PID), 'dfu' (自动检测)
                 if device and device != 'dfu':
                     dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
                     safe_device = shlex.quote(dfu_vid_pid)
                     device_filter = f'-d {safe_device}'
                 else:
-                    device_filter = '-d 0483:df11'
+                    # 不指定 -d，让 dfu-util 自动检测所有 DFU 设备
+                    device_filter = ''
                 safe_address = shlex.quote(dfu_address)
                 erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
                 flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -D {shlex.quote(firmware_path)}'
@@ -1906,13 +1936,13 @@ def flash_bl_firmware():
         import time
         
         if flash_mode == 'DFU':
-            # 使用设备ID（如果提供），否则使用默认0483:df11
             # device 可能是 "dfu:0483:df11" 格式，需要去掉前缀
             if device and device != 'dfu':
                 dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
                 device_filter = f'-d {dfu_vid_pid}'
             else:
-                device_filter = '-d 0483:df11'
+                # 不指定 -d，让 dfu-util 自动检测所有 DFU 设备
+                device_filter = ''
             safe_address = shlex.quote(dfu_address)
             # 先擦除再烧录
             erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
