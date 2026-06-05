@@ -1,31 +1,31 @@
 {
-  "type": "toolboard",
-  "name": "FLY-SHT36 V2",
-  "platform": "STM32",
-  "mcu": "stm32f103",
+  "bl_default_flash": "DFU",
+  "bl_flash_support": "支持",
   "bl_offset": "8192",
+  "boot_pins": "!PC13",
   "connections": [
     "CANBUS",
     "USB",
     "串口"
   ],
-  "default_connection": "CAN bus (on PB8/PB9)",
-  "flash_modes": [
-    "DFU",
-    "KAT"
-  ],
-  "default_flash": "KAT",
-  "boot_pins": "!PC13",
   "crystal": "8000000",
-  "bl_flash_support": "支持",
-  "bl_default_flash": "DFU",
-  "id": "sht36_v2",
+  "default_connection": "CAN bus (on PB8/PB9)",
+  "default_flash": "KAT",
   "firmware_update": {
-    "enabled": false,
-    "katapult_mode": "USB",
+    "custom_config": "",
     "device_id": "",
+    "enabled": false,
     "flash_mode": "KAT",
-    "custom_config": ""
+    "katapult_mode": "USB"
   },
-  "manufacturer": "FLY"
+  "flash_modes": [
+    "KAT",
+    "CAN"
+  ],
+  "id": "sht36_v2",
+  "manufacturer": "FLY",
+  "mcu": "stm32f103",
+  "name": "FLY-SHT36 V2-103",
+  "platform": "STM32",
+  "type": "toolboard"
 }

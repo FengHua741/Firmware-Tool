@@ -1074,13 +1074,16 @@ async function flashFirmware() {
     resultDiv.querySelector('.result-box').innerHTML = '<p>⏳ 正在烧录，请稍候...</p>';
     
     try {
+        const canIfaceEl = document.getElementById('flashCanIface');
+        const canIface = canIfaceEl ? canIfaceEl.value : 'can0';
         const response = await fetch('/api/firmware/flash', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 device_id: deviceId,
                 flash_mode: flashMode,
-                firmware_path: firmwarePath
+                firmware_path: firmwarePath,
+                can_iface: canIface
             })
         });
         

@@ -570,8 +570,43 @@ async function loadSettings() {
             if (ktp) ktp.value = config.katapult_path || '~/katapult';
             const mrHost = document.getElementById('settingsMoonrakerHost');
             if (mrHost) mrHost.value = config.moonraker_host || '127.0.0.1';
+            // 记住原始 Moonraker 地址，用于模式切换后恢复
+            _savedMoonrakerHost = config.moonraker_host || '127.0.0.1';
             const mrPort = document.getElementById('settingsMoonrakerPort');
             if (mrPort) mrPort.value = config.moonraker_port || 7125;
+            
+            // 加载连接模式
+            const mode = config.connection_mode || 'local';
+            const radios = document.querySelectorAll('input[name="connectionMode"]');
+            radios.forEach(r => r.checked = r.value === mode);
+            
+            // 标准 SSH 字段
+            const sshHost = document.getElementById('settingsSshHost');
+            if (sshHost) sshHost.value = config.ssh_host || '';
+            const sshPort = document.getElementById('settingsSshPort');
+            if (sshPort) sshPort.value = config.ssh_port || 22;
+            const sshUser = document.getElementById('settingsSshUser');
+            if (sshUser) sshUser.value = config.ssh_user || '';
+            const sudoMode = document.getElementById('settingsSudoMode');
+            if (sudoMode) sudoMode.value = config.sudo_mode || 'password';
+            
+            // FAST-SSH IP 地址
+            const fastSshHost = document.getElementById('settingsFastSshHost');
+            if (fastSshHost) fastSshHost.value = config.ssh_host || '';
+            
+            toggleSshConfig();
+            
+            // 加载凭据状态（仅标准 SSH 模式显示）
+            if (mode === 'ssh') {
+                try {
+                    const credResp = await fetch('/api/settings/ssh-credentials');
+                    const credData = await credResp.json();
+                    const sshPwd = document.getElementById('settingsSshPassword');
+                    const sudoPwd = document.getElementById('settingsSudoPassword');
+                    if (sshPwd) sshPwd.placeholder = credData.has_ssh_password ? '已保存 (留空保持不变)' : '输入SSH密码';
+                    if (sudoPwd) sudoPwd.placeholder = credData.has_sudo_password ? '已保存 (留空保持不变)' : '与SSH密码相同则留空';
+                } catch (e) {}
+            }
         }
     } catch (error) {
         console.error('加载设置失败:', error);
@@ -587,12 +622,41 @@ async function saveSettings() {
     const ktp = document.getElementById('settingsKatapultPath');
     const mrHost = document.getElementById('settingsMoonrakerHost');
     const mrPort = document.getElementById('settingsMoonrakerPort');
+    
+    // 获取连接模式
+    const modeRadio = document.querySelector('input[name="connectionMode"]:checked');
+    const connectionMode = modeRadio ? modeRadio.value : 'local';
+    
+    // 根据模式收集 SSH 配置
+    const sshHost = document.getElementById('settingsSshHost');
+    const sshPort = document.getElementById('settingsSshPort');
+    const sshUser = document.getElementById('settingsSshUser');
+    const sudoMode = document.getElementById('settingsSudoMode');
+    const fastSshHost = document.getElementById('settingsFastSshHost');
+    
     const settings = {
         klipper_path: kp ? kp.value : '~/klipper',
         katapult_path: ktp ? ktp.value : '~/katapult',
         moonraker_host: mrHost ? mrHost.value : '127.0.0.1',
         moonraker_port: mrPort ? parseInt(mrPort.value) || 7125 : 7125,
+        connection_mode: connectionMode,
     };
+    
+    if (connectionMode === 'ssh') {
+        settings.ssh_host = sshHost ? sshHost.value : '';
+        settings.ssh_port = sshPort ? parseInt(sshPort.value) || 22 : 22;
+        settings.ssh_user = sshUser ? sshUser.value : '';
+        settings.sudo_mode = sudoMode ? sudoMode.value : 'password';
+    } else if (connectionMode === 'fast-ssh') {
+        settings.ssh_host = fastSshHost ? fastSshHost.value : '';
+        settings.ssh_port = 22;
+        // ssh_user 和 sudo_mode 由后端自动设置固定值
+    } else {
+        // local 模式: 保留 ssh_host/port 的值以便将来切换回来
+        settings.ssh_host = sshHost ? sshHost.value : '';
+        settings.ssh_port = sshPort ? parseInt(sshPort.value) || 22 : 22;
+        settings.ssh_user = '';
+    }
     
     try {
         const response = await fetch('/api/settings/config', {
@@ -604,6 +668,24 @@ async function saveSettings() {
         const data = await response.json();
         
         if (data.success) {
+            // 标准 SSH 模式保存凭据（如果有输入）
+            if (connectionMode === 'ssh') {
+                const sshPwd = document.getElementById('settingsSshPassword');
+                const sudoPwd = document.getElementById('settingsSudoPassword');
+                if (sshPwd?.value || sudoPwd?.value) {
+                    const creds = {};
+                    if (sshPwd && sshPwd.value) creds.ssh_password = sshPwd.value;
+                    if (sudoPwd && sudoPwd.value) creds.sudo_password = sudoPwd.value;
+                    if (Object.keys(creds).length > 0) {
+                        await fetch('/api/settings/ssh-credentials', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(creds)
+                        });
+                    }
+                }
+            }
+            // FAST-SSH 模式凭据由后端自动保存，前端无需处理
             showSuccess('设置已保存');
         } else {
             showError('保存失败: ' + data.error);
@@ -613,7 +695,162 @@ async function saveSettings() {
     }
 }
 
+// 切换 SSH/FAST-SSH 配置区显隐
+function toggleSshConfig() {
+    const modeRadio = document.querySelector('input[name="connectionMode"]:checked');
+    const mode = modeRadio ? modeRadio.value : 'local';
+    const sshSection = document.getElementById('sshConfigSection');
+    const fastSshSection = document.getElementById('fastSshConfigSection');
+    
+    // 标准 SSH 配置区
+    if (sshSection) {
+        sshSection.style.display = mode === 'ssh' ? 'block' : 'none';
+    }
+    // FAST-SSH 配置区
+    if (fastSshSection) {
+        fastSshSection.style.display = mode === 'fast-ssh' ? 'block' : 'none';
+    }
+    
+    // 联动 Moonraker 地址
+    updateMoonrakerHostFromSsh();
+    // 更新路径解析提示
+    updatePathHints();
+}
 
+// 更新路径解析提示 — 显示 ~ 在当前模式下的实际路径
+async function updatePathHints() {
+    const kpInput = document.getElementById('settingsKlipperPath');
+    const ktpInput = document.getElementById('settingsKatapultPath');
+    const kpHint = document.getElementById('klipperPathHint');
+    const ktpHint = document.getElementById('katapultPathHint');
+    
+    if (!kpInput || !kpHint) return;
+    
+    const kpVal = kpInput.value || '~/klipper';
+    const ktpVal = ktpInput ? ktpInput.value : '~/katapult';
+    
+    // 如果路径不含 ~，直接显示原路径无提示
+    if (!kpVal.startsWith('~')) {
+        kpHint.textContent = '';
+    }
+    if (!ktpVal.startsWith('~')) {
+        if (ktpHint) ktpHint.textContent = '';
+    }
+    
+    // 从后端解析实际路径
+    try {
+        const params = new URLSearchParams();
+        params.append('path', kpVal);
+        if (ktpVal && ktpVal !== kpVal) params.append('path', ktpVal);
+        
+        const resp = await fetch('/api/settings/resolve-paths?' + params.toString());
+        const data = await resp.json();
+        
+        if (data.resolved) {
+            const resolvedKp = data.resolved[kpVal];
+            const resolvedKtp = data.resolved[ktpVal];
+            const mode = data.mode || 'local';
+            const modeLabel = mode === 'local' ? '本地' : mode.toUpperCase();
+            
+            if (resolvedKp && kpVal.startsWith('~')) {
+                kpHint.textContent = `${modeLabel} 模式实际路径: ${resolvedKp}`;
+                kpHint.style.color = mode === 'local' ? '#888' : '#1976D2';
+            } else if (kpHint) {
+                kpHint.textContent = '';
+            }
+            
+            if (ktpHint && resolvedKtp && ktpVal.startsWith('~')) {
+                ktpHint.textContent = `${modeLabel} 模式实际路径: ${resolvedKtp}`;
+                ktpHint.style.color = mode === 'local' ? '#888' : '#1976D2';
+            } else if (ktpHint) {
+                ktpHint.textContent = '';
+            }
+        }
+    } catch (e) {
+        // 解析失败时静默
+    }
+}
+
+// SSH/FAST-SSH 模式下自动将 Moonraker 地址同步为远程主机地址
+let _savedMoonrakerHost = ''; // 记住加载时的 Moonraker 地址
+
+function updateMoonrakerHostFromSsh() {
+    const modeRadio = document.querySelector('input[name="connectionMode"]:checked');
+    const mode = modeRadio ? modeRadio.value : 'local';
+    const mrHost = document.getElementById('settingsMoonrakerHost');
+    const sshHost = document.getElementById('settingsSshHost');
+    const fastSshHost = document.getElementById('settingsFastSshHost');
+    
+    if (!mrHost) return;
+    
+    // 确定当前远程主机 IP
+    let remoteHost = '';
+    if (mode === 'ssh') {
+        remoteHost = sshHost ? sshHost.value : '';
+    } else if (mode === 'fast-ssh') {
+        remoteHost = fastSshHost ? fastSshHost.value : '';
+    }
+    
+    if ((mode === 'ssh' || mode === 'fast-ssh') && remoteHost) {
+        // 首次进入远程模式时记住原始地址
+        if (!_savedMoonrakerHost) {
+            _savedMoonrakerHost = mrHost.value;
+        }
+        mrHost.value = remoteHost;
+        mrHost.readOnly = true;
+        mrHost.style.backgroundColor = '#f0f0f0';
+        mrHost.title = `${mode.toUpperCase()} 模式下自动使用远程主机地址`;
+    } else {
+        // 恢复本地模式的原始地址
+        if (_savedMoonrakerHost) {
+            mrHost.value = _savedMoonrakerHost;
+            _savedMoonrakerHost = '';
+        }
+        mrHost.readOnly = false;
+        mrHost.style.backgroundColor = '';
+        mrHost.title = '';
+    }
+}
+
+// 测试 SSH 连接（支持标准 SSH 和 FAST-SSH）
+async function testSshConnection() {
+    const modeRadio = document.querySelector('input[name="connectionMode"]:checked');
+    const mode = modeRadio ? modeRadio.value : 'local';
+    
+    // 根据模式选择结果显示元素
+    let resultEl, btnEl;
+    if (mode === 'fast-ssh') {
+        resultEl = document.getElementById('fastSshTestResult');
+        btnEl = document.getElementById('btnTestFastSsh');
+    } else {
+        resultEl = document.getElementById('sshTestResult');
+        btnEl = document.getElementById('btnTestSsh');
+    }
+    if (!resultEl) return;
+    
+    resultEl.textContent = '连接测试中...';
+    resultEl.style.color = '#888';
+    if (btnEl) btnEl.disabled = true;
+    
+    // 先保存当前设置（后端会自动设置 FAST-SSH 凭据）
+    await saveSettings();
+    
+    try {
+        const response = await fetch('/api/settings/ssh-test', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            resultEl.textContent = data.message || '连接成功';
+            resultEl.style.color = '#28a745';
+        } else {
+            resultEl.textContent = data.error || '连接失败';
+            resultEl.style.color = '#dc3545';
+        }
+    } catch (error) {
+        resultEl.textContent = '测试失败: ' + error.message;
+        resultEl.style.color = '#dc3545';
+    }
+    if (btnEl) btnEl.disabled = false;
+}
 
 async function manageService(service, action) {
     try {

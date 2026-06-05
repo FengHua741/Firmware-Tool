@@ -26,6 +26,7 @@ import sys
 # 导入主板配置
 from board_config_loader import load_all_boards, load_board_config, get_manufacturers, get_board_types, get_bl_firmwares
 from kconfig_can_parser import parse_can_options
+from ssh_manager import run_cmd, run_cmd_check, path_exists, get_file_size, list_dir, is_ssh_mode, is_fast_ssh_mode, download_firmware_from_remote, upload_bl_firmware_for_remote, cleanup_remote_bl_dir, SSHManager, FAST_SSH_USER, FAST_SSH_PASSWORD
 
 # 配置日志
 logging.basicConfig(
@@ -50,25 +51,40 @@ def get_klipper_owner(klipper_path=None):
     import pwd
     if not klipper_path:
         klipper_path = config.get('klipper_path', '~/klipper')
-    # 处理 ~ 开头路径：先尝试查找 /home 下实际存在的 klipper 目录
+
+    # SSH 模式: 通过远程命令获取 SSH 用户的 home 目录
+    if is_ssh_mode():
+        ssh_user = config.get('ssh_user', 'root')
+        try:
+            result = run_cmd(f'eval echo ~{ssh_user}', shell=True, capture_output=True, text=True, timeout=5)
+            remote_home = result.stdout.strip()
+            if remote_home and remote_home != f'~{ssh_user}':
+                return ssh_user, remote_home
+        except Exception:
+            pass
+        # 回退: 根据用户名推断 home 目录
+        if ssh_user == 'root':
+            return 'root', '/root'
+        return ssh_user, f'/home/{ssh_user}'
+    
+    # 本地模式
     if klipper_path.startswith('~'):
-        for user_dir in os.listdir('/home'):
+        for user_dir in list_dir('/home'):
             candidate = os.path.join('/home', user_dir, 'klipper')
-            if os.path.exists(candidate):
+            if path_exists(candidate):
                 klipper_path = candidate
                 break
-    if os.path.exists(klipper_path):
+    if path_exists(klipper_path):
         try:
             stat_info = os.stat(klipper_path)
             pw = pwd.getpwuid(stat_info.st_uid)
             return pw.pw_name, pw.pw_dir
         except (KeyError, OSError):
             pass
-    # fallback：查找非 root 用户的 klipper 目录
     for entry in pwd.getpwall():
         if entry.pw_uid >= 1000 and entry.pw_name not in ('nobody', 'nogroup'):
             candidate = os.path.join(entry.pw_dir, 'klipper')
-            if os.path.exists(candidate):
+            if path_exists(candidate):
                 return entry.pw_name, entry.pw_dir
     return 'fenghua', '/home/fenghua'
 
@@ -77,8 +93,47 @@ def expand_klipper_path(path):
     """展开 Klipper 路径，处理 systemd root 运行时 ~ 扩展问题"""
     if not path.startswith('~'):
         return os.path.expanduser(path)
+    # SSH 模式: 使用 SSH 用户的远程 home 目录，避免递归调用
+    if is_ssh_mode():
+        ssh_user = config.get('ssh_user', 'root')
+        if ssh_user == 'root':
+            remote_home = '/root'
+        else:
+            remote_home = f'/home/{ssh_user}'
+        # 尝试通过远程命令获取精确路径
+        try:
+            result = run_cmd(f'eval echo ~{ssh_user}', shell=True, capture_output=True, text=True, timeout=5)
+            resolved = result.stdout.strip()
+            if resolved and resolved != f'~{ssh_user}':
+                remote_home = resolved
+        except Exception:
+            pass
+        return remote_home + path[1:]
+    # 本地模式
     _, home_dir = get_klipper_owner()
     return home_dir + path[1:]
+
+
+def get_klipper_python_bin(home_dir):
+    """获取 Klipper 的 python 可执行文件路径"""
+    # 首先尝试 klippy-env 虚拟环境
+    venv_python = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
+    if is_ssh_mode():
+        # SSH 模式: 通过 SSH 命令快速检查
+        try:
+            manager = SSHManager.get_instance()
+            result = manager.exec_command(f'test -x {venv_python} && echo YES', timeout=3)
+            if 'YES' in result.stdout:
+                return venv_python
+        except Exception:
+            pass
+        # 回退到系统 python
+        return '/usr/bin/python3'
+    else:
+        # 本地模式
+        if os.path.exists(venv_python):
+            return venv_python
+        return '/usr/bin/python3'
 
 
 def sanitize_manufacturer(mfr):
@@ -111,7 +166,13 @@ DEFAULT_CONFIG = {
     'port': 9999,
     'klipper_path': '~/klipper',
     'json_repo_url': '',  # JSON配置仓库地址
-    'last_json_update': None
+    'last_json_update': None,
+    # SSH 远程连接配置
+    'connection_mode': 'local',  # 'local', 'ssh' 或 'fast-ssh'
+    'ssh_host': '',
+    'ssh_port': 22,
+    'ssh_user': '',
+    'sudo_mode': 'password',  # 'nopasswd' 或 'password'
 }
 
 def load_config():
@@ -142,6 +203,14 @@ def save_config(config):
 config = load_config()
 PORT = config.get('port', 9999)
 
+# FAST-SSH 模式保障：启动时自动设置固定凭据
+if config.get('connection_mode') == 'fast-ssh':
+    from ssh_manager import save_credential as _save_cred
+    config['ssh_user'] = FAST_SSH_USER
+    config['sudo_mode'] = 'password'
+    _save_cred('ssh_password', FAST_SSH_PASSWORD)
+    _save_cred('sudo_password', FAST_SSH_PASSWORD)
+
 # 历史数据存储
 MAX_HISTORY_POINTS = 3600
 resource_history = {
@@ -154,23 +223,208 @@ resource_history = {
 # 服务列表
 SERVICES = ['klipper', 'moonraker', 'nginx', 'crowsnest', 'KlipperScreen']
 
+# 远程资源采集缓存
+_remote_cpu_prev = None  # (total, idle) 上次 /proc/stat 采样
+_remote_resource_cache = {
+    'cpu': {'percent': 0, 'freq': 0, 'count': 1},
+    'memory': {'total': 0, 'used': 0, 'percent': 0},
+    'disk': {'total': 0, 'used': 0, 'percent': 0},
+    'network': {'interfaces': []},
+    'timestamp': 0
+}
+
+def _collect_remote_resources():
+    """通过 SSH 单次命令采集远程系统资源"""
+    global _remote_cpu_prev
+
+    try:
+        if not is_ssh_mode():
+            return None
+
+        manager = SSHManager.get_instance()
+
+        # 单次 SSH 命令采集所有数据（减少往返）
+        # 用 grep 替代 awk 避免引号转义问题
+        cmd = (
+            "echo '===STAT==='; grep 'cpu ' /proc/stat; "
+            "echo '===FRQ==='; cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo 0; "
+            "echo '===CNT==='; nproc; "
+            "echo '===MEM==='; free -b | grep '^Mem:'; "
+            "echo '===DSK==='; df -B1 / | tail -1; "
+            "echo '===NET==='; ip -br -4 addr show 2>/dev/null | grep -iE '^(eth|en|wlan|wlo)'; "
+            "echo '===END==='"
+        )
+
+        result = manager.exec_command(cmd, timeout=8)
+        logger.info(f"远程资源采集: rc={result.returncode}, stdout_len={len(result.stdout)}, stderr={result.stderr[:100]}")
+        if result.returncode != 0:
+            logger.warning(f"远程资源采集命令失败: rc={result.returncode}, stderr={result.stderr[:200]}")
+            return None
+
+        output = result.stdout
+
+        # 解析各段
+        sections = {}
+        current_key = None
+        current_lines = []
+
+        for line in output.split('\n'):
+            line = line.strip()
+            if line.startswith('===') and line.endswith('==='):
+                key = line[3:-3]
+                if current_key:
+                    sections[current_key] = '\n'.join(current_lines)
+                current_key = key
+                current_lines = []
+            else:
+                if current_key and line:
+                    current_lines.append(line)
+        if current_key:
+            sections[current_key] = '\n'.join(current_lines)
+
+        # 解析 CPU
+        cpu_info = {'percent': 0, 'freq': 0, 'count': 1}
+        if 'STAT' in sections:
+            parts = sections['STAT'].split()
+            if len(parts) >= 8:
+                try:
+                    values = [int(x) for x in parts[1:8]]
+                    idle = values[3] + values[4]  # idle + iowait
+                    total = sum(values)
+                    if _remote_cpu_prev is not None:
+                        prev_total, prev_idle = _remote_cpu_prev
+                        diff_total = total - prev_total
+                        diff_idle = idle - prev_idle
+                        if diff_total > 0:
+                            cpu_info['percent'] = round((1 - diff_idle / diff_total) * 100, 1)
+                    _remote_cpu_prev = (total, idle)
+                except (ValueError, IndexError):
+                    pass
+
+        if 'FRQ' in sections:
+            try:
+                cpu_info['freq'] = round(int(sections['FRQ'].strip()) / 1000000, 2)
+            except (ValueError, TypeError):
+                pass
+
+        if 'CNT' in sections:
+            try:
+                cpu_info['count'] = int(sections['CNT'].strip())
+            except (ValueError, TypeError):
+                pass
+
+        # 解析内存 — free -b | grep '^Mem:' 输出完整行:
+        #   Mem: total used shared buff/cache available
+        mem_info = {'total': 0, 'used': 0, 'percent': 0}
+        if 'MEM' in sections:
+            line = sections['MEM'].strip()
+            # 去除 "Mem:" 前缀
+            if line.startswith('Mem:'):
+                line = line[4:].strip()
+            parts = line.split()
+            if len(parts) >= 6:
+                try:
+                    mem_total = int(parts[0])      # total
+                    mem_used_raw = int(parts[1])     # used
+                    mem_avail = int(parts[5])        # available (第6个字段)
+                    # psutil 行为: used = total - available
+                    mem_used = mem_total - mem_avail if mem_avail > 0 else mem_used_raw
+                    mem_info = {
+                        'total': round(mem_total / (1024**3), 1),
+                        'used': round(mem_used / (1024**3), 1),
+                        'percent': round(mem_used / mem_total * 100, 1) if mem_total > 0 else 0
+                    }
+                except (ValueError, IndexError):
+                    logger.warning(f"远程内存解析失败: line={sections['MEM'][:80]}")
+
+        # 解析磁盘 — df -B1 / | tail -1 输出完整行:
+        #   /dev/root  total  used  avail  use%  mount
+        disk_info = {'total': 0, 'used': 0, 'percent': 0}
+        if 'DSK' in sections:
+            line = sections['DSK'].strip()
+            parts = line.split()
+            if len(parts) >= 6:
+                try:
+                    # 跳过第1个字段（filesystem名如 /dev/root）
+                    disk_total = int(parts[1])   # total (第2个字段)
+                    disk_used = int(parts[2])    # used (第3个字段)
+                    disk_info = {
+                        'total': round(disk_total / (1024**3), 1),
+                        'used': round(disk_used / (1024**3), 1),
+                        'percent': round(disk_used / disk_total * 100, 1) if disk_total > 0 else 0
+                    }
+                except (ValueError, IndexError):
+                    logger.warning(f"远程磁盘解析失败: line={sections['DSK'][:80]}")
+
+        # 解析网络
+        net_info = {'interfaces': []}
+        if 'NET' in sections:
+            import socket as _socket
+            for line in sections['NET'].split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) >= 3:
+                    iface_name = parts[0]
+                    ip_addr = parts[2].split('/')[0]
+                    iface_lower = iface_name.lower()
+                    if iface_lower.startswith('eth') or iface_lower.startswith('en'):
+                        display_name = '网线'
+                    elif iface_lower.startswith('wlan') or iface_lower.startswith('wlo'):
+                        display_name = 'WiFi'
+                    else:
+                        display_name = iface_name
+                    net_info['interfaces'].append({'name': display_name, 'ips': [ip_addr]})
+
+        resources = {
+            'cpu': cpu_info,
+            'memory': mem_info,
+            'disk': disk_info,
+            'network': net_info
+        }
+
+        _remote_resource_cache.update(resources)
+        _remote_resource_cache['timestamp'] = time.time()
+
+        return resources
+    except Exception as e:
+        logger.error(f"远程资源采集失败: {e}")
+        return None
+
 # ==================== 资源监控 ====================
 def resource_monitor():
-    """后台线程：每秒采集系统资源数据"""
+    """后台线程：采集系统资源数据"""
+    first_run = True
     while True:
         try:
-            cpu_percent = psutil.cpu_percent(interval=1)
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
-            
-            resource_history['cpu'].append(cpu_percent)
-            resource_history['memory'].append(memory.percent)
-            resource_history['disk'].append((disk.used / disk.total) * 100)
-            resource_history['timestamps'].append(datetime.now().isoformat())
+            if is_ssh_mode():
+                # SSH 模式: 每 3 秒采集一次远程资源
+                resources = _collect_remote_resources()
+                if resources:
+                    resource_history['cpu'].append(resources['cpu']['percent'])
+                    resource_history['memory'].append(resources['memory']['percent'])
+                    resource_history['disk'].append(resources['disk']['percent'])
+                    resource_history['timestamps'].append(datetime.now().isoformat())
+                else:
+                    if first_run:
+                        logger.warning("远程资源采集返回 None， 可能 SSH 连接未建立")
+                time.sleep(2)  # 合计约 3 秒间隔
+                first_run = False
+            else:
+                # 本地模式: 使用 psutil
+                cpu_percent = psutil.cpu_percent(interval=1)
+                memory = psutil.virtual_memory()
+                disk = psutil.disk_usage('/')
+
+                resource_history['cpu'].append(cpu_percent)
+                resource_history['memory'].append(memory.percent)
+                resource_history['disk'].append((disk.used / disk.total) * 100)
+                resource_history['timestamps'].append(datetime.now().isoformat())
+                time.sleep(1)
         except Exception as e:
             logger.error(f"资源监控错误: {e}")
-        
-        time.sleep(1)
+            time.sleep(3)
 
 monitor_thread = threading.Thread(target=resource_monitor, daemon=True)
 monitor_thread.start()
@@ -186,75 +440,84 @@ def index():
 def get_system_resources():
     """获取系统资源信息"""
     try:
-        # CPU信息
-        cpu_freq = psutil.cpu_freq()
-        cpu_info = {
-            'percent': psutil.cpu_percent(interval=0.1),
-            'freq': round(cpu_freq.current / 1000, 2) if cpu_freq else 0,
-            'count': psutil.cpu_count()
-        }
-        
-        # 内存信息
-        memory = psutil.virtual_memory()
-        mem_info = {
-            'total': round(memory.total / (1024**3), 1),
-            'used': round(memory.used / (1024**3), 1),
-            'percent': memory.percent
-        }
-        
-        # 磁盘信息
-        disk = psutil.disk_usage('/')
-        disk_info = {
-            'total': round(disk.total / (1024**3), 1),
-            'used': round(disk.used / (1024**3), 1),
-            'percent': round((disk.used / disk.total) * 100, 1)
-        }
-        
-        # 网络信息 - 只获取网口(eth/en)和WiFi(wlan/wlo)
-        net_info = {'interfaces': []}
-        try:
-            import socket
+        if is_ssh_mode():
+            # SSH 模式: 使用缓存的远程资源数据
+            cached = _remote_resource_cache
+            cpu_info = cached.get('cpu', {'percent': 0, 'freq': 0, 'count': 1})
+            mem_info = cached.get('memory', {'total': 0, 'used': 0, 'percent': 0})
+            disk_info = cached.get('disk', {'total': 0, 'used': 0, 'percent': 0})
+            net_info = cached.get('network', {'interfaces': []})
+        else:
+            # 本地模式: 使用 psutil
+            # CPU信息
+            cpu_freq = psutil.cpu_freq()
+            cpu_info = {
+                'percent': psutil.cpu_percent(interval=0.1),
+                'freq': round(cpu_freq.current / 1000, 2) if cpu_freq else 0,
+                'count': psutil.cpu_count()
+            }
             
-            # 获取所有网络接口
-            interfaces = psutil.net_if_addrs()
-            for iface_name, addrs in interfaces.items():
-                # 只保留网口(eth/en)和WiFi(wlan/wlo)
-                iface_lower = iface_name.lower()
-                if not (iface_lower.startswith('eth') or 
-                        iface_lower.startswith('en') or 
-                        iface_lower.startswith('wlan') or 
-                        iface_lower.startswith('wlo')):
-                    continue
-                
-                # 转换接口名称为中文
-                iface_lower = iface_name.lower()
-                if iface_lower.startswith('eth') or iface_lower.startswith('en'):
-                    display_name = '网线'
-                elif iface_lower.startswith('wlan') or iface_lower.startswith('wlo'):
-                    display_name = 'WiFi'
-                else:
-                    display_name = iface_name
-                
-                iface_info = {'name': display_name, 'ips': []}
-                for addr in addrs:
-                    if addr.family == socket.AF_INET:  # IPv4
-                        iface_info['ips'].append(addr.address)
-                
-                if iface_info['ips']:
-                    net_info['interfaces'].append(iface_info)
-        except:
-            # 如果获取失败，使用hostname
+            # 内存信息
+            memory = psutil.virtual_memory()
+            mem_info = {
+                'total': round(memory.total / (1024**3), 1),
+                'used': round(memory.used / (1024**3), 1),
+                'percent': memory.percent
+            }
+            
+            # 磁盘信息
+            disk = psutil.disk_usage('/')
+            disk_info = {
+                'total': round(disk.total / (1024**3), 1),
+                'used': round(disk.used / (1024**3), 1),
+                'percent': round((disk.used / disk.total) * 100, 1)
+            }
+            
+            # 网络信息 - 只获取网口(eth/en)和WiFi(wlan/wlo)
+            net_info = {'interfaces': []}
             try:
-                hostname = socket.gethostname()
-                net_info['interfaces'] = [{'name': 'default', 'ips': [socket.gethostbyname(hostname)]}]
+                import socket
+                
+                # 获取所有网络接口
+                interfaces = psutil.net_if_addrs()
+                for iface_name, addrs in interfaces.items():
+                    # 只保留网口(eth/en)和WiFi(wlan/wlo)
+                    iface_lower = iface_name.lower()
+                    if not (iface_lower.startswith('eth') or 
+                            iface_lower.startswith('en') or 
+                            iface_lower.startswith('wlan') or 
+                            iface_lower.startswith('wlo')):
+                        continue
+                    
+                    # 转换接口名称为中文
+                    iface_lower = iface_name.lower()
+                    if iface_lower.startswith('eth') or iface_lower.startswith('en'):
+                        display_name = '网线'
+                    elif iface_lower.startswith('wlan') or iface_lower.startswith('wlo'):
+                        display_name = 'WiFi'
+                    else:
+                        display_name = iface_name
+                    
+                    iface_info = {'name': display_name, 'ips': []}
+                    for addr in addrs:
+                        if addr.family == socket.AF_INET:  # IPv4
+                            iface_info['ips'].append(addr.address)
+                    
+                    if iface_info['ips']:
+                        net_info['interfaces'].append(iface_info)
             except:
-                net_info['interfaces'] = []
+                # 如果获取失败，使用hostname
+                try:
+                    hostname = socket.gethostname()
+                    net_info['interfaces'] = [{'name': 'default', 'ips': [socket.gethostbyname(hostname)]}]
+                except:
+                    net_info['interfaces'] = []
         
         # 服务状态
         service_status = {}
         for service in SERVICES:
             try:
-                result = subprocess.run(
+                result = run_cmd(
                     ['systemctl', 'is-active', service],
                     capture_output=True,
                     text=True,
@@ -290,7 +553,7 @@ def get_lsusb():
     # 默认排除列表（始终过滤）
     default_exclude = ['Linux Foundation']
     try:
-        output = subprocess.check_output(['lsusb'], text=True)
+        output = run_cmd_check(['lsusb'], text=True)
         devices = []
         for line in output.strip().split('\n'):
             if not line.strip():
@@ -328,7 +591,7 @@ def get_serial_devices():
     for path in serial_paths:
         try:
             info = {}
-            output = subprocess.check_output(
+            output = run_cmd_check(
                 ['udevadm', 'info', '--query=property', '--name=' + path],
                 text=True, timeout=5
             )
@@ -391,7 +654,7 @@ def get_can_interfaces():
     """获取可用CAN接口列表（模仿FlyTools getCanIface）"""
     try:
         # 尝试 JSON 输出（需要 iproute2 >= 4.12）
-        output = subprocess.check_output(
+        output = run_cmd_check(
             ['ip', '-d', '-j', 'link', 'show', 'type', 'can'],
             text=True, timeout=5
         )
@@ -409,7 +672,7 @@ def get_can_interfaces():
     except (subprocess.CalledProcessError, Exception):
         # JSON 模式失败，回退到纯文本解析
         try:
-            text_output = subprocess.check_output(
+            text_output = run_cmd_check(
                 ['ip', '-d', 'link', 'show', 'type', 'can'],
                 text=True, timeout=5
             )
@@ -437,17 +700,19 @@ def read_mcu_uuids_from_printer_cfg(content):
     current_section = None
     for line in content.split('\n'):
         line_stripped = line.strip()
-        # 跳过空行和注释
-        if not line_stripped or line_stripped.startswith('#'):
+        # 去除行尾注释（# 后的内容），保留段头和配置行
+        line_no_comment = re.sub(r'\s*#.*$', '', line_stripped).strip()
+        # 跳过空行
+        if not line_no_comment:
             continue
         # 检测段落头 [mcu], [mcu SHT36], [mcu ERCF] 等
-        m = re.match(r'^\[mcu(\s+.+)?\]$', line_stripped, re.IGNORECASE)
+        m = re.match(r'^\[mcu(\s+.+)?\]$', line_no_comment, re.IGNORECASE)
         if m:
             current_section = m.group(0)  # 如 "[mcu SHT36]"
             continue
         # 在 MCU 段落中查找 canbus_uuid
         if current_section:
-            m = re.match(r'^canbus_uuid\s*[:=]\s*([a-fA-F0-9]+)\s*$', line_stripped)
+            m = re.match(r'^canbus_uuid\s*[:=]\s*([a-fA-F0-9]+)\s*$', line_no_comment)
             if m:
                 uuid_val = m.group(1).lower()
                 uuids.append({
@@ -459,11 +724,20 @@ def read_mcu_uuids_from_printer_cfg(content):
     return uuids
 
 
+def get_moonraker_base_url():
+    """获取 Moonraker HTTP API 的基础 URL
+    在 SSH 模式下使用远程主机地址，否则使用配置的 moonraker_host"""
+    if is_ssh_mode():
+        host = config.get('ssh_host', '127.0.0.1')
+    else:
+        host = config.get('moonraker_host', '127.0.0.1')
+    port = config.get('moonraker_port', 7125)
+    return f'http://{host}:{port}'
+
+
 def query_moonraker_printer_cfg():
     """通过 Moonraker HTTP API 读取 printer.cfg 并提取 MCU UUID"""
-    host = config.get('moonraker_host', '127.0.0.1')
-    port = config.get('moonraker_port', 7125)
-    base = f'http://{host}:{port}'
+    base = get_moonraker_base_url()
 
     try:
         # 健康检查
@@ -487,13 +761,33 @@ def query_moonraker_printer_cfg():
 
 
 def read_printer_cfg_direct():
-    """直接读取文件系统中的 printer.cfg（后备方案）"""
+    """直接读取文件系统中的 printer.cfg（后备方案）
+    SSH 模式下通过远程命令 cat 读取，本地模式读本地文件"""
     _, home_dir = get_klipper_owner()
     candidates = [
         os.path.join(home_dir, 'printer_data', 'config', 'printer.cfg'),
         os.path.join(home_dir, 'klipper_config', 'printer.cfg'),
         os.path.join(home_dir, 'printer.cfg'),
     ]
+
+    if is_ssh_mode():
+        # SSH 模式：通过远程命令逐个尝试读取
+        manager = SSHManager.get_instance()
+        for path in candidates:
+            try:
+                result = manager.exec_command(f'cat "{path}" 2>/dev/null', timeout=5, inject_sudo=False)
+                if result.returncode == 0 and result.stdout.strip():
+                    uuids = read_mcu_uuids_from_printer_cfg(result.stdout)
+                    if uuids:
+                        logger.info(f"SSH 读取 printer.cfg 成功: {path}, 发现 {len(uuids)} 个 UUID")
+                        return uuids, True
+            except Exception as e:
+                logger.warning(f"SSH 读取 {path} 失败: {e}")
+                continue
+        logger.warning("SSH 模式: 所有 printer.cfg 路径均无法读取")
+        return [], False
+
+    # 本地模式
     for path in candidates:
         if os.path.exists(path):
             try:
@@ -512,10 +806,10 @@ def _scan_can_uuids(iface='can0'):
     返回 (devices: list, error: str|None)"""
     try:
         klipper_owner, home_dir = get_klipper_owner()
-        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
+        python_bin = get_klipper_python_bin(home_dir)
         canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
 
-        output = subprocess.run(
+        output = run_cmd(
             f'{python_bin} {canbus_script} {iface} 2>&1',
             shell=True, capture_output=True, text=True, timeout=10
         )
@@ -563,9 +857,7 @@ def verify_mcu_connection_status(uuids):
     if not uuids:
         return [], True
 
-    host = config.get('moonraker_host', '127.0.0.1')
-    port = config.get('moonraker_port', 7125)
-    base = f'http://{host}:{port}'
+    base = get_moonraker_base_url()
 
     try:
         # 先检查 Moonraker 是否可达
@@ -593,7 +885,9 @@ def verify_mcu_connection_status(uuids):
             sname = u.get('section', '').strip('[]')
             if not sname:
                 continue
-            sec_cfg = config_settings.get(sname, {})
+            # Moonraker 的 configfile.settings 会将 section 名转成小写，
+            # 但对象查询 API 保留原始大小写，需要用小写查找配置
+            sec_cfg = config_settings.get(sname) or config_settings.get(sname.lower(), {})
             serial = sec_cfg.get('serial')
             canbus = sec_cfg.get('canbus_uuid')
 
@@ -636,11 +930,11 @@ def verify_mcu_connection_status(uuids):
 
         verified_uuids = []
         for sname in can_sections:
-            mcu_status = mcu_statuses.get(sname, {})
+            mcu_status = mcu_statuses.get(sname) or mcu_statuses.get(sname.lower(), {})
 
             # 判断 MCU 是否实际在线（不被 Klipper 断连消息覆盖）
             is_klipper_ready = (webhooks_state == 'ready')
-            is_mcu_lost = sname in lost_mcus
+            is_mcu_lost = sname in lost_mcus or sname.lower() in lost_mcus
 
             if not is_klipper_ready and is_mcu_lost:
                 # Klipper 明确报告此 MCU 已断连，mcu_version 是缓存数据
@@ -690,9 +984,9 @@ def search_can_uuid():
         return jsonify({'uuids': [], 'error': '无效的CAN接口'})
     try:
         klipper_owner, home_dir = get_klipper_owner()
-        python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
+        python_bin = get_klipper_python_bin(home_dir)
         canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
-        output = subprocess.run(
+        output = run_cmd(
             f'{python_bin} {canbus_script} {iface}',
             shell=True, capture_output=True, text=True, timeout=10
         )
@@ -818,7 +1112,7 @@ def get_all_ids():
         
         # USB 设备 - 格式：serial: <id>
         try:
-            output = subprocess.run(
+            output = run_cmd(
                 'ls /dev/serial/by-id/* 2>/dev/null || echo ""',
                 shell=True, capture_output=True, text=True
             )
@@ -836,7 +1130,7 @@ def get_all_ids():
         
         # DFU设备检测
         try:
-            output = subprocess.run(
+            output = run_cmd(
                 'sudo dfu-util -l 2>/dev/null | grep "Found DFU" || echo ""',
                 shell=True, capture_output=True, text=True
             )
@@ -876,7 +1170,7 @@ def get_all_ids():
         
         # 摄像头设备
         try:
-            output = subprocess.run(
+            output = run_cmd(
                 'ls /dev/video* 2>/dev/null || echo ""',
                 shell=True, capture_output=True, text=True
             )
@@ -890,7 +1184,7 @@ def get_all_ids():
         # RP2040 BOOT设备检测
         try:
             # 方法1: 通过lsblk检测RP2040 BOOT块设备
-            lsblk_output = subprocess.run(
+            lsblk_output = run_cmd(
                 'lsblk -o NAME,MODEL 2>/dev/null | grep -i "RP2"',
                 shell=True, capture_output=True, text=True
             )
@@ -904,7 +1198,7 @@ def get_all_ids():
             
             # 方法2: 通过lsusb检测Raspberry Pi RP2 Boot设备 (2e8a:0003)
             if not result['rp_boot']:
-                lsusb_output = subprocess.run(
+                lsusb_output = run_cmd(
                     'lsusb | grep -i "2e8a:" 2>/dev/null || echo ""',
                     shell=True, capture_output=True, text=True
                 )
@@ -1074,11 +1368,11 @@ def compile_firmware():
         mcu_arch_upper = mcu_arch.upper()
         processor_upper = processor.upper()
         
-        if not os.path.exists(klipper_path):
+        if not path_exists(klipper_path):
             return jsonify({'error': f'Klipper目录不存在: {klipper_path}'}), 400
         
         # 清理之前的编译
-        subprocess.run(f'cd {klipper_path} && rm -rf .config out', 
+        run_cmd(f'cd {klipper_path} && rm -rf .config out', 
                       shell=True, capture_output=True)
         
         # 生成配置文件
@@ -1386,19 +1680,26 @@ def compile_firmware():
         # 写入配置
         config_content = '\n'.join(config_lines) + '\n'
         config_path = os.path.join(klipper_path, '.config')
-        with open(config_path, 'w') as f:
-            f.write(config_content)
+        if is_ssh_mode():
+            # SSH 模式: 通过远程命令写入配置
+            sudo_write_file(config_path, config_content)
+        else:
+            with open(config_path, 'w') as f:
+                f.write(config_content)
         
         # 确保 out 目录存在且权限正确
         out_dir = os.path.join(klipper_path, 'out')
-        os.makedirs(out_dir, exist_ok=True)
-        try:
-            os.chmod(out_dir, 0o755)
-        except:
-            pass
+        if is_ssh_mode():
+            run_cmd(f'mkdir -p {shlex.quote(out_dir)}', shell=True, capture_output=True)
+        else:
+            os.makedirs(out_dir, exist_ok=True)
+            try:
+                os.chmod(out_dir, 0o755)
+            except:
+                pass
         
         # 使用make olddefconfig补全配置
-        olddefconfig_result = subprocess.run(
+        olddefconfig_result = run_cmd(
             f'cd {klipper_path} && make olddefconfig',
             shell=True, capture_output=True, text=True, timeout=60
         )
@@ -1411,7 +1712,7 @@ def compile_firmware():
             }), 500
         
         # 编译
-        compile_result = subprocess.run(
+        compile_result = run_cmd(
             f'cd {klipper_path} && make -j4',
             shell=True, capture_output=True, text=True, timeout=300
         )
@@ -1425,45 +1726,53 @@ def compile_firmware():
         
         for fw_file in firmware_files:
             fw_path = os.path.join(out_dir, fw_file)
-            if os.path.exists(fw_path):
+            if path_exists(fw_path):
                 firmware_path = fw_path
                 break
         
         if compile_result.returncode == 0 and firmware_path:
-            # 修改文件权限为普通用户可读写 (666)
+            # 修改文件权限
             try:
-                os.chmod(firmware_path, 0o666)
-                # 也修改 out 目录权限
-                os.chmod(out_dir, 0o755)
-                # 修改文件所有者为 Klipper 目录所有者（避免root编译后普通用户无权限）
-                import shutil
-                import pwd
-                import grp
-                try:
-                    klipper_stat = os.stat(klipper_path)
-                    owner_name = pwd.getpwuid(klipper_stat.st_uid).pw_name
-                    group_name = grp.getgrgid(klipper_stat.st_gid).gr_name
-                except (KeyError, OSError):
-                    owner_name = None
-                    group_name = None
-                if owner_name and group_name:
-                    shutil.chown(firmware_path, user=owner_name, group=group_name)
-                    shutil.chown(out_dir, user=owner_name, group=group_name)
-                    # 递归修改 out 目录下所有文件/子目录的所有者
-                    for root_dir, dirs, files in os.walk(out_dir):
-                        for d in dirs:
-                            shutil.chown(os.path.join(root_dir, d), user=owner_name, group=group_name)
-                        for f in files:
-                            shutil.chown(os.path.join(root_dir, f), user=owner_name, group=group_name)
-                    # 同时修改 .config 文件所有者
-                    config_file = os.path.join(klipper_path, '.config')
-                    if os.path.exists(config_file):
-                        shutil.chown(config_file, user=owner_name, group=group_name)
+                if is_ssh_mode():
+                    # SSH 模式: 通过远程命令修改权限
+                    owner_name, _ = get_klipper_owner(klipper_path)
+                    run_cmd(f'chmod 666 {shlex.quote(firmware_path)}', shell=True, capture_output=True, timeout=5)
+                    run_cmd(f'chmod 755 {shlex.quote(out_dir)}', shell=True, capture_output=True, timeout=5)
+                    if owner_name:
+                        run_cmd(f'chown {shlex.quote(owner_name)} {shlex.quote(firmware_path)} {shlex.quote(out_dir)}', shell=True, capture_output=True, timeout=5)
+                        run_cmd(f'chown -R {shlex.quote(owner_name)} {shlex.quote(out_dir)}', shell=True, capture_output=True, timeout=5)
+                        config_file = os.path.join(klipper_path, '.config')
+                        run_cmd(f'chown {shlex.quote(owner_name)} {shlex.quote(config_file)}', shell=True, capture_output=True, timeout=5)
+                else:
+                    # 本地模式
+                    os.chmod(firmware_path, 0o666)
+                    os.chmod(out_dir, 0o755)
+                    import shutil
+                    import pwd
+                    import grp
+                    try:
+                        klipper_stat = os.stat(klipper_path)
+                        owner_name = pwd.getpwuid(klipper_stat.st_uid).pw_name
+                        group_name = grp.getgrgid(klipper_stat.st_gid).gr_name
+                    except (KeyError, OSError):
+                        owner_name = None
+                        group_name = None
+                    if owner_name and group_name:
+                        shutil.chown(firmware_path, user=owner_name, group=group_name)
+                        shutil.chown(out_dir, user=owner_name, group=group_name)
+                        for root_dir, dirs, files in os.walk(out_dir):
+                            for d in dirs:
+                                shutil.chown(os.path.join(root_dir, d), user=owner_name, group=group_name)
+                            for f in files:
+                                shutil.chown(os.path.join(root_dir, f), user=owner_name, group=group_name)
+                        config_file = os.path.join(klipper_path, '.config')
+                        if os.path.exists(config_file):
+                            shutil.chown(config_file, user=owner_name, group=group_name)
             except Exception as e:
                 logger.warning(f"修改文件权限失败: {e}")
             
             # 获取固件大小
-            firmware_size = os.path.getsize(firmware_path)
+            firmware_size = get_file_size(firmware_path)
             # 格式化为人类可读
             if firmware_size < 1024:
                 size_str = f'{firmware_size} bytes'
@@ -1519,10 +1828,12 @@ def download_firmware():
         if not is_allowed:
             return jsonify({'error': '非法路径'}), 403
         
-        if not os.path.exists(firmware_path):
+        if not path_exists(firmware_path):
             return jsonify({'error': '固件文件不存在'}), 404
         
-        return send_file(firmware_path, as_attachment=True, download_name='firmware.bin')
+        # SSH 模式下先下载到本地缓存
+        local_firmware_path = download_firmware_from_remote(firmware_path)
+        return send_file(local_firmware_path, as_attachment=True, download_name='firmware.bin')
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1536,7 +1847,7 @@ def detect_devices():
         # USB设备 - 检测多种USB串口设备
         try:
             # 1. 检测 /dev/serial/by-id/* (标准USB串口设备)
-            result = subprocess.run(
+            result = run_cmd(
                 'ls /dev/serial/by-id/* 2>/dev/null || echo ""',
                 shell=True, capture_output=True, text=True
             )
@@ -1549,7 +1860,7 @@ def detect_devices():
                         devices.append({'id': device_id, 'name': short_name, 'type': 'usb_serial'})
             
             # 2. 检测 /dev/ttyACM* (Katapult/CDC ACM设备)
-            acm_result = subprocess.run(
+            acm_result = run_cmd(
                 'ls /dev/ttyACM* 2>/dev/null || echo ""',
                 shell=True, capture_output=True, text=True
             )
@@ -1563,7 +1874,7 @@ def detect_devices():
                             devices.append({'id': device_id, 'name': f'{short_name} (ACM)', 'type': 'usb_acm'})
             
             # 3. 检测 /dev/ttyUSB* (USB转串口设备)
-            usb_result = subprocess.run(
+            usb_result = run_cmd(
                 'ls /dev/ttyUSB* 2>/dev/null || echo ""',
                 shell=True, capture_output=True, text=True
             )
@@ -1580,7 +1891,7 @@ def detect_devices():
         
         # DFU设备 - 使用dfu-util检测所有DFU设备
         try:
-            dfu_result = subprocess.run(
+            dfu_result = run_cmd(
                 'sudo dfu-util -l 2>/dev/null || echo ""',
                 shell=True, capture_output=True, text=True
             )
@@ -1629,7 +1940,7 @@ def detect_devices():
             # 兜底：检测常见DFU设备（STM32/APM32等）
             if not found_dfu:
                 for vidpid, chip_name in DFU_KNOWN_DEVICES.items():
-                    lsusb_result = subprocess.run(
+                    lsusb_result = run_cmd(
                         f'lsusb | grep -i "{vidpid}" || echo ""',
                         shell=True, capture_output=True, text=True
                     )
@@ -1642,7 +1953,7 @@ def detect_devices():
         # UF2/RP2040 BOOT设备检测
         try:
             # 方法1: 通过lsblk检测RP2040 BOOT块设备
-            lsblk_output = subprocess.run(
+            lsblk_output = run_cmd(
                 'lsblk -o NAME,MODEL 2>/dev/null | grep -i "RP2"',
                 shell=True, capture_output=True, text=True
             )
@@ -1653,7 +1964,7 @@ def detect_devices():
             
             # 方法2: 通过lsusb检测Raspberry Pi RP2 Boot设备 (2e8a:0003)
             if not any(d['id'] == 'rp2040_boot' for d in devices):
-                lsusb_output = subprocess.run(
+                lsusb_output = run_cmd(
                     'lsusb | grep -i "2e8a:" 2>/dev/null || echo ""',
                     shell=True, capture_output=True, text=True
                 )
@@ -1687,7 +1998,12 @@ def flash_firmware():
         flash_mode = data.get('flash_mode', 'DFU')
         dfu_address = data.get('dfu_address', '0x08000000')
         firmware_path = data.get('firmware_path', '')
+        if firmware_path:
+            firmware_path = expand_klipper_path(firmware_path)
         katapult_serial = data.get('katapult_serial', '')
+        can_iface = data.get('can_iface', 'can0')
+        if not can_iface.startswith('can'):
+            can_iface = 'can0'
         
         # 确定固件路径（根据烧录模式选择合适的文件）
         if not firmware_path:
@@ -1695,15 +2011,19 @@ def flash_firmware():
             firmware_bin = os.path.join(klipper_path, 'out', 'klipper.bin')
             
             # UF2模式优先使用.uf2文件
-            if flash_mode == 'UF2' and os.path.exists(firmware_uf2):
+            if flash_mode == 'UF2' and path_exists(firmware_uf2):
                 firmware_path = firmware_uf2
-            elif os.path.exists(firmware_uf2):
+            elif path_exists(firmware_uf2):
                 firmware_path = firmware_uf2
             else:
                 firmware_path = firmware_bin
         
-        if not os.path.exists(firmware_path):
+        if not path_exists(firmware_path):
             return jsonify({'error': f'固件文件不存在: {firmware_path}'}), 400
+        
+        # SSH 模式下上传固件到远程（仅本地文件需要上传，远程编译的固件已在目标机器上）
+        if is_ssh_mode() and os.path.exists(firmware_path):
+            firmware_path = upload_bl_firmware_for_remote(firmware_path)
         
         # TF卡模式 - 返回下载链接
         if flash_mode == 'TF':
@@ -1733,8 +2053,8 @@ def flash_firmware():
                 erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
                 flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -D {shlex.quote(firmware_path)}'
                 
-                erase_result = subprocess.run(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
-                flash_result = subprocess.run(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                erase_result = run_cmd(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                flash_result = run_cmd(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
                 
                 output = f"擦除: {erase_result.stdout + erase_result.stderr}\n烧录: {flash_result.stdout + flash_result.stderr}"
                 returncode = flash_result.returncode
@@ -1748,75 +2068,103 @@ def flash_firmware():
             # Katapult 烧录（或 CAN Bus 烧录）- 自动判断 USB 或 CAN 方式
             klipper_owner, home_dir = get_klipper_owner()
                     
-            python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
+            python_bin = get_klipper_python_bin(home_dir)
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
                     
             import logging
             import time
                     
             # 判断设备类型：CAN UUID（8-32位十六进制）或 USB 串口路径
-            _is_can_uuid = bool(re.match(r'^[a-fA-F0-9]{8,32}$', device.replace('can0:', '')))
-            if 'can0:' in device or _is_can_uuid:
-                # CAN 方式：先尝试重置进入 USB 烧录模式
-                can_uuid = device.replace('can0:', '') if 'can0:' in device else device
+            _prefix = f'{can_iface}:'
+            _is_can_uuid = bool(re.match(r'^[a-fA-F0-9]{8,32}$', device.replace(_prefix, '').replace('can0:', '')))
+            if _prefix in device or 'can0:' in device or _is_can_uuid:
+                can_uuid = device
+                for pfx in (_prefix, 'can0:', 'can1:', 'can2:'):
+                    if pfx in can_uuid:
+                        can_uuid = can_uuid.replace(pfx, '')
+                        break
                 
-                # 第一步：发送重置命令，让设备进入 Katapult USB 模式
-                reset_cmd = f'{python_bin} {flashtool_script} -i can0 -r -u {shlex.quote(can_uuid)}'
-                logging.info(f'CAN 重置命令：{reset_cmd}')
-                subprocess.run(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
-                
-                # 第二步：轮询等待设备重新枚举（最多10秒），优先匹配 Katapult/Klipper 设备
-                logging.info('等待设备重新枚举...')
-                new_device = None
-                katapult_device = None
-                for _ in range(20):  # 20 * 0.5s = 10s max
-                    time.sleep(0.5)
-                    find_result = subprocess.run(
-                        "ls /dev/serial/by-id/* 2>/dev/null",
-                        shell=True, capture_output=True, text=True, timeout=5
-                    )
-                    if find_result.stdout.strip():
-                        lines = [l.strip() for l in find_result.stdout.strip().split('\n') if l.strip()]
-                        # 优先选择 Katapult/Klipper 品牌的设备
-                        for line in lines:
-                            if re.search(r'(Klipper|Katapult|STM32)', line, re.IGNORECASE):
-                                katapult_device = line
-                                break
-                        # 退而求其次选任意设备
-                        if not katapult_device and lines:
-                            katapult_device = lines[0]
-                        if katapult_device:
-                            break
-                    logging.info(f'轮询中... ({_+1}/20)')
-                
-                if katapult_device:
-                    # 成功进入 USB 模式，使用 USB 方式烧录
-                    new_device = katapult_device
-                    logging.info(f'找到设备：{new_device}')
-                    cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(new_device)} -f {shlex.quote(firmware_path)}'
-                    logging.info(f'USB 烧录命令：{cmd}')
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
-                else:
-                    # 降级方案：检查 flash_can.py 是否存在，存在则直接 CAN 烧录
-                    logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
-                    flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
-                    if os.path.exists(flash_can_script):
-                        cmd = f'{python_bin} {flash_can_script} -i can0 -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
-                        logging.info(f'CAN 烧录命令：{cmd}')
-                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                # === FAST-SSH 模式：直接使用 CAN 烧录，不走 USB 重置流程 ===
+                if is_fast_ssh_mode():
+                    logging.info('FAST-SSH 模式：使用 CAN 直接烧录')
+                    
+                    # 优先使用新版 flashtool.py (FAST 1.3.8+)
+                    fast_flashtool = os.path.join(home_dir, 'klipper', 'lib', 'katapult', 'flashtool.py')
+                    # 旧版 flash_can.py (FAST 1.3.8 之前)
+                    fast_flash_can = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
+                    
+                    if path_exists(fast_flashtool):
+                        cmd = f'{python_bin} {fast_flashtool} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                        logging.info(f'FAST-SSH 新版烧录命令 (katapult/flashtool.py, {can_iface}): {cmd}')
+                    elif path_exists(fast_flash_can):
+                        cmd = f'{python_bin} {fast_flash_can} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                        logging.info(f'FAST-SSH 旧版烧录命令 (canboot/flash_can.py, {can_iface}): {cmd}')
                     else:
-                        # flash_can.py 不存在，回退到 flashtool.py CAN 模式
-                        logging.warning(f'flash_can.py 不存在: {flash_can_script}，回退到 flashtool.py CAN 模式')
-                        cmd = f'{python_bin} {flashtool_script} -i can0 -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
-                        logging.info(f'flashtool CAN 烧录命令：{cmd}')
-                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                        return jsonify({
+                            'error': f'未找到烧录工具。请确认 Klipper 已安装。\n查找路径:\n  {fast_flashtool}\n  {fast_flash_can}'
+                        }), 500
+                    
+                    result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                    
+                else:
+                    # === 标准模式：先尝试 USB 重置，失败再降级 CAN ===
+                    # 第一步：发送重置命令，让设备进入 Katapult USB 模式
+                    reset_cmd = f'{python_bin} {flashtool_script} -i {can_iface} -r -u {shlex.quote(can_uuid)}'
+                    logging.info(f'CAN 重置命令：{reset_cmd}')
+                    run_cmd(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
+                    
+                    # 第二步：轮询等待设备重新枚举（最多10秒），优先匹配 Katapult/Klipper 设备
+                    logging.info('等待设备重新枚举...')
+                    new_device = None
+                    katapult_device = None
+                    for _ in range(20):  # 20 * 0.5s = 10s max
+                        time.sleep(0.5)
+                        find_result = run_cmd(
+                            "ls /dev/serial/by-id/* 2>/dev/null",
+                            shell=True, capture_output=True, text=True, timeout=5
+                        )
+                        if find_result.stdout.strip():
+                            lines = [l.strip() for l in find_result.stdout.strip().split('\n') if l.strip()]
+                            # 优先选择 Katapult/Klipper 品牌的设备
+                            for line in lines:
+                                if re.search(r'(Klipper|Katapult|STM32)', line, re.IGNORECASE):
+                                    katapult_device = line
+                                    break
+                            # 退而求其次选任意设备
+                            if not katapult_device and lines:
+                                katapult_device = lines[0]
+                            if katapult_device:
+                                break
+                        logging.info(f'轮询中... ({_+1}/20)')
+                    
+                    if katapult_device:
+                        # 成功进入 USB 模式，使用 USB 方式烧录
+                        new_device = katapult_device
+                        logging.info(f'找到设备：{new_device}')
+                        cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(new_device)} -f {shlex.quote(firmware_path)}'
+                        logging.info(f'USB 烧录命令：{cmd}')
+                        result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
+                    else:
+                        # 降级方案：检查 flash_can.py 是否存在，存在则直接 CAN 烧录
+                        logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
+                        flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
+                        if path_exists(flash_can_script):
+                            cmd = f'{python_bin} {flash_can_script} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                            logging.info(f'CAN 烧录命令 ({can_iface}): {cmd}')
+                            result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                        else:
+                            # flash_can.py 不存在，回退到 flashtool.py CAN 模式
+                            logging.warning(f'flash_can.py 不存在: {flash_can_script}，回退到 flashtool.py CAN 模式')
+                            cmd = f'{python_bin} {flashtool_script} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                            logging.info(f'flashtool CAN 烧录命令 ({can_iface}): {cmd}')
+                            result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
             else:
                 # USB 方式：直接烧录，优先使用 katapult_serial 指定的串口路径
                 usb_device = katapult_serial if katapult_serial else device
                 logging.info(f'USB 烧录命令：device={usb_device}')
                 cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(usb_device)} -f {shlex.quote(firmware_path)}'
                 logging.info(f'USB 烧录命令：{cmd}')
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+                result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
                     
             output = result.stdout + result.stderr
             returncode = result.returncode
@@ -1826,14 +2174,14 @@ def flash_firmware():
             # UF2烧录（RP2040/RP2350）- 使用rp2040_flash工具
             rp2040_flash_tool = os.path.join(klipper_path, 'lib/rp2040_flash/rp2040_flash')
             
-            if not os.path.exists(rp2040_flash_tool):
+            if not path_exists(rp2040_flash_tool):
                 return jsonify({'error': 'rp2040_flash工具不存在，请检查Klipper安装'}), 500
             
             # 先卸载RP2040 BOOT设备（避免设备占用）
             _umount_rp2040_boot()
             
             cmd = f'sudo {rp2040_flash_tool} {firmware_path}'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
             output = result.stdout + result.stderr
             returncode = result.returncode
             
@@ -1867,22 +2215,26 @@ def install_host_firmware():
         
         firmware_path = expand_klipper_path(firmware_path)
         
-        if not os.path.exists(firmware_path):
+        if not path_exists(firmware_path):
             return jsonify({'error': f'固件文件不存在: {firmware_path}'}), 400
         
         # 复制到 klipper/out/klipper.elf
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         target_path = os.path.join(klipper_path, 'out', 'klipper.elf')
         
-        # 确保目录存在
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-        
-        # 复制文件
-        import shutil
-        shutil.copy2(firmware_path, target_path)
-        
-        # 设置权限
-        os.chmod(target_path, 0o755)
+        if is_ssh_mode():
+            # SSH 模式: 通过远程命令复制
+            run_cmd(f'mkdir -p {shlex.quote(os.path.dirname(target_path))}', shell=True, capture_output=True)
+            result = run_cmd(f'cp {shlex.quote(firmware_path)} {shlex.quote(target_path)}', shell=True, capture_output=True, text=True, timeout=10)
+            run_cmd(f'chmod 755 {shlex.quote(target_path)}', shell=True, capture_output=True)
+            if result.returncode != 0:
+                return jsonify({'error': f'复制失败: {result.stderr}'}), 500
+        else:
+            # 本地模式
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            import shutil
+            shutil.copy2(firmware_path, target_path)
+            os.chmod(target_path, 0o755)
         
         return jsonify({
             'success': True,
@@ -1899,7 +2251,7 @@ def _umount_rp2040_boot():
     import time
     try:
         # 通过lsblk查找RP2040 BOOT设备的挂载点
-        result = subprocess.run(
+        result = run_cmd(
             'lsblk -o NAME,MOUNTPOINT,MODEL 2>/dev/null | grep -i "rp2"',
             shell=True, capture_output=True, text=True, timeout=10
         )
@@ -1909,7 +2261,7 @@ def _umount_rp2040_boot():
                 if len(parts) >= 2:
                     mount_point = parts[1]
                     if mount_point and mount_point != '':
-                        subprocess.run(
+                        run_cmd(
                             f'sudo umount {mount_point} 2>/dev/null || true',
                             shell=True, capture_output=True, timeout=10
                         )
@@ -1930,8 +2282,12 @@ def flash_bl_firmware():
         dfu_address = data.get('dfu_address', '0x08000000')
         katapult_serial = data.get('katapult_serial', '')
         
-        if not bl_firmware_path or not os.path.exists(bl_firmware_path):
+        if not bl_firmware_path or not path_exists(bl_firmware_path):
             return jsonify({'error': f'BL固件文件不存在: {bl_firmware_path}'}), 400
+        
+        # SSH 模式下上传 BL 固件到远程
+        if is_ssh_mode():
+            bl_firmware_path = upload_bl_firmware_for_remote(bl_firmware_path)
         
         import time
         
@@ -1948,15 +2304,15 @@ def flash_bl_firmware():
             erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
             flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -D {shlex.quote(bl_firmware_path)}'
             
-            subprocess.run(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
-            result = subprocess.run(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
+            run_cmd(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
+            result = run_cmd(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
             
         elif flash_mode == 'UF2':
             # UF2烧录（RP2040/RP2350）- 使用rp2040_flash工具
             klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
             rp2040_flash_tool = os.path.join(klipper_path, 'lib/rp2040_flash/rp2040_flash')
             
-            if not os.path.exists(rp2040_flash_tool):
+            if not path_exists(rp2040_flash_tool):
                 return jsonify({'error': 'rp2040_flash工具不存在，请检查Klipper安装'}), 500
             
             # 动态查找并卸载RP2040 BOOT设备
@@ -1964,29 +2320,29 @@ def flash_bl_firmware():
             time.sleep(0.5)
             
             cmd = f'sudo {rp2040_flash_tool} {bl_firmware_path}'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
             
             if result.returncode == 0 and 'No rp2040 in BOOTSEL mode was found' in (result.stdout + result.stderr):
                 return jsonify({'success': False, 'error': '未找到处于 BOOTSEL 模式的 RP2040 设备', 'output': result.stdout + result.stderr}), 500
             
         elif flash_mode == 'KAT':
             klipper_owner, home_dir = get_klipper_owner()
-            python_bin = os.path.join(home_dir, 'klippy-env', 'bin', 'python3')
+            python_bin = get_klipper_python_bin(home_dir)
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
             # 优先使用 katapult_serial 指定的串口路径，其次使用 device
             usb_device = katapult_serial if katapult_serial else device
             cmd = f'{python_bin} {flashtool_script} -d {usb_device} -f {bl_firmware_path}' if usb_device else f'{python_bin} {flashtool_script} -f {bl_firmware_path}'
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+            result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
             
         elif flash_mode == 'st-flash':
             # 使用st-flash烧录
             stflash_cmd = f'sudo st-flash --reset write {bl_firmware_path} {dfu_address}'
-            result = subprocess.run(stflash_cmd, shell=True, capture_output=True, text=True, timeout=60)
+            result = run_cmd(stflash_cmd, shell=True, capture_output=True, text=True, timeout=60)
             
         elif flash_mode == 'openocd':
             # 使用OpenOCD烧录 - 使用通用配置
             openocd_cmd = f'sudo openocd -f interface/stlink.cfg -f target/stm32f1x.cfg -c "program {bl_firmware_path} {dfu_address} verify reset exit"'
-            result = subprocess.run(openocd_cmd, shell=True, capture_output=True, text=True, timeout=120)
+            result = run_cmd(openocd_cmd, shell=True, capture_output=True, text=True, timeout=120)
             
         else:
             return jsonify({'error': f'不支持的BL烧录方式: {flash_mode}'}), 400
@@ -2010,7 +2366,8 @@ def handle_config():
     else:
         data = request.json
         # 更新配置
-        for key in ['klipper_path', 'katapult_path', 'json_repo_url', 'port', 'moonraker_host', 'moonraker_port']:
+        for key in ['klipper_path', 'katapult_path', 'json_repo_url', 'port', 'moonraker_host', 'moonraker_port',
+                       'connection_mode', 'ssh_host', 'ssh_port', 'ssh_user', 'sudo_mode']:
             if key in data:
                 config[key] = data[key]
         
@@ -2022,10 +2379,74 @@ def handle_config():
         if 'json_repo_url' in data:
             config['json_repo_url'] = data['json_repo_url']
         
+        # FAST-SSH 模式: 自动设置固定凭据
+        if config.get('connection_mode') == 'fast-ssh':
+            from ssh_manager import save_credential
+            config['ssh_user'] = FAST_SSH_USER
+            config['sudo_mode'] = 'password'
+            save_credential('ssh_password', FAST_SSH_PASSWORD)
+            save_credential('sudo_password', FAST_SSH_PASSWORD)
+        
         if save_config(config):
             return jsonify({'success': True, 'message': '配置已保存', 'config': config})
         else:
             return jsonify({'error': '保存配置失败'}), 500
+
+
+# ==================== SSH 远程连接 API ====================
+@app.route('/api/settings/ssh-credentials', methods=['GET', 'POST'])
+def handle_ssh_credentials():
+    """设置或查询 SSH 凭据（加密存储）"""
+    from ssh_manager import save_credential, load_credential, has_credential, clear_credentials
+
+    if request.method == 'GET':
+        # 只返回是否已设置，不返回明文
+        return jsonify({
+            'has_ssh_password': has_credential('ssh_password'),
+            'has_sudo_password': has_credential('sudo_password')
+        })
+    else:
+        data = request.json
+        if data.get('ssh_password') is not None:
+            save_credential('ssh_password', data['ssh_password'])
+        if data.get('sudo_password') is not None:
+            save_credential('sudo_password', data['sudo_password'])
+        if data.get('clear_all'):
+            clear_credentials()
+        return jsonify({'success': True, 'message': '凭据已保存'})
+
+
+@app.route('/api/settings/resolve-paths', methods=['GET'])
+def resolve_paths():
+    """解析路径中的 ~ 为当前模式下的实际绝对路径"""
+    try:
+        paths = request.args.getlist('path') or ['~/klipper', '~/katapult']
+        resolved = {}
+        for p in paths:
+            if p.startswith('~'):
+                resolved[p] = expand_klipper_path(p)
+            else:
+                resolved[p] = p
+        return jsonify({'resolved': resolved, 'mode': config.get('connection_mode', 'local')})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/ssh-test', methods=['POST'])
+def test_ssh_connection():
+    """测试 SSH 连接"""
+    from ssh_manager import SSHManager
+    try:
+        manager = SSHManager.get_instance()
+        # 如果传入了新配置，先断开旧连接
+        manager.disconnect()
+        success, message = manager.test_connection()
+        if success:
+            return jsonify({'success': True, 'message': message})
+        else:
+            return jsonify({'success': False, 'error': message}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 200
 
 CAN_NETWORK_DIR = '/etc/systemd/network'
 CAN_INTERFACES_DIR = '/etc/network/interfaces.d'
@@ -2051,21 +2472,43 @@ def format_bitrate(bitrate):
 
 
 def sudo_write_file(path, content):
-    """使用 sudo 写入文件内容（避免shell转义问题）"""
-    proc = subprocess.Popen(
-        ['sudo', 'tee', path],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE
-    )
-    stdout, stderr = proc.communicate(content.encode())
-    if proc.returncode != 0:
-        raise Exception(f'写入文件失败 {path}: {stderr.decode()}')
+    """使用 sudo 写入文件内容（本地/远程兼容）"""
+    if is_ssh_mode():
+        # SSH 模式：两步法写入（先写临时文件，再 sudo cp 到目标）
+        # 避免 sudo -S 管道冲突导致密码被写入文件
+        import base64
+        encoded = base64.b64encode(content.encode()).decode()
+        manager = SSHManager.get_instance()
+        from ssh_manager import load_credential
+        sudo_pwd = load_credential('sudo_password') or load_credential('ssh_password') or ''
+        tmp_path = '/tmp/fwtool_write_tmp'
+        # 第1步：写入临时文件（无需sudo）
+        manager.exec_command(f'echo {encoded} | base64 -d > {tmp_path}', timeout=10, inject_sudo=False)
+        # 第2步：sudo cp 到目标
+        if sudo_pwd:
+            result = manager.exec_command(f'echo {shlex.quote(sudo_pwd)} | sudo -S cp {tmp_path} {shlex.quote(path)}', timeout=10, inject_sudo=False)
+        else:
+            result = manager.exec_command(f'sudo cp {tmp_path} {shlex.quote(path)}', timeout=10, inject_sudo=False)
+        # 清理临时文件
+        manager.exec_command(f'rm -f {tmp_path}', timeout=5, inject_sudo=False)
+        if result.returncode != 0:
+            raise Exception(f'写入文件失败 {path}: {result.stderr}')
+    else:
+        # 本地模式：保持原有 Popen 方式
+        proc = subprocess.Popen(
+            ['sudo', 'tee', path],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE
+        )
+        stdout, stderr = proc.communicate(content.encode())
+        if proc.returncode != 0:
+            raise Exception(f'写入文件失败 {path}: {stderr.decode()}')
 
 
 def sudo_mkdir(path):
     """使用 sudo 创建目录"""
-    subprocess.run(['sudo', 'mkdir', '-p', path], capture_output=True, check=True, timeout=10)
+    run_cmd(f'sudo mkdir -p {shlex.quote(path)}', shell=True, capture_output=True, timeout=10)
 
 
 def get_can_live_status():
@@ -2078,7 +2521,7 @@ def get_can_live_status():
         'txqueuelen': None,
     }
     try:
-        r = subprocess.run(
+        r = run_cmd(
             'ip -details link show can0 2>/dev/null',
             shell=True, capture_output=True, text=True, timeout=5
         )
@@ -2222,7 +2665,7 @@ def detect_can_config():
 def get_usb_can_count():
     """检测 USB CAN 适配器数量"""
     try:
-        r = subprocess.run(
+        r = run_cmd(
             'lsusb | grep "1d50:" || echo ""',
             shell=True, capture_output=True, text=True, timeout=5
         )
@@ -2359,7 +2802,7 @@ iface can0 can static
         # ---- 根据模式生效配置 ----
         if systemd_mode:
             # systemd 模式：重启 networkd 让它根据新配置接管接口
-            subprocess.run(
+            run_cmd(
                 'sudo systemctl restart systemd-networkd',
                 shell=True, capture_output=True, timeout=30
             )
@@ -2368,13 +2811,13 @@ iface can0 can static
         else:
             # interfaces 模式：手动翻转让新配置生效
             try:
-                subprocess.run('sudo ip link set can0 down',
+                run_cmd('sudo ip link set can0 down',
                                shell=True, capture_output=True, timeout=10)
                 time.sleep(0.5)
-                subprocess.run(f'sudo ip link set can0 type can bitrate {bitrate}',
+                run_cmd(f'sudo ip link set can0 type can bitrate {bitrate}',
                                shell=True, capture_output=True, timeout=10)
                 time.sleep(0.3)
-                subprocess.run(f'sudo ip link set can0 txqueuelen {txqueuelen}',
+                run_cmd(f'sudo ip link set can0 txqueuelen {txqueuelen}',
                                shell=True, capture_output=True, timeout=10)
                 time.sleep(0.3)
             except:
@@ -2382,17 +2825,17 @@ iface can0 can static
 
         # 确保 can0 接口已启动（只 up，不做 down/up 翻转，避免冲突）
         try:
-            check = subprocess.run(
+            check = run_cmd(
                 'ip link show can0 2>&1',
                 shell=True, capture_output=True, text=True, timeout=5
             )
             if 'does not exist' not in check.stdout:
-                detail = subprocess.run(
+                detail = run_cmd(
                     'ip -details link show can0 2>/dev/null',
                     shell=True, capture_output=True, text=True, timeout=5
                 )
                 if 'state DOWN' in detail.stdout or 'state UNKNOWN' in detail.stdout:
-                    subprocess.run('sudo ip link set can0 up',
+                    run_cmd('sudo ip link set can0 up',
                                    shell=True, capture_output=True, timeout=10)
         except:
             pass
@@ -2421,7 +2864,7 @@ def diagnose_can_network():
         
         # 1. 检查内核CAN支持
         try:
-            modprobe_result = subprocess.run(
+            modprobe_result = run_cmd(
                 'sudo modprobe can && echo "OK" || echo "FAIL"',
                 shell=True, capture_output=True, text=True
             )
@@ -2431,7 +2874,7 @@ def diagnose_can_network():
         
         # 2. 检查USB CAN设备（GS_USB或UTOC）
         try:
-            lsusb_result = subprocess.run(
+            lsusb_result = run_cmd(
                 'lsusb | grep -E "(GS_USB|CAN|UTOC|can)" || echo ""',
                 shell=True, capture_output=True, text=True
             )
@@ -2443,7 +2886,7 @@ def diagnose_can_network():
         
         # 3. 检查can0接口
         try:
-            can0_result = subprocess.run(
+            can0_result = run_cmd(
                 'ip link show can0 2>&1',
                 shell=True, capture_output=True, text=True
             )
@@ -2458,7 +2901,7 @@ def diagnose_can_network():
                     result['can0_state'] = 'UNKNOWN'
                 
                 # 获取详细比特率信息
-                details_result = subprocess.run(
+                details_result = run_cmd(
                     'ip -details link show can0 2>&1 | grep bitrate || echo ""',
                     shell=True, capture_output=True, text=True
                 )
@@ -2487,15 +2930,15 @@ def repair_can_network():
         
         # 1. 加载CAN内核模块
         try:
-            subprocess.run('sudo modprobe can', shell=True, capture_output=True)
-            subprocess.run('sudo modprobe can_raw', shell=True, capture_output=True)
-            subprocess.run('sudo modprobe gs_usb', shell=True, capture_output=True)
+            run_cmd('sudo modprobe can', shell=True, capture_output=True)
+            run_cmd('sudo modprobe can_raw', shell=True, capture_output=True)
+            run_cmd('sudo modprobe gs_usb', shell=True, capture_output=True)
             messages.append('CAN内核模块已加载')
         except:
             messages.append('CAN内核模块加载失败')
         
         # 2. 检查是否有USB CAN设备
-        lsusb_result = subprocess.run(
+        lsusb_result = run_cmd(
             'lsusb | grep -E "(GS_USB|CAN|UTOC)" || echo ""',
             shell=True, capture_output=True, text=True
         )
@@ -2525,7 +2968,7 @@ Name=can*
 [CAN]
 BitRate={bitrate_str}
 """
-            subprocess.run(
+            run_cmd(
                 f'echo "{config_content}" | sudo tee {CAN_NETWORK_DIR}/99-can.network > /dev/null',
                 shell=True, capture_output=True, check=True
             )
@@ -2537,7 +2980,7 @@ OriginalName=can*
 [Link]
 TxQueueLength={txqueuelen}
 """
-            subprocess.run(
+            run_cmd(
                 f'echo "{link_content}" | sudo tee {CAN_NETWORK_DIR}/99-can.link > /dev/null',
                 shell=True, capture_output=True, check=True
             )
@@ -2548,7 +2991,7 @@ TxQueueLength={txqueuelen}
         
         # 4. 重启systemd-networkd
         try:
-            subprocess.run('sudo systemctl restart systemd-networkd', 
+            run_cmd('sudo systemctl restart systemd-networkd', 
                          shell=True, capture_output=True, check=True)
             messages.append('systemd-networkd已重启')
         except:
@@ -2560,19 +3003,19 @@ TxQueueLength={txqueuelen}
         
         try:
             # 检查can0是否存在，如果不存在尝试手动创建
-            can0_check = subprocess.run('ip link show can0 2>&1', 
+            can0_check = run_cmd('ip link show can0 2>&1', 
                                        shell=True, capture_output=True, text=True)
             
             if 'does not exist' in can0_check.stdout:
                 # 尝试手动创建can0（如果知道设备名）
                 messages.append('can0接口不存在，尝试手动创建...')
                 # 查找CAN设备
-                can_devs = subprocess.run('ls /sys/bus/usb/devices/*/can* 2>/dev/null || echo ""',
+                can_devs = run_cmd('ls /sys/bus/usb/devices/*/can* 2>/dev/null || echo ""',
                                          shell=True, capture_output=True, text=True)
                 messages.append(f'找到的CAN设备: {can_devs.stdout.strip() or "无"}')
             else:
                 # 启动can0
-                subprocess.run('sudo ip link set can0 up', 
+                run_cmd('sudo ip link set can0 up', 
                              shell=True, capture_output=True, check=True)
                 messages.append('can0接口已启动')
         except Exception as e:
@@ -2594,7 +3037,7 @@ def handle_timezone():
     """获取或设置时区"""
     if request.method == 'GET':
         try:
-            result = subprocess.run(['timedatectl', 'show', '--property=Timezone'], 
+            result = run_cmd(['timedatectl', 'show', '--property=Timezone'], 
                                   capture_output=True, text=True)
             timezone = result.stdout.strip().replace('Timezone=', '')
             return jsonify({'timezone': timezone})
@@ -2604,7 +3047,7 @@ def handle_timezone():
         data = request.json
         new_timezone = data.get('timezone', 'Asia/Shanghai')
         try:
-            subprocess.run(['sudo', 'timedatectl', 'set-timezone', new_timezone], 
+            run_cmd(['sudo', 'timedatectl', 'set-timezone', new_timezone], 
                          check=True, capture_output=True)
             return jsonify({'success': True, 'message': f'时区已设置为 {new_timezone}'})
         except Exception as e:
@@ -2626,12 +3069,12 @@ def manage_service(action):
     
     try:
         if action == 'status':
-            result = subprocess.run(['systemctl', 'is-active', service], 
+            result = run_cmd(['systemctl', 'is-active', service], 
                                   capture_output=True, text=True)
             is_active = result.returncode == 0
             return jsonify({'service': service, 'active': is_active})
         else:
-            result = subprocess.run(['sudo', 'systemctl', action, service], 
+            result = run_cmd(['sudo', 'systemctl', action, service], 
                                   capture_output=True, text=True)
             if result.returncode == 0:
                 return jsonify({'success': True, 'message': f'{service} {action}成功'})
@@ -2655,7 +3098,7 @@ def auto_update_json():
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
         
-        result = subprocess.run(
+        result = run_cmd(
             f'git clone --depth 1 {repo_url} {temp_dir}',
             shell=True, capture_output=True, text=True, timeout=60
         )
@@ -3408,7 +3851,7 @@ def get_versions():
     try:
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         if os.path.exists(os.path.join(klipper_path, '.git')):
-            output = subprocess.run(
+            output = run_cmd(
                 ['git', '-C', klipper_path, 'describe', '--tags', '--always'],
                 capture_output=True, text=True, timeout=5
             )
@@ -3437,7 +3880,7 @@ def control_service():
     
     # 委托给 manage_service 处理
     try:
-        result = subprocess.run(['sudo', 'systemctl', action, service_name],
+        result = run_cmd(['sudo', 'systemctl', action, service_name],
                               capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             return jsonify({'success': True, 'message': f'{service_name} {action} 成功'})
@@ -3467,13 +3910,13 @@ def check_update():
         env['USER'] = username
         
         # 添加 safe.directory 配置
-        subprocess.run(
+        run_cmd(
             ['git', 'config', '--global', '--add', 'safe.directory', BASE_DIR],
             capture_output=True, env=env
         )
         
         # 获取当前版本（git commit hash）
-        current_output = subprocess.run(
+        current_output = run_cmd(
             ['git', '-C', BASE_DIR, 'rev-parse', '--short', 'HEAD'],
             capture_output=True, text=True, timeout=10, env=env
         )
@@ -3481,13 +3924,13 @@ def check_update():
         
         # 获取远程最新版本
         # 先获取远程信息
-        subprocess.run(
+        run_cmd(
             ['git', '-C', BASE_DIR, 'fetch', 'origin'],
             capture_output=True, timeout=30, env=env
         )
         
         # 获取远程最新commit
-        remote_output = subprocess.run(
+        remote_output = run_cmd(
             ['git', '-C', BASE_DIR, 'rev-parse', '--short', 'origin/main'],
             capture_output=True, text=True, timeout=10, env=env
         )
@@ -3499,7 +3942,7 @@ def check_update():
         # 获取最新提交时间
         update_time = None
         if has_update:
-            time_output = subprocess.run(
+            time_output = run_cmd(
                 ['git', '-C', BASE_DIR, 'log', '-1', '--format=%cd', '--date=iso', 'origin/main'],
                 capture_output=True, text=True, timeout=10, env=env
             )
@@ -3533,7 +3976,7 @@ def update_project():
             env['USER'] = user_info.pw_name
             
             # 添加 safe.directory 配置
-            subprocess.run(
+            run_cmd(
                 ['git', 'config', '--global', '--add', 'safe.directory', BASE_DIR],
                 capture_output=True, env=env
             )
@@ -3549,7 +3992,7 @@ def update_project():
             
             # 2. 执行 git pull
             yield "拉取最新代码...\n"
-            result = subprocess.run(
+            result = run_cmd(
                 ['git', '-C', BASE_DIR, 'pull', 'origin', 'main'],
                 capture_output=True, text=True, timeout=60, env=env
             )
@@ -3569,7 +4012,7 @@ def update_project():
             
             # 4. 重启服务
             yield "重启服务...\n"
-            restart_result = subprocess.run(
+            restart_result = run_cmd(
                 ['sudo', 'systemctl', 'restart', 'firmware-tool'],
                 capture_output=True, text=True, timeout=30
             )

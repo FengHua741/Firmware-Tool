@@ -606,18 +606,98 @@
                 </div>
 
                 <div class="card">
-                    <div class="card-header"><h3>📂 路径设置</h3></div>
+                    <div class="card-header"><h3>连接模式</h3></div>
+                    <div class="card-body">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">执行模式</label>
+                                <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;">
+                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                        <input type="radio" name="connectionMode" value="local" checked onchange="toggleSshConfig()"> 本地执行
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                        <input type="radio" name="connectionMode" value="ssh" onchange="toggleSshConfig()"> SSH 远程执行
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                        <input type="radio" name="connectionMode" value="fast-ssh" onchange="toggleSshConfig()"> FAST-SSH (快速连接)
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 标准 SSH 配置区 -->
+                        <div id="sshConfigSection" style="display:none;">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">远程主机</label>
+                                    <input type="text" class="form-control" id="settingsSshHost" placeholder="192.168.1.100" oninput="updateMoonrakerHostFromSsh()">
+                                </div>
+                                <div class="form-group" style="max-width:100px;">
+                                    <label class="form-label">SSH 端口</label>
+                                    <input type="number" class="form-control" id="settingsSshPort" value="22" min="1" max="65535">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">用户名</label>
+                                    <input type="text" class="form-control" id="settingsSshUser" placeholder="pi">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">SSH 密码</label>
+                                    <input type="password" class="form-control" id="settingsSshPassword" placeholder="输入SSH密码">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">sudo 密码</label>
+                                    <input type="password" class="form-control" id="settingsSudoPassword" placeholder="与SSH密码相同则留空">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">sudo 模式</label>
+                                    <select class="form-control form-select" id="settingsSudoMode">
+                                        <option value="password">需要密码</option>
+                                        <option value="nopasswd">NOPASSWD 已配置</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-row" style="gap:10px;align-items:center;">
+                                <button class="btn btn-secondary" onclick="testSshConnection()" id="btnTestSsh">测试连接</button>
+                                <span id="sshTestResult" style="font-size:14px;"></span>
+                            </div>
+                        </div>
+                        <!-- FAST-SSH 配置区（仅显示 IP 地址） -->
+                        <div id="fastSshConfigSection" style="display:none;">
+                            <div style="background:rgba(33,150,243,0.06);padding:12px 16px;border-radius:8px;border-left:4px solid #2196F3;margin-bottom:14px;font-size:13px;color:#555;">
+                                快速连接模式：仅需输入目标设备 IP 地址，使用预设凭据自动连接。
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">目标设备 IP 地址</label>
+                                    <input type="text" class="form-control" id="settingsFastSshHost" placeholder="192.168.1.100" oninput="updateMoonrakerHostFromSsh()">
+                                </div>
+                            </div>
+                            <div class="form-row" style="gap:10px;align-items:center;">
+                                <button class="btn btn-secondary" onclick="testSshConnection()" id="btnTestFastSsh">测试连接</button>
+                                <span id="fastSshTestResult" style="font-size:14px;"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3>路径设置</h3></div>
                     <div class="card-body">
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">Klipper 路径</label>
-                                <input type="text" class="form-control" id="settingsKlipperPath" value="~/klipper">
+                                <input type="text" class="form-control" id="settingsKlipperPath" value="~/klipper" oninput="updatePathHints()">
+                                <small id="klipperPathHint" style="color:#888;font-size:12px;display:block;margin-top:2px;"></small>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">Katapult 路径</label>
-                                <input type="text" class="form-control" id="settingsKatapultPath" value="~/katapult">
+                                <input type="text" class="form-control" id="settingsKatapultPath" value="~/katapult" oninput="updatePathHints()">
+                                <small id="katapultPathHint" style="color:#888;font-size:12px;display:block;margin-top:2px;"></small>
                             </div>
                         </div>
                         <div class="form-row">

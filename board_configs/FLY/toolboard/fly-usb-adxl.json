@@ -1,28 +1,30 @@
 {
-  "type": "toolboard",
-  "name": "FLY-USB-ADXL",
-  "platform": "RP2040",
-  "mcu": "rp2040",
-  "bl_offset": "16384",
+  "bl_default_flash": "UF2",
+  "bl_flash_support": "支持",
+  "bl_offset": "256",
+  "boot_pins": "gpio8",
   "connections": [
     "CANBUS",
     "USB"
   ],
   "default_connection": "USB",
+  "default_flash": "UF2",
+  "firmware_update": {
+    "custom_config": "",
+    "device_id": "",
+    "enabled": false,
+    "flash_mode": "KAT",
+    "katapult_mode": "USB"
+  },
   "flash_modes": [
+    "KAT",
     "UF2"
   ],
-  "default_flash": "UF2",
-  "boot_pins": "gpio8",
-  "bl_flash_support": "支持",
-  "bl_default_flash": "UF2",
   "id": "fly-usb-adxl",
-  "firmware_update": {
-    "enabled": false,
-    "katapult_mode": "USB",
-    "device_id": "",
-    "flash_mode": "KAT",
-    "custom_config": ""
-  },
-  "manufacturer": "FLY"
+  "manufacturer": "FLY",
+  "mcu": "rp2040",
+  "name": "FLY-USB-ADXL",
+  "platform": "RP2040",
+  "type": "toolboard",
+  "crystal": "12000000"
 }

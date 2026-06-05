@@ -99,7 +99,10 @@ chown $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR/config.json"
 # 安装依赖
 echo "安装依赖..."
 apt update
-apt install -y python3-flask python3-flask-cors
+apt install -y python3-flask python3-flask-cors python3-paramiko python3-cryptography
+
+# 检查 pip 可用并安装可能缺失的包
+pip3 install paramiko cryptography 2>/dev/null || pip install paramiko cryptography 2>/dev/null || true
 
 # 设置目录权限
 echo "设置目录权限..."

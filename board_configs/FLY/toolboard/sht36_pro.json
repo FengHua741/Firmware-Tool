@@ -7,6 +7,7 @@
     "CANBUS",
     "USB"
   ],
+  "crystal": "12000000",
   "default_connection": "CAN bus",
   "default_flash": "KAT",
   "firmware_update": {
@@ -18,6 +19,7 @@
   },
   "flash_modes": [
     "KAT",
+    "CAN",
     "UF2"
   ],
   "id": "sht36_pro",
@@ -25,6 +27,5 @@
   "mcu": "rp2040",
   "name": "FLY-SHT36 Pro",
   "platform": "RP2040",
-  "type": "toolboard",
-  "crystal": "12000000"
+  "type": "toolboard"
 }

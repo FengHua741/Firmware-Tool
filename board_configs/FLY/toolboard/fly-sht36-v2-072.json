@@ -1,0 +1,16 @@
+{
+    "bl_offset": "8192",
+    "boot_pins": "!PC13",
+    "connections": [],
+    "crystal": "8000000",
+    "default_flash": "",
+    "flash_modes": [
+        "KAT",
+        "CAN"
+    ],
+    "manufacturer": "FLY",
+    "mcu": "stm32f072",
+    "name": "FLY-SHT36 V2-072",
+    "platform": "STM32",
+    "type": "toolboard"
+}
