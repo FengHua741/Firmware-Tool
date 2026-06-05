@@ -957,6 +957,18 @@ async function updateResources() {
                 flyosBar.style.display = 'none';
             }
         }
+
+        // 更新主板型号信息（仅 FAST-SSH 模式显示）
+        const boardBar = document.getElementById('flyosBoardBar');
+        const boardText = document.getElementById('flyosBoardText');
+        if (boardBar && boardText) {
+            if (current.board_name) {
+                boardText.textContent = current.board_name;
+                boardBar.style.display = 'flex';
+            } else {
+                boardBar.style.display = 'none';
+            }
+        }
         
     } catch (error) {
         console.error('获取系统资源失败:', error);

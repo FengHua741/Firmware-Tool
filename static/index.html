@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Firmware-Tool - 固件工具</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=20260605a">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260605c">
     <link rel="stylesheet" href="/static/css/config-manager.css?v=20260320f">
 </head>
 <body>
@@ -54,6 +54,10 @@
                             <div id="flyosVersionBar" class="flyos-version-bar" style="display:none;">
                                 <span class="flyos-version-label">FlyOS</span>
                                 <span class="flyos-version-value" id="flyosVersionText">--</span>
+                            </div>
+                            <div id="flyosBoardBar" class="flyos-board-bar" style="display:none; margin-top: -4px;">
+                                <span class="flyos-version-label">BOARD</span>
+                                <span class="flyos-version-value" id="flyosBoardText">--</span>
                             </div>
                             <div class="monitor-grid">
                                 <div class="monitor-item">
@@ -329,6 +333,38 @@
                             <p style="margin: 5px 0; color: #424242;">2. 将 firmware.bin 复制到 TF 卡根目录</p>
                             <p style="margin: 5px 0; color: #424242;">3. 将 TF 卡插入主板，重新上电即可自动烧录</p>
                             <button class="btn btn-primary" onclick="downloadFirmwareForTF()" style="margin-top: 10px;">📥 下载 firmware.bin</button>
+                        </div>
+                        
+                        <!-- HOST 固件源选择 (仅在HOST烧录模式显示) -->
+                        <div id="hostFirmwareSourceCard" style="display:none; margin: 15px 0; padding: 15px; background: #e8f5e9; border-radius: 8px; border-left: 4px solid #4caf50;">
+                            <h4 style="margin: 0 0 12px 0; color: #2e7d32;">HOST 固件源</h4>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">固件来源</label>
+                                    <select class="form-control form-select" id="hostFirmwareSource" onchange="onHostSourceChange()">
+                                        <option value="compiled">编译固件 (~/klipper/out/klipper.bin)</option>
+                                        <option value="prebuilt">预构建固件 (选择已有文件)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="hostPrebuiltSection" style="display:none;">
+                                <div class="form-row">
+                                    <div class="form-group" style="flex:1;">
+                                        <label class="form-label">固件文件路径</label>
+                                        <div style="display:flex; gap:8px;">
+                                            <input type="text" class="form-control" id="hostPrebuiltPath" placeholder="选择或输入固件文件路径...">
+                                            <button class="btn btn-secondary" onclick="openHostFileBrowser()" title="浏览远程文件">浏览</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="hostFileBrowser" class="host-file-browser" style="display:none;">
+                                    <div class="browser-toolbar">
+                                        <button class="btn btn-sm" onclick="hostBrowserGoUp()" id="hostBrowserUpBtn">&#x2190; 返回上级</button>
+                                        <span class="browser-path" id="hostBrowserPath">/</span>
+                                    </div>
+                                    <div class="browser-list" id="hostBrowserList"></div>
+                                </div>
+                            </div>
                         </div>
                         
                         <div class="form-row" style="margin-top: 15px;">
@@ -814,10 +850,10 @@
         </main>
     </div>
 
-    <script src="/static/js/app.js?v=20260605a"></script>
+    <script src="/static/js/app.js?v=20260605c"></script>
     <script src="/static/js/mcu-presets.js?v=20260320f"></script>
     <script src="/static/js/config-manager.js?v=20260320f"></script>
-    <script src="/static/js/firmware-compile.js?v=20260604e"></script>
+    <script src="/static/js/firmware-compile.js?v=20260605g"></script>
     <script src="/static/js/firmware-update.js?v=20260320f"></script>
 </body>
 </html>

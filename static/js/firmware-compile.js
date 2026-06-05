@@ -486,15 +486,19 @@ async function onCompilePresetModelChange() {
     const config = JSON.parse(option.dataset.config);
     const presetName = config.name || option.textContent;
 
-    // 设置烧录模式：根据 flash_modes 过滤选项并默认选中 default_flash
+    // 设置烧录模式：默认选中 default_flash，但保留所有选项可编辑
     const flashModeEl = document.getElementById('flashMode');
     if (flashModeEl && config.flash_modes && config.flash_modes.length > 0) {
-        // 保存当前值用于回退
-        const prevValue = flashModeEl.value;
-        // 过滤选项：只显示产品支持的烧录模式
+        // 恢复所有选项可见（用户可手动覆盖）
         const supportedModes = config.flash_modes;
         Array.from(flashModeEl.options).forEach(opt => {
-            opt.style.display = supportedModes.includes(opt.value) ? '' : 'none';
+            opt.style.display = '';
+            // 标记推荐模式
+            if (supportedModes.includes(opt.value)) {
+                opt.textContent = opt.textContent.replace(/\s*\(推荐\)$/, '') + ' (\u63A8\u8350)';
+            } else {
+                opt.textContent = opt.textContent.replace(/\s*\(推荐\)$/, '');
+            }
         });
         // 设置默认值
         if (config.default_flash && supportedModes.includes(config.default_flash)) {
@@ -984,15 +988,21 @@ function onFlashModeChange() {
         flashBtn.style.display = 'none';
         deviceIdGroup.style.display = 'none';
     } else if (flashMode === 'HOST') {
-        // HOST模式：隐藏TF卡区域和设备选择，显示烧录按钮
+        // HOST模式：隐藏TF卡区域和设备选择，显示烧录按钮和固件源选择
         tfCardSection.style.display = 'none';
         flashBtn.style.display = 'inline-block';
         deviceIdGroup.style.display = 'none';
+        // 显示 HOST 固件源卡片
+        const hostCard = document.getElementById('hostFirmwareSourceCard');
+        if (hostCard) hostCard.style.display = 'block';
     } else {
         // 其他模式：正常显示
         tfCardSection.style.display = 'none';
         flashBtn.style.display = 'inline-block';
         deviceIdGroup.style.display = 'block';
+        // 隐藏 HOST 固件源卡片
+        const hostCard2 = document.getElementById('hostFirmwareSourceCard');
+        if (hostCard2) hostCard2.style.display = 'none';
     }
     // CAN接口选择框只在 KAT/CAN 模式 且 有多个接口时显示
     if (canIfaceEl && needCan) {
@@ -1052,9 +1062,19 @@ async function flashFirmware() {
     let firmwarePath = compiledFirmwarePath;
     
     if (flashMode === 'HOST') {
-        // HOST模式：安装固件到上位机
-        if (!firmwarePath) {
-            firmwarePath = '~/klipper/out/klipper.bin';
+        // HOST模式：根据固件源选择文件
+        const source = document.getElementById('hostFirmwareSource')?.value || 'compiled';
+        if (source === 'prebuilt') {
+            const prebuiltPath = document.getElementById('hostPrebuiltPath')?.value?.trim();
+            if (!prebuiltPath) {
+                showError('请选择或输入预构建固件文件路径');
+                return;
+            }
+            firmwarePath = prebuiltPath;
+        } else {
+            if (!firmwarePath) {
+                firmwarePath = '~/klipper/out/klipper.bin';
+            }
         }
         return await flashHostFirmware(firmwarePath);
     }
@@ -1122,45 +1142,185 @@ async function flashFirmware() {
 async function flashHostFirmware(firmwarePath) {
     const resultDiv = document.getElementById('flashResult');
     resultDiv.style.display = 'block';
-    resultDiv.querySelector('.result-box').innerHTML = '<p>⏳ 正在安装固件到上位机，请稍候...</p>';
+    resultDiv.querySelector('.result-box').innerHTML = '<p>正在烧录固件，请稍候...</p>';
     
     try {
         const response = await fetch('/api/firmware/install-host', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                firmware_path: firmwarePath
-            })
+            body: JSON.stringify({ firmware_path: firmwarePath })
         });
         
         const result = await response.json();
         
         if (result.success) {
-            resultDiv.querySelector('.result-box').innerHTML = `
-                <div class="status-success">
-                    <p>✅ ${result.message || '固件安装成功！'}</p>
-                </div>
-            `;
-            showSuccess('固件安装成功！');
+            let outputHtml = `<div class="status-success"><p>${result.message || '固件烧录成功'}</p>`;
+            if (result.flash_output) {
+                outputHtml += `<pre style="font-size:12px;margin-top:8px;white-space:pre-wrap">${result.flash_output}</pre>`;
+            }
+            outputHtml += `</div>`;
+            resultDiv.querySelector('.result-box').innerHTML = outputHtml;
+            showSuccess('固件烧录成功');
         } else {
             resultDiv.querySelector('.result-box').innerHTML = `
                 <div class="status-error">
-                    <p>❌ 安装失败</p>
+                    <p>烧录失败</p>
                     <pre>${result.error || '未知错误'}</pre>
                 </div>
             `;
-            showError('安装失败: ' + (result.error || '未知错误'));
+            showError('烧录失败: ' + (result.error || '未知错误'));
         }
     } catch (error) {
-        console.error('安装失败:', error);
+        console.error('烧录失败:', error);
         resultDiv.querySelector('.result-box').innerHTML = `
             <div class="status-error">
-                <p>❌ 安装请求失败</p>
+                <p>烧录请求失败</p>
                 <pre>${error.message}</pre>
             </div>
         `;
-        showError('安装请求失败: ' + error.message);
+        showError('烧录请求失败: ' + error.message);
     }
+}
+
+// ==================== HOST 固件源 & 文件浏览器 ====================
+
+// 固件源切换
+function onHostSourceChange() {
+    const source = document.getElementById('hostFirmwareSource')?.value;
+    const prebuiltSection = document.getElementById('hostPrebuiltSection');
+    if (prebuiltSection) {
+        prebuiltSection.style.display = (source === 'prebuilt') ? 'block' : 'none';
+    }
+    // 切换到预构建时自动检测路径
+    if (source === 'prebuilt') {
+        autoDetectHostFirmwarePath();
+    }
+}
+
+// 自动检测 HOST 预构建固件路径
+async function autoDetectHostFirmwarePath() {
+    const pathInput = document.getElementById('hostPrebuiltPath');
+    if (!pathInput) return;
+    
+    // 收集当前 MCU 和通信参数
+    const mcuId = currentCompileMcu ? currentCompileMcu.mcu.id : '';
+    const commType = document.getElementById('compileConnection')?.value || '';
+    const blOffset = document.getElementById('compileBlOffset')?.value || '';
+    
+    try {
+        const params = new URLSearchParams();
+        if (mcuId) params.set('mcu', mcuId);
+        if (commType) params.set('comm_type', commType);
+        if (blOffset) params.set('bl_offset', blOffset);
+        
+        const resp = await fetch('/api/firmware/host-info?' + params.toString());
+        const info = await resp.json();
+        
+        if (info.best_match && info.best_score > 0) {
+            pathInput.value = info.best_match.path;
+            const sizeStr = info.best_match.size ? ` (${formatFileSize(info.best_match.size)})` : '';
+            showSuccess(`已匹配固件: ${info.best_match.name}${sizeStr}`);
+        } else if (info.firmware_files && info.firmware_files.length > 0) {
+            // 没有精确匹配，但有固件文件
+            showSuccess(`找到 ${info.firmware_files.length} 个预构建固件，请手动选择`);
+            // 如果只有一个 MCU 类型的固件，自动选中第一个
+            const mcuFiles = info.firmware_files.filter(f => f.fw_mcu === mcuId.toLowerCase());
+            if (mcuFiles.length === 1) {
+                pathInput.value = mcuFiles[0].path;
+                showSuccess(`已自动选择: ${mcuFiles[0].name}`);
+            }
+        } else {
+            showSuccess('远程设备未找到预构建固件，请手动选择');
+        }
+    } catch (err) {
+        console.warn('检测 HOST 固件路径失败:', err);
+    }
+}
+
+// 打开文件浏览器
+let _hostBrowserParent = null;
+
+function openHostFileBrowser() {
+    const browser = document.getElementById('hostFileBrowser');
+    if (!browser) return;
+    browser.style.display = 'block';
+    // 默认打开预构建固件目录
+    loadHostBrowserDir('/usr/lib/firmware/klipper');
+}
+
+function hostBrowserGoUp() {
+    if (_hostBrowserParent) {
+        loadHostBrowserDir(_hostBrowserParent);
+    }
+}
+
+async function loadHostBrowserDir(path) {
+    const listEl = document.getElementById('hostBrowserList');
+    const pathEl = document.getElementById('hostBrowserPath');
+    const upBtn = document.getElementById('hostBrowserUpBtn');
+    if (!listEl) return;
+    
+    listEl.innerHTML = '<div class="browser-empty">加载中...</div>';
+    
+    try {
+        const params = path ? `?path=${encodeURIComponent(path)}` : '';
+        const resp = await fetch(`/api/remote/browse${params}`);
+        const data = await resp.json();
+        
+        if (data.error) {
+            listEl.innerHTML = `<div class="browser-empty">${data.error}</div>`;
+            return;
+        }
+        
+        _hostBrowserParent = data.parent;
+        if (pathEl) pathEl.textContent = data.path;
+        if (upBtn) upBtn.style.display = data.parent ? '' : 'none';
+        
+        if (!data.entries || data.entries.length === 0) {
+            listEl.innerHTML = '<div class="browser-empty">目录为空</div>';
+            return;
+        }
+        
+        let html = '';
+        for (const entry of data.entries) {
+            const icon = entry.is_dir ? '&#x1F4C1;' : '&#x1F4C4;';
+            const sizeStr = entry.is_dir ? '' : formatFileSize(entry.size);
+            const dirClass = entry.is_dir ? ' is-dir' : '';
+            const escapedPath = entry.path.replace(/'/g, "\\'");
+            html += `<div class="browser-item${dirClass}" onclick="onHostBrowserClick(this, '${escapedPath}', ${entry.is_dir})">
+                <span class="item-icon">${icon}</span>
+                <span class="item-name">${escapeHtml(entry.name)}</span>
+                <span class="item-size">${sizeStr}</span>
+            </div>`;
+        }
+        listEl.innerHTML = html;
+    } catch (err) {
+        listEl.innerHTML = `<div class="browser-empty">浏览失败: ${err.message}</div>`;
+    }
+}
+
+function onHostBrowserClick(el, path, isDir) {
+    if (isDir) {
+        loadHostBrowserDir(path);
+    } else {
+        document.querySelectorAll('.browser-item.selected').forEach(e => e.classList.remove('selected'));
+        el.classList.add('selected');
+        const pathInput = document.getElementById('hostPrebuiltPath');
+        if (pathInput) pathInput.value = path;
+    }
+}
+
+function formatFileSize(bytes) {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
 }
 
 // 展开/折叠 BL 烧录区域

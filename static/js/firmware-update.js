@@ -750,18 +750,20 @@ async function flashAllSelected() {
                     addBatchResult(displayName, 'error', 'UF2烧录失败: ' + (flashResult.error || '未知错误'));
                 }
             } else if (mode === 'HOST') {
-                // HOST模式：复制到klipper目录
+                // HOST模式：安装到上位机并自动重启
                 addBatchResult(displayName, 'running', '安装到上位机...');
                 const installResponse = await fetch('/api/firmware/install-host', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        firmware_path: compileResult.firmware_path
+                        firmware_path: compileResult.firmware_path,
+                        auto_restart: true
                     })
                 });
                 const installResult = await installResponse.json();
                 if (installResult.success) {
-                    addBatchResult(displayName, 'success', '安装成功，请重启Klipper');
+                    const msg = installResult.message || '安装成功';
+                    addBatchResult(displayName, 'success', msg);
                 } else {
                     addBatchResult(displayName, 'error', '安装失败: ' + (installResult.error || '未知错误'));
                 }

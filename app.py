@@ -89,18 +89,39 @@ def get_klipper_owner(klipper_path=None):
     return 'fenghua', '/home/fenghua'
 
 
-def expand_klipper_path(path):
-    """展开 Klipper 路径，处理 systemd root 运行时 ~ 扩展问题"""
+def expand_klipper_path(path, force_local=False):
+    """展开 Klipper 路径，处理 systemd root 运行时 ~ 扩展问题
+    
+    Args:
+        path: 路径字符串，支持 ~ 前缀
+        force_local: 强制使用本地路径解析（用于 Kconfig 解析等需要本地文件的场景）
+    """
     if not path.startswith('~'):
         return os.path.expanduser(path)
-    # SSH 模式: 使用 SSH 用户的远程 home 目录，避免递归调用
+    # 强制本地模式: 直接搜索本地 /home 下的 klipper 目录
+    if force_local:
+        try:
+            for user_dir in os.listdir('/home'):
+                candidate = os.path.join('/home', user_dir, 'klipper')
+                if os.path.isdir(candidate):
+                    return os.path.join('/home', user_dir) + path[1:]
+        except OSError:
+            pass
+        # 回退: 查找 uid >= 1000 的用户
+        import pwd as _pwd
+        for entry in _pwd.getpwall():
+            if entry.pw_uid >= 1000 and entry.pw_name not in ('nobody', 'nogroup'):
+                candidate = os.path.join(entry.pw_dir, 'klipper')
+                if os.path.isdir(candidate):
+                    return entry.pw_dir + path[1:]
+        return '/home/fenghua' + path[1:]
+    # SSH 模式: 使用 SSH 用户的远程 home 目录
     if is_ssh_mode():
         ssh_user = config.get('ssh_user', 'root')
         if ssh_user == 'root':
             remote_home = '/root'
         else:
             remote_home = f'/home/{ssh_user}'
-        # 尝试通过远程命令获取精确路径
         try:
             result = run_cmd(f'eval echo ~{ssh_user}', shell=True, capture_output=True, text=True, timeout=5)
             resolved = result.stdout.strip()
@@ -233,6 +254,7 @@ _remote_resource_cache = {
     'timestamp': 0
 }
 _remote_flyos_version = None  # FlyOS 版本缓存（不会变化，只取一次）
+_remote_board_name = None      # 主板型号缓存（从内核参数获取，不会变化）
 
 def _collect_remote_resources():
     """通过 SSH 单次命令采集远程系统资源"""
@@ -254,6 +276,7 @@ def _collect_remote_resources():
             "echo '===DSK==='; df -B1 / | tail -1; "
             "echo '===NET==='; ip -br -4 addr show 2>/dev/null | grep -iE '^(eth|en|wlan|wlo)'; "
             "echo '===VER==='; flyos-fast-ota --version 2>&1 | head -1; "
+            "echo '===BRD==='; cat /proc/cmdline 2>/dev/null; "
             "echo '===END==='"
         )
 
@@ -380,7 +403,7 @@ def _collect_remote_resources():
                     net_info['interfaces'].append({'name': display_name, 'ips': [ip_addr]})
 
         # 解析 FlyOS 版本（仅首次采集后缓存）
-        global _remote_flyos_version
+        global _remote_flyos_version, _remote_board_name
         if _remote_flyos_version is None and 'VER' in sections:
             ver_line = sections['VER'].strip()
             # 格式: "INFO[2026-06-05 12:01:36] FlyOS-Fast: v1.3.6-g18854ae160"
@@ -390,6 +413,15 @@ def _collect_remote_resources():
                 _remote_flyos_version = _ver_match.group(1)
             else:
                 _remote_flyos_version = ''  # 非 FlyOS 系统，置空避免重复采集
+
+        # 解析主板型号（从内核启动参数 board_name=xxx）
+        if _remote_board_name is None and 'BRD' in sections:
+            import re as _re
+            _brd_match = _re.search(r'board_name=([^\s]+)', sections['BRD'].strip())
+            if _brd_match:
+                _remote_board_name = _brd_match.group(1)
+            else:
+                _remote_board_name = ''  # 未找到，置空避免重复采集
 
         resources = {
             'cpu': cpu_info,
@@ -548,7 +580,8 @@ def get_system_resources():
                 'disk': disk_info,
                 'network': net_info,
                 'services': service_status,
-                'flyos_version': _remote_flyos_version if is_fast_ssh_mode() else None
+                'flyos_version': _remote_flyos_version if is_fast_ssh_mode() else None,
+                'board_name': _remote_board_name if is_fast_ssh_mode() else None
             },
             'history': {
                 'cpu': list(resource_history['cpu']),
@@ -1096,9 +1129,9 @@ def get_video_devices():
 # ==================== 通信选项 API ====================
 @app.route('/api/klipper/communication-options')
 def get_communication_options():
-    """获取 Kconfig 中的通信接口选项"""
+    """获取 Kconfig 中的通信接口选项（需要本地 Kconfig 文件）"""
     klipper_path = request.args.get('klipper_path', config.get('klipper_path', '~/klipper'))
-    klipper_path = expand_klipper_path(klipper_path)
+    klipper_path = expand_klipper_path(klipper_path, force_local=True)
     try:
         data = parse_can_options(klipper_path)
         return jsonify(data)
@@ -1320,7 +1353,7 @@ def compile_firmware():
         data = request.json
         
         # 获取 Klipper 路径，优先使用用户传入的，其次是配置的，最后是默认值
-        # 修复 systemd root 运行时 ~ 被扩展为 /root 的问题
+        # 编译在远程设备上执行（SSH模式下远程有 Klipper 源码和编译环境）
         klipper_path = data.get('klipper_path', config.get('klipper_path', '~/klipper'))
         klipper_path = expand_klipper_path(klipper_path)
         
@@ -2220,7 +2253,7 @@ def flash_firmware():
 # ==================== HOST固件安装 API ====================
 @app.route('/api/firmware/install-host', methods=['POST'])
 def install_host_firmware():
-    """安装固件到上位机（Linux进程）"""
+    """安装固件到主板 MCU（通过 HOST 设备烧录）"""
     try:
         data = request.json
         firmware_path = data.get('firmware_path', '')
@@ -2233,30 +2266,242 @@ def install_host_firmware():
         if not path_exists(firmware_path):
             return jsonify({'error': f'固件文件不存在: {firmware_path}'}), 400
         
-        # 复制到 klipper/out/klipper.elf
+        # FAST-SSH 模式: 使用 fly-flash 烧录
+        if is_fast_ssh_mode():
+            flash_cmd = f'fly-flash -d auto -h -f {shlex.quote(firmware_path)}'
+            logger.info(f'HOST 烧录命令: {flash_cmd}')
+            result = run_cmd(flash_cmd, shell=True, capture_output=True, text=True, timeout=120)
+            output = (result.stdout + '\n' + result.stderr).strip()
+            
+            if result.returncode != 0:
+                return jsonify({'error': f'fly-flash 烧录失败: {output}'}), 500
+            
+            # 烧录成功后重启 Klipper 服务
+            restart_result = run_cmd(
+                'systemctl restart klipper.service',
+                shell=True, capture_output=True, text=True, timeout=30
+            )
+            restart_output = (restart_result.stdout + restart_result.stderr).strip()
+            if restart_result.returncode != 0:
+                logger.warning(f'Klipper 重启失败: {restart_output}')
+            
+            return jsonify({
+                'success': True,
+                'message': f'固件烧录成功: {firmware_path}',
+                'flash_output': output,
+                'restart_output': restart_output,
+                'method': 'fly-flash'
+            })
+        
+        # 标准 SSH / 本地模式: 复制到 klipper out 目录
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
-        target_path = os.path.join(klipper_path, 'out', 'klipper.elf')
+        target_path = os.path.join(klipper_path, 'out', 'klipper.bin')
         
         if is_ssh_mode():
-            # SSH 模式: 通过远程命令复制
             run_cmd(f'mkdir -p {shlex.quote(os.path.dirname(target_path))}', shell=True, capture_output=True)
             result = run_cmd(f'cp {shlex.quote(firmware_path)} {shlex.quote(target_path)}', shell=True, capture_output=True, text=True, timeout=10)
-            run_cmd(f'chmod 755 {shlex.quote(target_path)}', shell=True, capture_output=True)
             if result.returncode != 0:
                 return jsonify({'error': f'复制失败: {result.stderr}'}), 500
         else:
-            # 本地模式
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             import shutil
             shutil.copy2(firmware_path, target_path)
-            os.chmod(target_path, 0o755)
         
         return jsonify({
             'success': True,
-            'message': f'固件已安装到 {target_path}，请重启Klipper服务',
-            'target_path': target_path
+            'message': f'固件已复制到 {target_path}',
+            'target_path': target_path,
+            'method': 'copy'
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ==================== HOST 固件信息 API ====================
+@app.route('/api/firmware/host-info')
+def get_host_firmware_info():
+    """获取预构建固件列表（从 /usr/lib/firmware/klipper/ 扫描）并根据 MCU 匹配最佳固件"""
+    try:
+        mcu_id = (request.args.get('mcu', '') or '').lower()  # e.g. stm32h723
+        comm_type = request.args.get('comm_type', '')  # usb/can/usbcanbridge/serial
+        bl_offset = request.args.get('bl_offset', '')  # 32k/128k etc.
+        
+        # 预构建固件目录
+        firmware_dir = '/usr/lib/firmware/klipper'
+        
+        firmware_files = []
+        
+        if is_ssh_mode():
+            # SSH 模式: 通过远程命令扫描
+            result = run_cmd(
+                f'ls -la {shlex.quote(firmware_dir)}/ 2>/dev/null',
+                shell=True, capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    parts = line.split()
+                    if len(parts) >= 9 and parts[-1].endswith('.bin'):
+                        name = parts[-1]
+                        size = int(parts[4]) if parts[4].isdigit() else 0
+                        full_path = os.path.join(firmware_dir, name)
+                        firmware_files.append({
+                            'name': name,
+                            'path': full_path,
+                            'size': size
+                        })
+        else:
+            # 本地模式
+            if os.path.isdir(firmware_dir):
+                for name in os.listdir(firmware_dir):
+                    if name.endswith('.bin'):
+                        full_path = os.path.join(firmware_dir, name)
+                        try:
+                            size = os.path.getsize(full_path)
+                        except:
+                            size = 0
+                        firmware_files.append({
+                            'name': name,
+                            'path': full_path,
+                            'size': size
+                        })
+        
+        # 解析文件名提取固件信息
+        import re
+        for fw in firmware_files:
+            # 格式: stm32f407-32k-usb.bin, stm32h723-128k-usbcan-1m.bin
+            m = re.match(r'^([a-z0-9]+)-(\d+)k-(\w+?)(?:-(\w+))?\.bin$', fw['name'])
+            if m:
+                fw['fw_mcu'] = m.group(1)       # stm32f407
+                fw['fw_bl'] = m.group(2) + 'k'   # 32k
+                fw['fw_comm'] = m.group(3)       # usb / usbcan
+                fw['fw_speed'] = m.group(4) or ''  # 1m / 500k / ''
+            else:
+                fw['fw_mcu'] = ''
+                fw['fw_bl'] = ''
+                fw['fw_comm'] = ''
+                fw['fw_speed'] = ''
+        
+        # 匹配最佳固件
+        best_match = None
+        best_score = 0
+        
+        # 通信类型映射: 前端值 -> 文件名中的值
+        comm_map = {
+            'usb': 'usb',
+            'serial': 'serial',
+            'can': 'usbcan',      # CAN 通信在文件名中是 usbcan
+            'usbcanbridge': 'usbcan',
+        }
+        target_comm = comm_map.get(comm_type, comm_type)
+        
+        for fw in firmware_files:
+            if not fw.get('fw_mcu'):
+                continue
+            score = 0
+            # MCU 匹配 (最重要)
+            if mcu_id and mcu_id.lower() == fw['fw_mcu'].lower():
+                score += 10
+            elif mcu_id and mcu_id.lower().startswith(fw['fw_mcu'][:6].lower()):
+                score += 5
+            # BL 偏移匹配
+            if bl_offset and bl_offset.lower() == fw['fw_bl'].lower():
+                score += 3
+            # 通信类型匹配
+            if target_comm and target_comm == fw['fw_comm']:
+                score += 5
+            
+            if score > best_score:
+                best_score = score
+                best_match = fw
+        
+        return jsonify({
+            'firmware_dir': firmware_dir,
+            'firmware_files': firmware_files,
+            'best_match': best_match,
+            'best_score': best_score,
+            'query': {'mcu': mcu_id, 'comm_type': comm_type, 'bl_offset': bl_offset}
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ==================== 远程目录浏览 API ====================
+@app.route('/api/remote/browse')
+def remote_browse():
+    """浏览远程/本地目录，用于选择固件文件"""
+    try:
+        path = request.args.get('path', '')
+        
+        # 默认路径
+        if not path:
+            if is_ssh_mode():
+                # SSH 模式默认浏览用户主目录
+                path = '~'
+            else:
+                path = os.path.expanduser('~')
+        
+        # 展开路径
+        if path.startswith('~'):
+            if is_ssh_mode():
+                # 远程展开: 尝试常见的 home 路径
+                manager = SSHManager.get_instance()
+                result = manager.exec_command('echo $HOME', timeout=5)
+                home = result.stdout.strip()
+                if home:
+                    path = path.replace('~', home, 1)
+            else:
+                path = os.path.expanduser(path)
+        
+        # 列出目录
+        entries = []
+        if is_ssh_mode():
+            manager = SSHManager.get_instance()
+            # 获取文件类型和大小信息
+            result = manager.exec_command(
+                f'ls -la --time-style=long-iso {shlex.quote(path)} 2>/dev/null | tail -n +2',
+                timeout=10
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().split('\n'):
+                    parts = line.split()
+                    if len(parts) >= 8:
+                        perms = parts[0]
+                        size = parts[4]
+                        name = parts[7]
+                        if name in ('.', '..') or name.startswith('.'):
+                            continue
+                        is_dir = perms.startswith('d')
+                        entries.append({
+                            'name': name,
+                            'is_dir': is_dir,
+                            'size': int(size) if not is_dir else 0,
+                            'path': os.path.join(path, name)
+                        })
+        else:
+            abs_path = os.path.abspath(path)
+            if os.path.isdir(abs_path):
+                for name in sorted(os.listdir(abs_path)):
+                    if name.startswith('.'):
+                        continue
+                    full_path = os.path.join(abs_path, name)
+                    is_dir = os.path.isdir(full_path)
+                    entries.append({
+                        'name': name,
+                        'is_dir': is_dir,
+                        'size': os.path.getsize(full_path) if not is_dir else 0,
+                        'path': full_path
+                    })
+        
+        # 排序: 目录在前，然后按名称
+        entries.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+        
+        # 获取父目录
+        parent = os.path.dirname(path.rstrip('/')) if path != '/' and path != '~' else None
+        
+        return jsonify({
+            'path': path,
+            'parent': parent,
+            'entries': entries
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2403,8 +2648,9 @@ def handle_config():
             save_credential('sudo_password', FAST_SSH_PASSWORD)
         
         # 连接模式或主机变更时重置 FlyOS 版本缓存
-        global _remote_flyos_version
+        global _remote_flyos_version, _remote_board_name
         _remote_flyos_version = None
+        _remote_board_name = None
         
         if save_config(config):
             return jsonify({'success': True, 'message': '配置已保存', 'config': config})
