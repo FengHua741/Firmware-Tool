@@ -946,6 +946,18 @@ async function updateResources() {
             updateNetworkDisplay(current.network);
         }
         
+        // 更新 FlyOS 版本信息（仅 FAST-SSH 模式显示）
+        const flyosBar = document.getElementById('flyosVersionBar');
+        const flyosText = document.getElementById('flyosVersionText');
+        if (flyosBar && flyosText) {
+            if (current.flyos_version) {
+                flyosText.textContent = current.flyos_version;
+                flyosBar.style.display = 'flex';
+            } else {
+                flyosBar.style.display = 'none';
+            }
+        }
+        
     } catch (error) {
         console.error('获取系统资源失败:', error);
     }

@@ -12,12 +12,12 @@
     "USB"
   ],
   "default_connection": "CAN bus",
-  "default_flash": "KAT",
+  "default_flash": "UF2",
   "firmware_update": {
     "custom_config": "",
     "device_id": "",
     "enabled": false,
-    "flash_mode": "KAT",
+    "flash_mode": "UF2",
     "katapult_mode": "USB"
   },
   "flash_modes": [

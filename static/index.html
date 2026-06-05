@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Firmware-Tool - 固件工具</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=20260320f">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260605a">
     <link rel="stylesheet" href="/static/css/config-manager.css?v=20260320f">
 </head>
 <body>
@@ -51,6 +51,10 @@
                     <div class="card resource-monitor">
                         <div class="card-header"><h3>实时资源监控</h3></div>
                         <div class="card-body">
+                            <div id="flyosVersionBar" class="flyos-version-bar" style="display:none;">
+                                <span class="flyos-version-label">FlyOS</span>
+                                <span class="flyos-version-value" id="flyosVersionText">--</span>
+                            </div>
                             <div class="monitor-grid">
                                 <div class="monitor-item">
                                     <span class="monitor-label">CPU</span>
@@ -810,7 +814,7 @@
         </main>
     </div>
 
-    <script src="/static/js/app.js?v=20260320f"></script>
+    <script src="/static/js/app.js?v=20260605a"></script>
     <script src="/static/js/mcu-presets.js?v=20260320f"></script>
     <script src="/static/js/config-manager.js?v=20260320f"></script>
     <script src="/static/js/firmware-compile.js?v=20260604e"></script>

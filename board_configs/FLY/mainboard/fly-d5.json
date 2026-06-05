@@ -14,7 +14,7 @@
     "custom_config": "",
     "device_id": "",
     "enabled": false,
-    "flash_mode": "DFU",
+    "flash_mode": "KAT",
     "katapult_mode": "USB"
   },
   "flash_modes": [

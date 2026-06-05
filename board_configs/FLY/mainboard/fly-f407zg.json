@@ -10,20 +10,19 @@
   ],
   "default_connection": "USB (on PA11/PA12)",
   "flash_modes": [
-    "DFU",
-    "KAT"
+    "TF"
   ],
-  "default_flash": "KAT",
+  "default_flash": "TF",
   "boot_pins": null,
   "crystal": "8000000",
   "bl_flash_support": "支持",
-  "bl_default_flash": "DFU",
+  "bl_default_flash": "",
   "id": "fly-f407zg",
   "firmware_update": {
     "enabled": false,
     "katapult_mode": "USB",
     "device_id": "",
-    "flash_mode": "DFU",
+    "flash_mode": "TF",
     "custom_config": ""
   },
   "manufacturer": "FLY"

@@ -11,7 +11,8 @@
   "default_connection": "CAN bus",
   "flash_modes": [
     "DFU",
-    "KAT"
+    "KAT",
+    "CAN"
   ],
   "default_flash": "KAT",
   "boot_pins": "gpio17",

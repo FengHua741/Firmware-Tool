@@ -325,6 +325,14 @@ function inferUpdateMode(boardConfig) {
     const hasCan = conn.includes('CAN');
     const hasUsb = conn.includes('USB') && !conn.includes('转');
 
+    if (flashMode === 'TF') {
+        return 'TF';
+    }
+
+    if (flashMode === 'HOST') {
+        return 'HOST';
+    }
+
     if (flashMode === 'UF2') {
         return 'UF2';
     }

@@ -13,7 +13,7 @@
     "custom_config": "",
     "device_id": "",
     "enabled": false,
-    "flash_mode": "KAT",
+    "flash_mode": "UF2",
     "katapult_mode": "USB"
   },
   "flash_modes": [

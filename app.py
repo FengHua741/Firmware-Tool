@@ -232,6 +232,7 @@ _remote_resource_cache = {
     'network': {'interfaces': []},
     'timestamp': 0
 }
+_remote_flyos_version = None  # FlyOS 版本缓存（不会变化，只取一次）
 
 def _collect_remote_resources():
     """通过 SSH 单次命令采集远程系统资源"""
@@ -252,6 +253,7 @@ def _collect_remote_resources():
             "echo '===MEM==='; free -b | grep '^Mem:'; "
             "echo '===DSK==='; df -B1 / | tail -1; "
             "echo '===NET==='; ip -br -4 addr show 2>/dev/null | grep -iE '^(eth|en|wlan|wlo)'; "
+            "echo '===VER==='; flyos-fast-ota --version 2>&1 | head -1; "
             "echo '===END==='"
         )
 
@@ -376,6 +378,18 @@ def _collect_remote_resources():
                     else:
                         display_name = iface_name
                     net_info['interfaces'].append({'name': display_name, 'ips': [ip_addr]})
+
+        # 解析 FlyOS 版本（仅首次采集后缓存）
+        global _remote_flyos_version
+        if _remote_flyos_version is None and 'VER' in sections:
+            ver_line = sections['VER'].strip()
+            # 格式: "INFO[2026-06-05 12:01:36] FlyOS-Fast: v1.3.6-g18854ae160"
+            import re as _re
+            _ver_match = _re.search(r'FlyOS-Fast:\s*(v[\S]+)', ver_line)
+            if _ver_match:
+                _remote_flyos_version = _ver_match.group(1)
+            else:
+                _remote_flyos_version = ''  # 非 FlyOS 系统，置空避免重复采集
 
         resources = {
             'cpu': cpu_info,
@@ -533,7 +547,8 @@ def get_system_resources():
                 'memory': mem_info,
                 'disk': disk_info,
                 'network': net_info,
-                'services': service_status
+                'services': service_status,
+                'flyos_version': _remote_flyos_version if is_fast_ssh_mode() else None
             },
             'history': {
                 'cpu': list(resource_history['cpu']),
@@ -2386,6 +2401,10 @@ def handle_config():
             config['sudo_mode'] = 'password'
             save_credential('ssh_password', FAST_SSH_PASSWORD)
             save_credential('sudo_password', FAST_SSH_PASSWORD)
+        
+        # 连接模式或主机变更时重置 FlyOS 版本缓存
+        global _remote_flyos_version
+        _remote_flyos_version = None
         
         if save_config(config):
             return jsonify({'success': True, 'message': '配置已保存', 'config': config})
