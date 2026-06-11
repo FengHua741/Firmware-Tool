@@ -2285,7 +2285,7 @@ def flash_firmware():
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
                     
             import logging
-            import time
+            # time 已在模块顶层导入
                     
             # 判断设备类型：CAN UUID（8-32位十六进制）或 USB 串口路径
             _prefix = f'{can_iface}:'
@@ -2673,7 +2673,7 @@ def remote_browse():
 # ==================== RP2040 BOOT设备卸载辅助 ====================
 def _umount_rp2040_boot():
     """动态查找并卸载RP2040 BOOT设备"""
-    import time
+    # time 已在模块顶层导入
     try:
         # 通过lsblk查找RP2040 BOOT设备的挂载点
         result = run_cmd(
@@ -2714,7 +2714,7 @@ def flash_bl_firmware():
         if is_ssh_mode():
             bl_firmware_path = upload_bl_firmware_for_remote(bl_firmware_path)
         
-        import time
+        # time 已在模块顶层导入
         
         if flash_mode == 'DFU':
             # device 可能是 "dfu:0483:df11" 格式，需要去掉前缀
@@ -3237,16 +3237,24 @@ def set_can_config():
         if config['system'] == 'flyos_fast':
             config_txt = '/config/config.txt'
             try:
-                # 用 sed 替换 canbus_bitrate 值
+                # 用 sed 替换 canbus_bitrate 值，如果不存在则追加
                 sed_cmd = f"sed -i 's/^canbus_bitrate=.*/canbus_bitrate={bitrate}/' {config_txt}"
                 r = run_cmd(sed_cmd, shell=True, capture_output=True, text=True, timeout=10)
                 if r.returncode != 0:
                     return jsonify({'success': False, 'error': f'写入 config.txt 失败: {r.stderr}'}), 500
 
-                # 验证写入是否成功
+                # 验证写入是否成功，如果不存在则追加
                 r2 = run_cmd(f'grep "^canbus_bitrate=" {config_txt}', shell=True, capture_output=True, text=True, timeout=5)
                 if str(bitrate) not in (r2.stdout or ''):
-                    return jsonify({'success': False, 'error': '写入验证失败，config.txt 可能为只读'}), 500
+                    # 行不存在，追加到文件末尾
+                    append_cmd = f"echo 'canbus_bitrate={bitrate}' >> {config_txt}"
+                    r3 = run_cmd(append_cmd, shell=True, capture_output=True, text=True, timeout=5)
+                    if r3.returncode != 0:
+                        return jsonify({'success': False, 'error': '写入失败，config.txt 可能为只读'}), 500
+                    # 再次验证
+                    r4 = run_cmd(f'grep "^canbus_bitrate=" {config_txt}', shell=True, capture_output=True, text=True, timeout=5)
+                    if str(bitrate) not in (r4.stdout or ''):
+                        return jsonify({'success': False, 'error': '写入验证失败，config.txt 可能为只读'}), 500
 
                 # 重启 CAN 接口使新配置生效
                 run_cmd('sudo ip link set can0 down 2>/dev/null', shell=True, capture_output=True, timeout=10)
@@ -3520,7 +3528,7 @@ def repair_can_network():
         
         # 3. 创建systemd-networkd配置
         try:
-            os.makedirs(CAN_NETWORK_DIR, exist_ok=True)
+            sudo_mkdir(CAN_NETWORK_DIR)
             
             # 转换bitrate为M格式
             if bitrate >= 1000000:
@@ -3536,10 +3544,7 @@ Name=can*
 [CAN]
 BitRate={bitrate_str}
 """
-            run_cmd(
-                f'echo "{config_content}" | sudo tee {CAN_NETWORK_DIR}/99-can.network > /dev/null',
-                shell=True, capture_output=True, check=True
-            )
+            sudo_write_file(os.path.join(CAN_NETWORK_DIR, '99-can.network'), config_content)
             
             # 创建link配置文件
             link_content = f"""[Match]
@@ -3548,10 +3553,7 @@ OriginalName=can*
 [Link]
 TxQueueLength={txqueuelen}
 """
-            run_cmd(
-                f'echo "{link_content}" | sudo tee {CAN_NETWORK_DIR}/99-can.link > /dev/null',
-                shell=True, capture_output=True, check=True
-            )
+            sudo_write_file(os.path.join(CAN_NETWORK_DIR, '99-can.link'), link_content)
             
             messages.append(f'CAN配置文件已创建（速率: {bitrate_str}）')
         except Exception as e:
@@ -3566,7 +3568,6 @@ TxQueueLength={txqueuelen}
             messages.append('systemd-networkd重启失败')
         
         # 5. 等待并启动can0
-        import time
         time.sleep(2)
         
         try:
@@ -3732,18 +3733,18 @@ def list_configs(manufacturer):
         if os.path.exists(mfr_dir):
             for board_type in os.listdir(mfr_dir):
                 type_dir = os.path.join(mfr_dir, board_type)
-                if os.path.isdir(type_dir) and not board_type.startswith('.'):
+                if os.path.isdir(type_dir) and not board_type.startswith('.') and board_type != 'BL':
                     board_types.append(board_type)
                     for filename in os.listdir(type_dir):
                         if filename.endswith('.json') and not filename.endswith('.bak'):
                             filepath = os.path.join(type_dir, filename)
                             try:
                                 with open(filepath, 'r', encoding='utf-8') as f:
-                                    config = json.load(f)
+                                    cfg_data = json.load(f)
                                     config_id = filename.replace('.json', '')
-                                    config['id'] = config_id
-                                    config['type'] = board_type
-                                    configs.append(config)
+                                    cfg_data['id'] = config_id
+                                    cfg_data['type'] = board_type
+                                    configs.append(cfg_data)
                             except Exception as e:
                                 logger.error(f"读取配置失败 {filename}: {e}")
         
@@ -3765,12 +3766,17 @@ def get_config(manufacturer, config_id):
         if not config_id:
             return jsonify({'error': '无效的配置ID'}), 400
         mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
-        for board_type in ['mainboard', 'toolboard', 'expansion']:
-            filepath = os.path.join(mfr_dir, board_type, f"{config_id}.json")
-            if os.path.exists(filepath):
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                return jsonify(config)
+        # 动态搜索所有子目录，不限制类型
+        if os.path.exists(mfr_dir):
+            for board_type in os.listdir(mfr_dir):
+                type_dir = os.path.join(mfr_dir, board_type)
+                if not os.path.isdir(type_dir) or board_type.startswith('.'):
+                    continue
+                filepath = os.path.join(type_dir, f"{config_id}.json")
+                if os.path.exists(filepath):
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        cfg_data = json.load(f)
+                    return jsonify(cfg_data)
         
         return jsonify({'error': '配置不存在'}), 404
     except Exception as e:
@@ -3824,13 +3830,17 @@ def delete_config(manufacturer, config_id):
             return jsonify({'error': '无效的配置ID'}), 400
         mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
         
-        # 在所有类型目录中查找
-        for board_type in ['mainboard', 'toolboard', 'expansion']:
-            filepath = os.path.join(mfr_dir, board_type, f"{config_id}.json")
-            if os.path.exists(filepath):
-                os.remove(filepath)
-                logger.info(f"删除配置：{filepath}")
-                return jsonify({'success': True})
+        # 动态搜索所有子目录，不限制类型
+        if os.path.exists(mfr_dir):
+            for board_type in os.listdir(mfr_dir):
+                type_dir = os.path.join(mfr_dir, board_type)
+                if not os.path.isdir(type_dir) or board_type.startswith('.'):
+                    continue
+                filepath = os.path.join(type_dir, f"{config_id}.json")
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    logger.info(f"删除配置：{filepath}")
+                    return jsonify({'success': True})
         
         return jsonify({'error': '配置不存在'}), 404
     except Exception as e:
@@ -3841,6 +3851,9 @@ def upload_config():
     """上传配置文件"""
     try:
         manufacturer = request.form.get('manufacturer', 'FLY')
+        manufacturer = sanitize_manufacturer(manufacturer)
+        if not manufacturer:
+            return jsonify({'error': '无效的厂家名称'}), 400
         files = request.files.getlist('files[]')
         
         if not files:
@@ -3850,8 +3863,20 @@ def upload_config():
         
         for file in files:
             if file.filename:
-                # 处理路径：configs/{manufacturer}/...
-                save_path = os.path.join(CONFIGS_DIR, manufacturer, file.filename)
+                # 安全处理文件名：禁止路径遍历
+                safe_filename = os.path.basename(file.filename)
+                if not safe_filename or safe_filename.startswith('.'):
+                    logger.warning(f"跳过不安全的文件名: {file.filename}")
+                    continue
+                # 处理路径：board_configs/{manufacturer}/...
+                save_path = os.path.join(CONFIGS_DIR, manufacturer, safe_filename)
+                
+                # 最终安全检查：确保路径在 CONFIGS_DIR 内
+                real_save = os.path.realpath(save_path)
+                real_base = os.path.realpath(CONFIGS_DIR)
+                if not real_save.startswith(real_base + os.sep):
+                    logger.warning(f"路径遍历拦截: {save_path}")
+                    continue
                 
                 # 确保目录存在
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -4183,12 +4208,12 @@ def get_all_configs():
     try:
         for manufacturer in os.listdir(BOARD_CONFIGS_DIR):
             manufacturer_path = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
-            if not os.path.isdir(manufacturer_path):
+            if not os.path.isdir(manufacturer_path) or manufacturer.startswith('.'):
                 continue
                 
-            for board_type in ['mainboard', 'toolboard', 'expansion']:
+            for board_type in os.listdir(manufacturer_path):
                 type_path = os.path.join(manufacturer_path, board_type)
-                if not os.path.exists(type_path):
+                if not os.path.isdir(type_path) or board_type.startswith('.') or board_type == 'BL':
                     continue
                     
                 for filename in os.listdir(type_path):
@@ -4198,9 +4223,9 @@ def get_all_configs():
                     config_path = os.path.join(type_path, filename)
                     try:
                         with open(config_path, 'r', encoding='utf-8') as f:
-                            config = json.load(f)
-                            config['manufacturer'] = manufacturer
-                            all_configs.append(config)
+                            cfg_data = json.load(f)
+                            cfg_data['manufacturer'] = manufacturer
+                            all_configs.append(cfg_data)
                     except Exception as e:
                         logger.error(f"读取配置失败 {config_path}: {e}")
         
@@ -4280,10 +4305,10 @@ def list_firmware_update_configs():
                         filepath = os.path.join(update_dir, filename)
                         try:
                             with open(filepath, 'r', encoding='utf-8') as f:
-                                config = json.load(f)
-                                config['_filepath'] = filepath
-                                config['_manufacturer'] = manufacturer
-                                configs.append(config)
+                                cfg_data = json.load(f)
+                                cfg_data['_filepath'] = filepath
+                                cfg_data['_manufacturer'] = manufacturer
+                                configs.append(cfg_data)
                         except Exception as e:
                             logger.warning(f"读取固件更新配置失败 {filepath}: {e}")
         
@@ -4319,11 +4344,11 @@ def get_firmware_update_config(manufacturer, config_id):
             }), 404
         
         with open(filepath, 'r', encoding='utf-8') as f:
-            config = json.load(f)
+            cfg_data = json.load(f)
         
         return jsonify({
             'success': True,
-            'config': config
+            'config': cfg_data
         })
         
     except Exception as e:

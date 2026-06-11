@@ -23,13 +23,14 @@ def get_manufacturers():
 
 
 def get_board_types(manufacturer):
-    """获取指定厂家的主板类型"""
+    """获取指定厂家的主板类型（动态读取所有子目录）"""
     types = []
     manufacturer_dir = os.path.join(CONFIGS_DIR, manufacturer)
     if os.path.exists(manufacturer_dir):
         for item in os.listdir(manufacturer_dir):
             item_path = os.path.join(manufacturer_dir, item)
-            if os.path.isdir(item_path) and item.lower() in ['mainboard', 'toolboard', 'expansion']:
+            # 包含所有子目录，但以 . 开头的隐藏目录和 BL 固件目录排除
+            if os.path.isdir(item_path) and not item.startswith('.') and item != 'BL':
                 types.append(item)
     return sorted(types)
 

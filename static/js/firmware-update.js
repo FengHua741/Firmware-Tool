@@ -2,7 +2,7 @@
 
 let updateableConfigs = [];  // 可更新的配置列表
 let selectedUpdateConfigs = new Set(); // 选中的配置 ID
-let boardConfigs = []; // 主板配置列表（用于选择关联）
+let updateBoardConfigs = []; // 主板配置列表（用于选择关联）
 let currentBoardConfig = null; // 当前选中的主板配置
 
 // 初始化固件更新页面
@@ -48,10 +48,10 @@ async function onUpdateBoardManufacturerChange() {
     try {
         const response = await fetch(`/api/config/list/${manufacturer}`);
         const data = await response.json();
-        boardConfigs = data.configs || [];
+        updateBoardConfigs = data.configs || [];
         
         // 提取类型
-        const types = [...new Set(boardConfigs.map(c => c.type))];
+        const types = [...new Set(updateBoardConfigs.map(c => c.type))];
         types.forEach(type => {
             const label = type === 'mainboard' ? '主板' : 
                          type === 'toolboard' ? '工具板' : '扩展板';
@@ -74,7 +74,7 @@ function onUpdateBoardTypeChange() {
     
     if (!type) return;
     
-    const configs = boardConfigs.filter(c => c.type === type);
+    const configs = updateBoardConfigs.filter(c => c.type === type);
     configs.forEach(config => {
         modelSelect.innerHTML += `<option value="${config.id}">${config.name}</option>`;
     });
