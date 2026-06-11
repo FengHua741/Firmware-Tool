@@ -26,16 +26,18 @@ import sys
 # 导入主板配置
 from board_config_loader import load_all_boards, load_board_config, get_manufacturers, get_board_types, get_bl_firmwares
 from kconfig_can_parser import parse_can_options
-from ssh_manager import run_cmd, run_cmd_check, path_exists, get_file_size, list_dir, is_ssh_mode, is_fast_ssh_mode, download_firmware_from_remote, upload_bl_firmware_for_remote, cleanup_remote_bl_dir, SSHManager, FAST_SSH_USER, FAST_SSH_PASSWORD
+from ssh_manager import run_cmd, run_cmd_check, path_exists, get_file_size, list_dir, is_ssh_mode, is_fast_ssh_mode, download_firmware_from_remote, upload_bl_firmware_for_remote, cleanup_remote_bl_dir, SSHManager, get_fast_ssh_credentials
 
 # 配置日志
+_log_handlers = [logging.StreamHandler()]
+try:
+    _log_handlers.append(logging.FileHandler('/tmp/firmware-tool.log'))
+except PermissionError:
+    pass  # 无权限写 /tmp 时仅输出到控制台
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('/tmp/firmware-tool.log'),
-        logging.StreamHandler()
-    ]
+    handlers=_log_handlers
 )
 logger = logging.getLogger(__name__)
 
@@ -168,6 +170,20 @@ def sanitize_manufacturer(mfr):
     safe = re.sub(r'[^a-zA-Z0-9_-]', '', safe)
     return safe
 
+def sanitize_config_id(cid):
+    """清理配置ID，防止路径遍历"""
+    if not cid:
+        return ''
+    import re
+    # 只允许字母、数字、连字符、下划线、点（不含路径分隔符）
+    safe = re.sub(r'[^a-zA-Z0-9_.\-]', '', cid)
+    # 禁止以点开头（防止 .. 或 .）
+    safe = safe.lstrip('.')
+    # 禁止包含连续点
+    while '..' in safe:
+        safe = safe.replace('..', '.')
+    return safe
+
 
 app = Flask(__name__, static_folder='static')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -224,13 +240,18 @@ def save_config(config):
 config = load_config()
 PORT = config.get('port', 9999)
 
-# FAST-SSH 模式保障：启动时自动设置固定凭据
+# FAST-SSH 模式保障：启动时自动设置凭据
 if config.get('connection_mode') == 'fast-ssh':
     from ssh_manager import save_credential as _save_cred
-    config['ssh_user'] = FAST_SSH_USER
+    _fast_user, _fast_pwd = get_fast_ssh_credentials()
+    config['ssh_user'] = _fast_user
     config['sudo_mode'] = 'password'
-    _save_cred('ssh_password', FAST_SSH_PASSWORD)
-    _save_cred('sudo_password', FAST_SSH_PASSWORD)
+    _save_cred('ssh_password', _fast_pwd)
+    _save_cred('sudo_password', _fast_pwd)
+    # 首次使用时将凭据持久化到 config.json（避免源码泄露）
+    if not config.get('fast_ssh_user'):
+        config['fast_ssh_user'] = _fast_user
+        config['fast_ssh_password'] = _fast_pwd
 
 # 历史数据存储
 MAX_HISTORY_POINTS = 3600
@@ -273,7 +294,7 @@ def _collect_remote_resources():
             "echo '===FRQ==='; cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo 0; "
             "echo '===CNT==='; nproc; "
             "echo '===MEM==='; free -b | grep '^Mem:'; "
-            "echo '===DSK==='; df -B1 / | tail -1; "
+            "echo '===DSK==='; df -B1 --output=source,size,used,target 2>/dev/null | grep -vE '^(tmpfs|devtmpfs|overlayfs|Filesystem|/dev/zram)' | sort -k2 -rn | head -1; "
             "echo '===NET==='; ip -br -4 addr show 2>/dev/null | grep -iE '^(eth|en|wlan|wlo)'; "
             "echo '===VER==='; flyos-fast-ota --version 2>&1 | head -1; "
             "echo '===BRD==='; cat /proc/cmdline 2>/dev/null; "
@@ -362,16 +383,15 @@ def _collect_remote_resources():
                 except (ValueError, IndexError):
                     logger.warning(f"远程内存解析失败: line={sections['MEM'][:80]}")
 
-        # 解析磁盘 — df -B1 / | tail -1 输出完整行:
-        #   /dev/root  total  used  avail  use%  mount
+        # 解析磁盘 — --output=source,size,used,target 输出:
+        #   /dev/mmcblk1p6  total  used  mount
         disk_info = {'total': 0, 'used': 0, 'percent': 0}
         if 'DSK' in sections:
             line = sections['DSK'].strip()
             parts = line.split()
-            if len(parts) >= 6:
+            if len(parts) >= 4:
                 try:
-                    # 跳过第1个字段（filesystem名如 /dev/root）
-                    disk_total = int(parts[1])   # total (第2个字段)
+                    disk_total = int(parts[1])   # size (第2个字段)
                     disk_used = int(parts[2])    # used (第3个字段)
                     disk_info = {
                         'total': round(disk_total / (1024**3), 1),
@@ -633,64 +653,118 @@ def get_lsusb():
 @app.route('/api/system/serial')
 def get_serial_devices():
     """获取串口设备详细信息（模仿FlyTools getSerial）"""
-    import glob
     devices = []
-    serial_paths = glob.glob('/dev/serial/by-path/*')
-    for path in serial_paths:
+    
+    if is_ssh_mode():
+        # SSH 模式: 同时扫描 by-path 和 by-id，一次命令获取所有串口设备信息
         try:
-            info = {}
-            output = run_cmd_check(
-                ['udevadm', 'info', '--query=property', '--name=' + path],
-                text=True, timeout=5
+            result = run_cmd(
+                'for p in /dev/serial/by-id/* /dev/serial/by-path/*; do '
+                '[ -e "$p" ] || continue; '
+                'echo "===DEV===$p"; '
+                'udevadm info --query=property --name="$p" 2>/dev/null; '
+                'done',
+                shell=True, capture_output=True, text=True, timeout=10
             )
-            for line in output.strip().split('\n'):
-                if '=' in line:
-                    k, v = line.split('=', 1)
+            output = result.stdout or ''
+            
+            # 解析各设备
+            current_path = None
+            info = {}
+            all_device_data = []
+            for line in output.split('\n'):
+                line_s = line.strip()
+                if line_s.startswith('===DEV==='):
+                    if current_path and info:
+                        all_device_data.append((current_path, info))
+                    current_path = line_s[9:]  # 去掉 ===DEV===
+                    info = {}
+                elif '=' in line_s and current_path:
+                    k, v = line_s.split('=', 1)
                     info[k] = v
-            devlinks = info.get('DEVLINKS', '').split()
-            # 找到 by-id 链接
-            by_id_link = ''
-            for dl in devlinks:
-                if '/dev/serial/by-id/' in dl:
-                    by_id_link = dl
-                    break
-            # 判断是否优先显示 by-id：
-            # Klipper/Katapult/CanBoot 等 USB 虚拟串口设备用 by-id（含序列号，更稳定）
-            # ch341/CP210x/FTDI 等 USB转串口芯片用 by-path
-            prefer_by_id = False
-            if by_id_link:
-                by_id_lower = by_id_link.lower()
-                prefer_by_id = any(kw in by_id_lower for kw in [
-                    'klipper', 'katapult', 'canboot', 'stm32', 'stm32f',
-                    'atmel', 'samd', 'same', 'lpc', 'rp2040', 'raspberry'
-                ])
-            # 选择推荐显示路径
-            if prefer_by_id and by_id_link:
-                display_path = by_id_link
-            else:
-                display_path = path
-            devices.append({
-                'path': path,
-                'by_id': by_id_link,
-                'display_path': display_path,
-                'prefer_by_id': prefer_by_id,
-                'devname': info.get('DEVNAME', ''),
-                'model': info.get('ID_MODEL', ''),
-                'vendor': info.get('ID_VENDOR', ''),
-                'vid': info.get('ID_VENDOR_ID', ''),
-                'pid': info.get('ID_USB_MODEL_ID', info.get('ID_MODEL_ID', '')),
-                'driver': info.get('ID_USB_DRIVER', ''),
-            })
+            if current_path and info:
+                all_device_data.append((current_path, info))
+            
+            for path, info in all_device_data:
+                devlinks = info.get('DEVLINKS', '').split()
+                by_id_link = ''
+                for dl in devlinks:
+                    if '/dev/serial/by-id/' in dl:
+                        by_id_link = dl
+                        break
+                prefer_by_id = False
+                if by_id_link:
+                    by_id_lower = by_id_link.lower()
+                    prefer_by_id = any(kw in by_id_lower for kw in [
+                        'klipper', 'katapult', 'canboot', 'stm32', 'stm32f',
+                        'atmel', 'samd', 'same', 'lpc', 'rp2040', 'raspberry'
+                    ])
+                display_path = by_id_link if (prefer_by_id and by_id_link) else path
+                devices.append({
+                    'path': path,
+                    'by_id': by_id_link,
+                    'display_path': display_path,
+                    'prefer_by_id': prefer_by_id,
+                    'devname': info.get('DEVNAME', ''),
+                    'model': info.get('ID_MODEL', ''),
+                    'vendor': info.get('ID_VENDOR', ''),
+                    'vid': info.get('ID_VENDOR_ID', ''),
+                    'pid': info.get('ID_USB_MODEL_ID', info.get('ID_MODEL_ID', '')),
+                    'driver': info.get('ID_USB_DRIVER', ''),
+                })
         except Exception:
-            continue
-    # 按 devname 去重（同一物理设备可能通过 USB2/USB3 出现多次）
+            pass
+    else:
+        # 本地模式: 原有逻辑
+        import glob
+        serial_paths = glob.glob('/dev/serial/by-path/*')
+        for path in serial_paths:
+            try:
+                info = {}
+                output = run_cmd_check(
+                    ['udevadm', 'info', '--query=property', '--name=' + path],
+                    text=True, timeout=5
+                )
+                for line in output.strip().split('\n'):
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        info[k] = v
+                devlinks = info.get('DEVLINKS', '').split()
+                by_id_link = ''
+                for dl in devlinks:
+                    if '/dev/serial/by-id/' in dl:
+                        by_id_link = dl
+                        break
+                prefer_by_id = False
+                if by_id_link:
+                    by_id_lower = by_id_link.lower()
+                    prefer_by_id = any(kw in by_id_lower for kw in [
+                        'klipper', 'katapult', 'canboot', 'stm32', 'stm32f',
+                        'atmel', 'samd', 'same', 'lpc', 'rp2040', 'raspberry'
+                    ])
+                display_path = by_id_link if (prefer_by_id and by_id_link) else path
+                devices.append({
+                    'path': path,
+                    'by_id': by_id_link,
+                    'display_path': display_path,
+                    'prefer_by_id': prefer_by_id,
+                    'devname': info.get('DEVNAME', ''),
+                    'model': info.get('ID_MODEL', ''),
+                    'vendor': info.get('ID_VENDOR', ''),
+                    'vid': info.get('ID_VENDOR_ID', ''),
+                    'pid': info.get('ID_USB_MODEL_ID', info.get('ID_MODEL_ID', '')),
+                    'driver': info.get('ID_USB_DRIVER', ''),
+                })
+            except Exception:
+                continue
+    
+    # 按 devname 去重
     seen = {}
     for d in devices:
         key = d['devname'] or d['by_id'] or d['path']
         if key not in seen:
             seen[key] = d
         else:
-            # 优先保留 prefer_by_id 的记录
             if d['prefer_by_id'] and not seen[key]['prefer_by_id']:
                 seen[key] = d
     devices = list(seen.values())
@@ -1892,134 +1966,225 @@ def detect_devices():
     try:
         devices = []
         
-        # USB设备 - 检测多种USB串口设备
-        try:
-            # 1. 检测 /dev/serial/by-id/* (标准USB串口设备)
-            result = run_cmd(
-                'ls /dev/serial/by-id/* 2>/dev/null || echo ""',
-                shell=True, capture_output=True, text=True
+        if is_ssh_mode():
+            # SSH 模式: 合并所有探测命令为一次 SSH 调用
+            cmd = (
+                "echo '===BY_ID==='; ls /dev/serial/by-id/* 2>/dev/null; "
+                "echo '===ACM==='; ls /dev/ttyACM* 2>/dev/null; "
+                "echo '===USB==='; ls /dev/ttyUSB* 2>/dev/null; "
+                "echo '===DFU==='; sudo dfu-util -l 2>/dev/null; "
+                "echo '===LSBLK==='; lsblk -o NAME,MODEL 2>/dev/null | grep -i 'RP2'; "
+                "echo '===LSUSB_RP==='; lsusb 2>/dev/null | grep -i '2e8a:'; "
+                "echo '===LSUSB_DFU==='; lsusb 2>/dev/null | grep -iE '0483:df11|314b:0106'; "
+                "echo '===END==='"
             )
-            if result.stdout:
-                for line in result.stdout.strip().split('\n'):
-                    if '/dev/serial/by-id/' in line:
-                        device_id = line.strip()
-                        # 提取设备名（最后一段路径）
-                        short_name = os.path.basename(device_id)
-                        devices.append({'id': device_id, 'name': short_name, 'type': 'usb_serial'})
+            result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=15)
+            output = result.stdout or ''
             
-            # 2. 检测 /dev/ttyACM* (Katapult/CDC ACM设备)
-            acm_result = run_cmd(
-                'ls /dev/ttyACM* 2>/dev/null || echo ""',
-                shell=True, capture_output=True, text=True
-            )
-            if acm_result.stdout:
-                for line in acm_result.stdout.strip().split('\n'):
-                    if line.strip():
-                        device_id = line.strip()
-                        short_name = os.path.basename(device_id)
-                        # 检查是否已存在，避免重复
-                        if not any(d['id'] == device_id for d in devices):
-                            devices.append({'id': device_id, 'name': f'{short_name} (ACM)', 'type': 'usb_acm'})
+            # 解析各段
+            sections = {}
+            current_key = None
+            current_lines = []
+            for line in output.split('\n'):
+                line_s = line.strip()
+                if line_s.startswith('===') and line_s.endswith('==='):
+                    if current_key:
+                        sections[current_key] = current_lines
+                    current_key = line_s.strip('=')
+                    current_lines = []
+                elif current_key:
+                    current_lines.append(line_s)
+            if current_key:
+                sections[current_key] = current_lines
             
-            # 3. 检测 /dev/ttyUSB* (USB转串口设备)
-            usb_result = run_cmd(
-                'ls /dev/ttyUSB* 2>/dev/null || echo ""',
-                shell=True, capture_output=True, text=True
-            )
-            if usb_result.stdout:
-                for line in usb_result.stdout.strip().split('\n'):
-                    if line.strip():
-                        device_id = line.strip()
-                        short_name = os.path.basename(device_id)
-                        # 检查是否已存在，避免重复
-                        if not any(d['id'] == device_id for d in devices):
-                            devices.append({'id': device_id, 'name': f'{short_name} (USB)', 'type': 'usb_ftdi'})
-        except:
-            pass
-        
-        # DFU设备 - 使用dfu-util检测所有DFU设备
-        try:
-            dfu_result = run_cmd(
-                'sudo dfu-util -l 2>/dev/null || echo ""',
-                shell=True, capture_output=True, text=True
-            )
+            # 1. USB串口设备 (by-id)
+            for line in sections.get('BY_ID', []):
+                if '/dev/serial/by-id/' in line:
+                    device_id = line.strip()
+                    short_name = os.path.basename(device_id)
+                    devices.append({'id': device_id, 'name': short_name, 'type': 'usb_serial'})
+            
+            # 2. ttyACM 设备
+            for line in sections.get('ACM', []):
+                if line.strip():
+                    device_id = line.strip()
+                    short_name = os.path.basename(device_id)
+                    if not any(d['id'] == device_id for d in devices):
+                        devices.append({'id': device_id, 'name': f'{short_name} (ACM)', 'type': 'usb_acm'})
+            
+            # 3. ttyUSB 设备
+            for line in sections.get('USB', []):
+                if line.strip():
+                    device_id = line.strip()
+                    short_name = os.path.basename(device_id)
+                    if not any(d['id'] == device_id for d in devices):
+                        devices.append({'id': device_id, 'name': f'{short_name} (USB)', 'type': 'usb_ftdi'})
+            
+            # 4. DFU设备
+            dfu_lines = sections.get('DFU', [])
+            seen_dfu = set()
             found_dfu = False
-            if dfu_result.stdout:
-                # 按 devnum+serial 去重（一个 DFU 设备会有多个 alt 行）
-                seen_dfu = set()
-                for line in dfu_result.stdout.strip().split('\n'):
-                    if 'Found DFU' not in line:
-                        continue
-                    # 提取 VID:PID
-                    vid_pid_match = re.search(r'\[([0-9a-f]{4}:[0-9a-f]{4})\]', line, re.IGNORECASE)
-                    if not vid_pid_match:
-                        continue
-                    vid_pid = vid_pid_match.group(1).lower()
-                    # 提取 devnum 用于去重
-                    devnum_match = re.search(r'devnum=(\d+)', line)
-                    devnum = devnum_match.group(1) if devnum_match else ''
-                    # 提取 serial 用于显示
-                    serial_match = re.search(r'serial="([^"]+)"', line)
-                    serial = serial_match.group(1) if serial_match else ''
-                    # 提取 alt=0 的 name（Internal Flash）
-                    alt_match = re.search(r'alt=0,\s*name="([^"]+)"', line)
-                    flash_name = alt_match.group(1) if alt_match else ''
-                    # 按 devnum 去重
-                    dedup_key = f'{vid_pid}:{devnum}'
-                    if dedup_key in seen_dfu:
-                        continue
-                    seen_dfu.add(dedup_key)
-                    # 构造显示名
-                    chip_name = DFU_KNOWN_DEVICES.get(vid_pid, '')
-                    display_parts = [f'{chip_name} DFU' if chip_name else f'DFU ({vid_pid})']
-                    if not chip_name:
-                        pass  # 未知芯片已显示 VID:PID
-                    if serial:
-                        display_parts.append(f'SN:{serial}')
-                    devices.append({
-                        'id': f'dfu:{vid_pid}',
-                        'name': ' '.join(display_parts),
-                        'type': 'dfu',
-                        'vid_pid': vid_pid,
-                        'serial': serial,
-                        'devnum': devnum
-                    })
-                    found_dfu = True
-            # 兜底：检测常见DFU设备（STM32/APM32等）
+            for line in dfu_lines:
+                if 'Found DFU' not in line:
+                    continue
+                vid_pid_match = re.search(r'\[([0-9a-f]{4}:[0-9a-f]{4})\]', line, re.IGNORECASE)
+                if not vid_pid_match:
+                    continue
+                vid_pid = vid_pid_match.group(1).lower()
+                devnum_match = re.search(r'devnum=(\d+)', line)
+                devnum = devnum_match.group(1) if devnum_match else ''
+                serial_match = re.search(r'serial="([^"]+)"', line)
+                serial = serial_match.group(1) if serial_match else ''
+                dedup_key = f'{vid_pid}:{devnum}'
+                if dedup_key in seen_dfu:
+                    continue
+                seen_dfu.add(dedup_key)
+                chip_name = DFU_KNOWN_DEVICES.get(vid_pid, '')
+                display_parts = [f'{chip_name} DFU' if chip_name else f'DFU ({vid_pid})']
+                if serial:
+                    display_parts.append(f'SN:{serial}')
+                devices.append({
+                    'id': f'dfu:{vid_pid}',
+                    'name': ' '.join(display_parts),
+                    'type': 'dfu',
+                    'vid_pid': vid_pid,
+                    'serial': serial,
+                    'devnum': devnum
+                })
+                found_dfu = True
+            
+            # 兜底: lsusb 检测 DFU
             if not found_dfu:
-                for vidpid, chip_name in DFU_KNOWN_DEVICES.items():
-                    lsusb_result = run_cmd(
-                        f'lsusb | grep -i "{vidpid}" || echo ""',
-                        shell=True, capture_output=True, text=True
-                    )
-                    if lsusb_result.stdout and vidpid in lsusb_result.stdout:
-                        devices.append({'id': f'dfu:{vidpid}', 'name': f'DFU Device ({chip_name} {vidpid})', 'type': 'dfu', 'vid_pid': vidpid, 'serial': '', 'devnum': ''})
-                        found_dfu = True
-        except:
-            pass
-        
-        # UF2/RP2040 BOOT设备检测
-        try:
-            # 方法1: 通过lsblk检测RP2040 BOOT块设备
-            lsblk_output = run_cmd(
-                'lsblk -o NAME,MODEL 2>/dev/null | grep -i "RP2"',
-                shell=True, capture_output=True, text=True
-            )
-            if lsblk_output.stdout.strip():
-                for line in lsblk_output.stdout.strip().split('\n'):
+                for line in sections.get('LSUSB_DFU', []):
+                    for vidpid, chip_name in DFU_KNOWN_DEVICES.items():
+                        if vidpid in line.lower():
+                            devices.append({'id': f'dfu:{vidpid}', 'name': f'DFU Device ({chip_name} {vidpid})', 'type': 'dfu', 'vid_pid': vidpid, 'serial': '', 'devnum': ''})
+            
+            # 5. RP2040 BOOT
+            lsblk_lines = sections.get('LSBLK', [])
+            if lsblk_lines:
+                for line in lsblk_lines:
                     if line.strip():
                         devices.append({'id': 'rp2040_boot', 'name': f'RP2040 UF2 ({line.strip()})'})
-            
-            # 方法2: 通过lsusb检测Raspberry Pi RP2 Boot设备 (2e8a:0003)
             if not any(d['id'] == 'rp2040_boot' for d in devices):
-                lsusb_output = run_cmd(
-                    'lsusb | grep -i "2e8a:" 2>/dev/null || echo ""',
+                rp_lines = sections.get('LSUSB_RP', [])
+                for line in rp_lines:
+                    if '2e8a:' in line.lower():
+                        devices.append({'id': 'rp2040_boot', 'name': 'RP2040 UF2 (USB 2e8a)'})
+                        break
+        else:
+            # 本地模式: 原有逻辑
+            # USB设备 - 检测多种USB串口设备
+            try:
+                # 1. 检测 /dev/serial/by-id/* (标准USB串口设备)
+                result = run_cmd(
+                    'ls /dev/serial/by-id/* 2>/dev/null || echo ""',
                     shell=True, capture_output=True, text=True
                 )
-                if lsusb_output.stdout.strip() and '2e8a:' in lsusb_output.stdout:
-                    devices.append({'id': 'rp2040_boot', 'name': 'RP2040 UF2 (USB 2e8a)'})
-        except:
-            pass
+                if result.stdout:
+                    for line in result.stdout.strip().split('\n'):
+                        if '/dev/serial/by-id/' in line:
+                            device_id = line.strip()
+                            short_name = os.path.basename(device_id)
+                            devices.append({'id': device_id, 'name': short_name, 'type': 'usb_serial'})
+                
+                # 2. 检测 /dev/ttyACM* (Katapult/CDC ACM设备)
+                acm_result = run_cmd(
+                    'ls /dev/ttyACM* 2>/dev/null || echo ""',
+                    shell=True, capture_output=True, text=True
+                )
+                if acm_result.stdout:
+                    for line in acm_result.stdout.strip().split('\n'):
+                        if line.strip():
+                            device_id = line.strip()
+                            short_name = os.path.basename(device_id)
+                            if not any(d['id'] == device_id for d in devices):
+                                devices.append({'id': device_id, 'name': f'{short_name} (ACM)', 'type': 'usb_acm'})
+                
+                # 3. 检测 /dev/ttyUSB* (USB转串口设备)
+                usb_result = run_cmd(
+                    'ls /dev/ttyUSB* 2>/dev/null || echo ""',
+                    shell=True, capture_output=True, text=True
+                )
+                if usb_result.stdout:
+                    for line in usb_result.stdout.strip().split('\n'):
+                        if line.strip():
+                            device_id = line.strip()
+                            short_name = os.path.basename(device_id)
+                            if not any(d['id'] == device_id for d in devices):
+                                devices.append({'id': device_id, 'name': f'{short_name} (USB)', 'type': 'usb_ftdi'})
+            except:
+                pass
+            
+            # DFU设备 - 使用dfu-util检测所有DFU设备
+            try:
+                dfu_result = run_cmd(
+                    'sudo dfu-util -l 2>/dev/null || echo ""',
+                    shell=True, capture_output=True, text=True
+                )
+                found_dfu = False
+                if dfu_result.stdout:
+                    seen_dfu = set()
+                    for line in dfu_result.stdout.strip().split('\n'):
+                        if 'Found DFU' not in line:
+                            continue
+                        vid_pid_match = re.search(r'\[([0-9a-f]{4}:[0-9a-f]{4})\]', line, re.IGNORECASE)
+                        if not vid_pid_match:
+                            continue
+                        vid_pid = vid_pid_match.group(1).lower()
+                        devnum_match = re.search(r'devnum=(\d+)', line)
+                        devnum = devnum_match.group(1) if devnum_match else ''
+                        serial_match = re.search(r'serial="([^"]+)"', line)
+                        serial = serial_match.group(1) if serial_match else ''
+                        dedup_key = f'{vid_pid}:{devnum}'
+                        if dedup_key in seen_dfu:
+                            continue
+                        seen_dfu.add(dedup_key)
+                        chip_name = DFU_KNOWN_DEVICES.get(vid_pid, '')
+                        display_parts = [f'{chip_name} DFU' if chip_name else f'DFU ({vid_pid})']
+                        if serial:
+                            display_parts.append(f'SN:{serial}')
+                        devices.append({
+                            'id': f'dfu:{vid_pid}',
+                            'name': ' '.join(display_parts),
+                            'type': 'dfu',
+                            'vid_pid': vid_pid,
+                            'serial': serial,
+                            'devnum': devnum
+                        })
+                        found_dfu = True
+                if not found_dfu:
+                    for vidpid, chip_name in DFU_KNOWN_DEVICES.items():
+                        lsusb_result = run_cmd(
+                            f'lsusb | grep -i "{vidpid}" || echo ""',
+                            shell=True, capture_output=True, text=True
+                        )
+                        if lsusb_result.stdout and vidpid in lsusb_result.stdout:
+                            devices.append({'id': f'dfu:{vidpid}', 'name': f'DFU Device ({chip_name} {vidpid})', 'type': 'dfu', 'vid_pid': vidpid, 'serial': '', 'devnum': ''})
+                            found_dfu = True
+            except:
+                pass
+            
+            # UF2/RP2040 BOOT设备检测
+            try:
+                lsblk_output = run_cmd(
+                    'lsblk -o NAME,MODEL 2>/dev/null | grep -i "RP2"',
+                    shell=True, capture_output=True, text=True
+                )
+                if lsblk_output.stdout.strip():
+                    for line in lsblk_output.stdout.strip().split('\n'):
+                        if line.strip():
+                            devices.append({'id': 'rp2040_boot', 'name': f'RP2040 UF2 ({line.strip()})'})
+                
+                if not any(d['id'] == 'rp2040_boot' for d in devices):
+                    lsusb_output = run_cmd(
+                        'lsusb | grep -i "2e8a:" 2>/dev/null || echo ""',
+                        shell=True, capture_output=True, text=True
+                    )
+                    if lsusb_output.stdout.strip() and '2e8a:' in lsusb_output.stdout:
+                        devices.append({'id': 'rp2040_boot', 'name': 'RP2040 UF2 (USB 2e8a)'})
+            except:
+                pass
         
         return jsonify({'devices': devices})
     except Exception as e:
@@ -2639,13 +2804,18 @@ def handle_config():
         if 'json_repo_url' in data:
             config['json_repo_url'] = data['json_repo_url']
         
-        # FAST-SSH 模式: 自动设置固定凭据
+        # FAST-SSH 模式: 自动设置凭据
         if config.get('connection_mode') == 'fast-ssh':
             from ssh_manager import save_credential
-            config['ssh_user'] = FAST_SSH_USER
+            _fast_user, _fast_pwd = get_fast_ssh_credentials()
+            config['ssh_user'] = _fast_user
             config['sudo_mode'] = 'password'
-            save_credential('ssh_password', FAST_SSH_PASSWORD)
-            save_credential('sudo_password', FAST_SSH_PASSWORD)
+            save_credential('ssh_password', _fast_pwd)
+            save_credential('sudo_password', _fast_pwd)
+            # 首次使用时将凭据持久化到 config.json
+            if not config.get('fast_ssh_user'):
+                config['fast_ssh_user'] = _fast_user
+                config['fast_ssh_password'] = _fast_pwd
         
         # 连接模式或主机变更时重置 FlyOS 版本缓存
         global _remote_flyos_version, _remote_board_name
@@ -2834,7 +3004,7 @@ def detect_can_config():
     """智能检测 CAN 配置（三模式：flyos_fast / systemd / interfaces / none）
 
     检测优先级：FlyOS-FAST > systemd-networkd > 传统interfaces
-    三种模式互斥，一旦命中即返回。
+    三种模式互斥，一旦命中即返回。支持本地和 SSH 模式。
     """
     result = {
         'system': 'none',
@@ -2845,42 +3015,77 @@ def detect_can_config():
         'txqueuelen': None,
     }
 
-    # 1. 检测 FlyOS-FAST
+    # 1. 检测 FlyOS-FAST（通过 /etc/issue 判断）
     try:
-        with open('/etc/issue', 'r') as f:
-            if 'FlyOS-Fast' in f.read():
-                result['system'] = 'flyos_fast'
-                config_txt = '/config/config.txt'
-                if os.path.exists(config_txt):
-                    with open(config_txt, 'r') as f2:
-                        for line in f2:
-                            m = re.match(r'canbus_bitrate\s*=\s*(\d+)', line.strip())
-                            if m:
-                                result['bitrate'] = int(m.group(1))
-                                break
-                return result
+        if is_ssh_mode():
+            r = run_cmd('cat /etc/issue 2>/dev/null || echo ""', shell=True, capture_output=True, text=True, timeout=5)
+            issue_content = r.stdout or ''
+        else:
+            with open('/etc/issue', 'r') as f:
+                issue_content = f.read()
+
+        if 'FlyOS-Fast' in issue_content:
+            result['system'] = 'flyos_fast'
+            config_txt = '/config/config.txt'
+            try:
+                if is_ssh_mode():
+                    r = run_cmd(f'cat {config_txt} 2>/dev/null || echo ""', shell=True, capture_output=True, text=True, timeout=5)
+                    cfg_content = r.stdout or ''
+                else:
+                    if os.path.exists(config_txt):
+                        with open(config_txt, 'r') as f2:
+                            cfg_content = f2.read()
+                    else:
+                        cfg_content = ''
+                for line in cfg_content.split('\n'):
+                    m = re.match(r'canbus_bitrate\s*=\s*(\d+)', line.strip())
+                    if m:
+                        result['bitrate'] = int(m.group(1))
+                        break
+            except:
+                pass
+            return result
     except:
         pass
 
     # 2. 检测 systemd-networkd
-    if os.path.exists(CAN_NETWORK_DIR):
-        files = os.listdir(CAN_NETWORK_DIR)
-        # 查找 *can*.network
-        for fname in files:
-            if 'can' in fname.lower() and fname.endswith('.network'):
-                result['network_file'] = os.path.join(CAN_NETWORK_DIR, fname)
-                break
-        # 查找 *can*.link
-        for fname in files:
-            if 'can' in fname.lower() and fname.endswith('.link'):
-                result['link_file'] = os.path.join(CAN_NETWORK_DIR, fname)
-                break
+    if is_ssh_mode():
+        # SSH 模式: 通过远程命令检测
+        try:
+            r = run_cmd(f'ls {CAN_NETWORK_DIR}/*can*.network 2>/dev/null | head -1 || echo ""', shell=True, capture_output=True, text=True, timeout=5)
+            network_file = r.stdout.strip() if r.stdout else ''
+            if network_file:
+                result['network_file'] = network_file
+        except:
+            pass
+        try:
+            r = run_cmd(f'ls {CAN_NETWORK_DIR}/*can*.link 2>/dev/null | head -1 || echo ""', shell=True, capture_output=True, text=True, timeout=5)
+            link_file = r.stdout.strip() if r.stdout else ''
+            if link_file:
+                result['link_file'] = link_file
+        except:
+            pass
+    else:
+        if os.path.exists(CAN_NETWORK_DIR):
+            files = os.listdir(CAN_NETWORK_DIR)
+            for fname in files:
+                if 'can' in fname.lower() and fname.endswith('.network'):
+                    result['network_file'] = os.path.join(CAN_NETWORK_DIR, fname)
+                    break
+            for fname in files:
+                if 'can' in fname.lower() and fname.endswith('.link'):
+                    result['link_file'] = os.path.join(CAN_NETWORK_DIR, fname)
+                    break
 
     if result['network_file']:
         result['system'] = 'systemd'
         try:
-            with open(result['network_file'], 'r') as f:
-                content = f.read()
+            if is_ssh_mode():
+                r = run_cmd(f'cat "{result["network_file"]}" 2>/dev/null', shell=True, capture_output=True, text=True, timeout=5)
+                content = r.stdout or ''
+            else:
+                with open(result['network_file'], 'r') as f:
+                    content = f.read()
             m = re.search(r'BitRate\s*=\s*(\d+)', content)
             if m:
                 bitrate_val = int(m.group(1))
@@ -2896,8 +3101,12 @@ def detect_can_config():
             pass
         if result['link_file']:
             try:
-                with open(result['link_file'], 'r') as f:
-                    link_content = f.read()
+                if is_ssh_mode():
+                    r = run_cmd(f'cat "{result["link_file"]}" 2>/dev/null', shell=True, capture_output=True, text=True, timeout=5)
+                    link_content = r.stdout or ''
+                else:
+                    with open(result['link_file'], 'r') as f:
+                        link_content = f.read()
                 m = re.search(r'TxQueueLength\s*=\s*(\d+)', link_content)
                 if m:
                     result['txqueuelen'] = int(m.group(1))
@@ -2906,23 +3115,41 @@ def detect_can_config():
         return result
 
     # 3. 检测传统 interfaces
-    if os.path.exists(CAN_INTERFACES_DIR):
-        for fname in os.listdir(CAN_INTERFACES_DIR):
-            if fname.lower().startswith('can'):
-                result['interfaces_file'] = os.path.join(CAN_INTERFACES_DIR, fname)
+    if is_ssh_mode():
+        try:
+            r = run_cmd(f'ls {CAN_INTERFACES_DIR}/can* 2>/dev/null | head -1 || echo ""', shell=True, capture_output=True, text=True, timeout=5)
+            iface_file = r.stdout.strip() if r.stdout else ''
+            if iface_file:
+                result['interfaces_file'] = iface_file
                 result['system'] = 'interfaces'
-                try:
-                    with open(result['interfaces_file'], 'r') as f:
-                        content = f.read()
-                    m = re.search(r'bitrate\s+(\d+)', content)
-                    if m:
-                        result['bitrate'] = int(m.group(1))
-                    m = re.search(r'txqueuelen\s+(\d+)', content)
-                    if m:
-                        result['txqueuelen'] = int(m.group(1))
-                except:
-                    pass
-                return result
+                r2 = run_cmd(f'cat "{iface_file}" 2>/dev/null', shell=True, capture_output=True, text=True, timeout=5)
+                content = r2.stdout or ''
+                m = re.search(r'bitrate\s+(\d+)', content)
+                if m:
+                    result['bitrate'] = int(m.group(1))
+                m = re.search(r'txqueuelen\s+(\d+)', content)
+                if m:
+                    result['txqueuelen'] = int(m.group(1))
+        except:
+            pass
+    else:
+        if os.path.exists(CAN_INTERFACES_DIR):
+            for fname in os.listdir(CAN_INTERFACES_DIR):
+                if fname.lower().startswith('can'):
+                    result['interfaces_file'] = os.path.join(CAN_INTERFACES_DIR, fname)
+                    result['system'] = 'interfaces'
+                    try:
+                        with open(result['interfaces_file'], 'r') as f:
+                            content = f.read()
+                        m = re.search(r'bitrate\s+(\d+)', content)
+                        if m:
+                            result['bitrate'] = int(m.group(1))
+                        m = re.search(r'txqueuelen\s+(\d+)', content)
+                        if m:
+                            result['txqueuelen'] = int(m.group(1))
+                    except:
+                        pass
+                    return result
 
     return result
 
@@ -2972,8 +3199,6 @@ def get_can_config():
         # FlyOS-FAST 特殊信息
         if config['system'] == 'flyos_fast':
             result['config_txt'] = '/config/config.txt'
-            result['flyos_readonly'] = True
-            result['message'] = 'FlyOS-Fast 系统 CAN 配置修改将在后续版本支持'
 
         # USB CAN 设备检测
         result['usb_can_count'] = get_usb_can_count()
@@ -3008,12 +3233,35 @@ def set_can_config():
         # 检测当前配置
         config = detect_can_config()
 
-        # FlyOS-FAST：预留只读
+        # FlyOS-FAST: 修改 /config/config.txt 中的 canbus_bitrate
         if config['system'] == 'flyos_fast':
-            return jsonify({
-                'success': False,
-                'message': 'FlyOS-Fast 系统 CAN 配置修改将在后续版本支持，当前为只读'
-            })
+            config_txt = '/config/config.txt'
+            try:
+                # 用 sed 替换 canbus_bitrate 值
+                sed_cmd = f"sed -i 's/^canbus_bitrate=.*/canbus_bitrate={bitrate}/' {config_txt}"
+                r = run_cmd(sed_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                if r.returncode != 0:
+                    return jsonify({'success': False, 'error': f'写入 config.txt 失败: {r.stderr}'}), 500
+
+                # 验证写入是否成功
+                r2 = run_cmd(f'grep "^canbus_bitrate=" {config_txt}', shell=True, capture_output=True, text=True, timeout=5)
+                if str(bitrate) not in (r2.stdout or ''):
+                    return jsonify({'success': False, 'error': '写入验证失败，config.txt 可能为只读'}), 500
+
+                # 重启 CAN 接口使新配置生效
+                run_cmd('sudo ip link set can0 down 2>/dev/null', shell=True, capture_output=True, timeout=10)
+                time.sleep(0.5)
+                run_cmd(f'sudo ip link set can0 type can bitrate {bitrate} 2>/dev/null', shell=True, capture_output=True, timeout=10)
+                time.sleep(0.3)
+                run_cmd('sudo ip link set can0 up 2>/dev/null', shell=True, capture_output=True, timeout=10)
+                time.sleep(1)
+
+                return jsonify({
+                    'success': True,
+                    'message': f'FlyOS-Fast CAN 配置已更新: canbus_bitrate={bitrate}，接口已重启'
+                })
+            except Exception as e:
+                return jsonify({'success': False, 'error': f'FlyOS-Fast CAN 配置修改失败: {str(e)}'}), 500
 
         # 写入 systemd 或 interfaces 配置
         systemd_mode = config['system'] in ('systemd', 'none')
@@ -3127,56 +3375,111 @@ def diagnose_can_network():
             'errors': []
         }
         
-        # 1. 检查内核CAN支持
-        try:
-            modprobe_result = run_cmd(
-                'sudo modprobe can && echo "OK" || echo "FAIL"',
-                shell=True, capture_output=True, text=True
+        if is_ssh_mode():
+            # SSH 模式: 合并为一次 SSH 调用
+            cmd = (
+                'echo "===MODPROBE==="; sudo modprobe can 2>/dev/null && echo "OK" || echo "FAIL"; '
+                'echo "===LSUSB==="; lsusb 2>/dev/null | grep -iE "(GS_USB|CAN|UTOC|can)"; '
+                'echo "===CAN0==="; ip link show can0 2>&1; '
+                'echo "===CAN0_DETAILS==="; ip -details link show can0 2>/dev/null | grep bitrate; '
+                'echo "===END==="'
             )
-            result['kernel_support'] = 'OK' in modprobe_result.stdout
-        except:
-            result['errors'].append('内核CAN模块检查失败')
-        
-        # 2. 检查USB CAN设备（GS_USB或UTOC）
-        try:
-            lsusb_result = run_cmd(
-                'lsusb | grep -E "(GS_USB|CAN|UTOC|can)" || echo ""',
-                shell=True, capture_output=True, text=True
-            )
-            if lsusb_result.stdout.strip():
+            out = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=10)
+            output = out.stdout or ''
+            
+            sections = {}
+            current_key = None
+            current_lines = []
+            for line in output.split('\n'):
+                line_s = line.strip()
+                if line_s.startswith('===') and line_s.endswith('==='):
+                    if current_key:
+                        sections[current_key] = current_lines
+                    current_key = line_s.strip('=')
+                    current_lines = []
+                elif current_key:
+                    current_lines.append(line_s)
+            if current_key:
+                sections[current_key] = current_lines
+            
+            # 1. 内核CAN支持
+            modprobe_lines = sections.get('MODPROBE', [])
+            result['kernel_support'] = any('OK' in l for l in modprobe_lines)
+            if not result['kernel_support']:
+                result['errors'].append('内核CAN模块加载失败')
+            
+            # 2. USB CAN设备
+            lsusb_lines = sections.get('LSUSB', [])
+            if lsusb_lines:
                 result['can_device_exists'] = True
-                result['can_device_info'] = lsusb_result.stdout.strip()
-        except:
-            pass
-        
-        # 3. 检查can0接口
-        try:
-            can0_result = run_cmd(
-                'ip link show can0 2>&1',
-                shell=True, capture_output=True, text=True
-            )
-            if 'can0' in can0_result.stdout and 'does not exist' not in can0_result.stdout:
+                result['can_device_info'] = '\n'.join(lsusb_lines)
+            
+            # 3. can0接口
+            can0_lines = sections.get('CAN0', [])
+            can0_output = '\n'.join(can0_lines)
+            if can0_lines and 'can0' in can0_output and 'does not exist' not in can0_output:
                 result['can0_exists'] = True
-                # 解析状态
-                if 'state UP' in can0_result.stdout:
+                if 'state UP' in can0_output:
                     result['can0_state'] = 'UP'
-                elif 'state DOWN' in can0_result.stdout:
+                elif 'state DOWN' in can0_output:
                     result['can0_state'] = 'DOWN'
                 else:
                     result['can0_state'] = 'UNKNOWN'
-                
-                # 获取详细比特率信息
-                details_result = run_cmd(
-                    'ip -details link show can0 2>&1 | grep bitrate || echo ""',
-                    shell=True, capture_output=True, text=True
-                )
-                if details_result.stdout.strip():
-                    result['can0_bitrate'] = details_result.stdout.strip()
+                details_lines = sections.get('CAN0_DETAILS', [])
+                if details_lines:
+                    result['can0_bitrate'] = details_lines[0]
             else:
                 result['can0_exists'] = False
                 result['errors'].append('can0接口不存在')
-        except:
-            result['errors'].append('can0接口检查失败')
+        else:
+            # 本地模式: 原有逻辑
+            # 1. 检查内核CAN支持
+            try:
+                modprobe_result = run_cmd(
+                    'sudo modprobe can && echo "OK" || echo "FAIL"',
+                    shell=True, capture_output=True, text=True
+                )
+                result['kernel_support'] = 'OK' in modprobe_result.stdout
+            except:
+                result['errors'].append('内核CAN模块检查失败')
+            
+            # 2. 检查USB CAN设备
+            try:
+                lsusb_result = run_cmd(
+                    'lsusb | grep -E "(GS_USB|CAN|UTOC|can)" || echo ""',
+                    shell=True, capture_output=True, text=True
+                )
+                if lsusb_result.stdout.strip():
+                    result['can_device_exists'] = True
+                    result['can_device_info'] = lsusb_result.stdout.strip()
+            except:
+                pass
+            
+            # 3. 检查can0接口
+            try:
+                can0_result = run_cmd(
+                    'ip link show can0 2>&1',
+                    shell=True, capture_output=True, text=True
+                )
+                if 'can0' in can0_result.stdout and 'does not exist' not in can0_result.stdout:
+                    result['can0_exists'] = True
+                    if 'state UP' in can0_result.stdout:
+                        result['can0_state'] = 'UP'
+                    elif 'state DOWN' in can0_result.stdout:
+                        result['can0_state'] = 'DOWN'
+                    else:
+                        result['can0_state'] = 'UNKNOWN'
+                    details_result = run_cmd(
+                        'ip -details link show can0 2>&1 | grep bitrate || echo ""',
+                        shell=True, capture_output=True, text=True
+                    )
+                    if details_result.stdout.strip():
+                        result['can0_bitrate'] = details_result.stdout.strip()
+                else:
+                    result['can0_exists'] = False
+                    result['errors'].append('can0接口不存在')
+            except:
+                result['errors'].append('can0接口检查失败')
         
         return jsonify(result)
         
@@ -3458,6 +3761,9 @@ def get_config(manufacturer, config_id):
         manufacturer = sanitize_manufacturer(manufacturer)
         if not manufacturer:
             return jsonify({'error': '无效的厂家名称'}), 400
+        config_id = sanitize_config_id(config_id)
+        if not config_id:
+            return jsonify({'error': '无效的配置ID'}), 400
         mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
         for board_type in ['mainboard', 'toolboard', 'expansion']:
             filepath = os.path.join(mfr_dir, board_type, f"{config_id}.json")
@@ -3513,6 +3819,9 @@ def delete_config(manufacturer, config_id):
         manufacturer = sanitize_manufacturer(manufacturer)
         if not manufacturer:
             return jsonify({'error': '无效的厂家名称'}), 400
+        config_id = sanitize_config_id(config_id)
+        if not config_id:
+            return jsonify({'error': '无效的配置ID'}), 400
         mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
         
         # 在所有类型目录中查找
@@ -3726,25 +4035,6 @@ def create_manufacturer():
     except Exception as e:
         logger.error(f"创建厂家失败: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
-@app.route('/api/config/mcu-info/<mcu_id>', methods=['GET'])
-def get_mcu_info(mcu_id):
-    """获取特定 MCU 的详细信息"""
-    mcu_id = mcu_id.lower()
-    
-    for mcu_type, data in KLIPPER_MCU_LIST.items():
-        for mcu in data['mcus']:
-            if mcu['id'] == mcu_id:
-                return jsonify({
-                    'success': True,
-                    'mcu': mcu,
-                    'type': mcu_type,
-                    'flash_modes': data['flash_modes']
-                })
-    
-    return jsonify({
-        'success': False,
-        'error': f'未找到 MCU: {mcu_id}'
-    }), 404
 
 
 # ==================== Klipper Kconfig 解析器集成 ====================
@@ -4017,6 +4307,9 @@ def get_firmware_update_config(manufacturer, config_id):
         manufacturer = sanitize_manufacturer(manufacturer)
         if not manufacturer:
             return jsonify({'success': False, 'error': '无效的厂家名称'}), 400
+        config_id = sanitize_config_id(config_id)
+        if not config_id:
+            return jsonify({'success': False, 'error': '无效的配置ID'}), 400
         filepath = os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'firmware_update', f"{config_id}.json")
         
         if not os.path.exists(filepath):
@@ -4048,6 +4341,9 @@ def save_firmware_update_config(manufacturer, config_id):
         manufacturer = sanitize_manufacturer(manufacturer)
         if not manufacturer:
             return jsonify({'success': False, 'error': '无效的厂家名称'}), 400
+        config_id = sanitize_config_id(config_id)
+        if not config_id:
+            return jsonify({'success': False, 'error': '无效的配置ID'}), 400
         config_data = request.json
         
         # 确保目录存在
@@ -4080,6 +4376,9 @@ def delete_firmware_update_config(manufacturer, config_id):
         manufacturer = sanitize_manufacturer(manufacturer)
         if not manufacturer:
             return jsonify({'success': False, 'error': '无效的厂家名称'}), 400
+        config_id = sanitize_config_id(config_id)
+        if not config_id:
+            return jsonify({'success': False, 'error': '无效的配置ID'}), 400
         filepath = os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'firmware_update', f"{config_id}.json")
         
         if not os.path.exists(filepath):

@@ -15,7 +15,7 @@ async function initFirmwarePage() {
     await loadCompilePresetManufacturers();
     await refreshFlashCanIfaces();
     // 初始化时根据默认烧录模式隐藏 CAN 接口选择框
-    onFlashModeChange();
+    onFlashModeChange(true);
 }
 
 // 刷新固件烧录页的CAN接口列表
@@ -703,7 +703,7 @@ async function compileFirmware() {
         }
         
         // 检查是否有覆盖的连接方式
-        const overrideConnection = document.getElementById('compilePresetConnection').value;
+        const overrideConnection = document.getElementById('compilePresetConnection')?.value;
         if (overrideConnection) {
             // 将简单值映射到Kconfig符号格式
             const connMap = {
@@ -716,7 +716,7 @@ async function compileFirmware() {
         }
         
         // 检查是否有启动引脚
-        const startupPin = document.getElementById('compilePresetStartupPin').value;
+        const startupPin = document.getElementById('compilePresetStartupPin')?.value;
         if (startupPin) {
             config.boot_pins = startupPin;
         }
@@ -971,7 +971,7 @@ async function refreshDeviceIds() {
 }
 
 // 烧录模式变化处理
-function onFlashModeChange() {
+function onFlashModeChange(skipRefresh = false) {
     const flashModeEl = document.getElementById('flashMode');
     if (!flashModeEl) return;
     const flashMode = flashModeEl.value;
@@ -1012,7 +1012,9 @@ function onFlashModeChange() {
         canIfaceEl.style.display = 'none';
     }
     // 切换模式后刷新设备列表（过滤 CAN/USB 设备显示）
-    refreshDeviceIds();
+    if (!skipRefresh) {
+        refreshDeviceIds();
+    }
 }
 
 // 下载 firmware.bin 用于 TF 卡烧录

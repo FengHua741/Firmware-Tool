@@ -331,22 +331,41 @@ async function loadCanHostConfig() {
         let html = '';
 
         if (data.system === 'flyos_fast') {
-            // FlyOS-FAST: 只读占位
-            const liveBitrate = data.live && data.live.bitrate ? formatBitrate(data.live.bitrate) : (data.bitrate_display || '--');
+            // FlyOS-FAST: 可编辑 canbus_bitrate
+            const liveBitrate = data.live && data.live.bitrate ? formatBitrate(data.live.bitrate) : '--';
             const liveState = data.live && data.live.exists ? (data.live.state || '--') : '--';
+            const cfgBitrate = data.bitrate || 1000000;
+            const bitrateOptions = [1000000, 500000, 250000];
+            const bitrateLabels = { 1000000: '1M', 500000: '500K', 250000: '250K' };
+
             html = `
                 <div style="padding:4px 0;">
                     <div style="background:rgba(33,150,243,0.08);padding:12px;border-radius:6px;border-left:4px solid #2196F3;margin-bottom:12px;font-size:13px;">
-                        FlyOS-Fast 系统，CAN 通过 /config/config.txt 配置
+                        FlyOS-Fast 系统，CAN 速率通过 /config/config.txt 配置
                     </div>
                     <div class="status-info" style="margin-bottom:12px;">
                         <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;">
                             <span>接口状态: <strong>${liveState}</strong></span>
-                            <span>当前速率: <strong>${liveBitrate}</strong></span>
+                            <span>实际速率: <strong>${liveBitrate}</strong></span>
                         </div>
                     </div>
-                    <div style="font-size:12px;color:#888;padding:8px;background:var(--bg-color);border-radius:4px;">
-                        FlyOS-Fast 系统 CAN 速率修改将在后续版本支持，当前为只读
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">CAN 速率 (canbus_bitrate)</label>
+                            <select class="form-control form-select" id="canHostRate" style="min-width:140px;">
+                                ${bitrateOptions.map(v => `
+                                    <option value="${v}" ${v === cfgBitrate ? 'selected' : ''}>${bitrateLabels[v]}</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-sm btn-primary" onclick="applyCanHostConfig()">应用修改</button>
+                    <div id="canHostApplyStatus" style="margin-top:8px;"></div>
+
+                    <div style="margin-top:12px;font-size:12px;color:#888;padding:8px;background:var(--bg-color);border-radius:4px;">
+                        修改后会同时更新 /config/config.txt 并重启 CAN 接口，上位机速率必须与工具板固件的 CAN 速率一致
                     </div>
                 </div>`;
         } else if (data.system === 'systemd' || data.system === 'interfaces') {
@@ -445,12 +464,13 @@ async function applyCanHostConfig() {
     const rateSelect = document.getElementById('canHostRate');
     const txqueueInput = document.getElementById('canHostTxqueue');
 
-    if (!rateSelect || !txqueueInput) return;
+    if (!rateSelect) return;
 
     const bitrate = parseInt(rateSelect.value);
-    const txqueuelen = parseInt(txqueueInput.value);
+    // FlyOS-Fast 模式没有 txqueueInput，默认为 1024
+    const txqueuelen = txqueueInput ? parseInt(txqueueInput.value) : 1024;
 
-    if (isNaN(txqueuelen) || txqueuelen < 128 || txqueuelen > 8192) {
+    if (txqueueInput && (isNaN(txqueuelen) || txqueuelen < 128 || txqueuelen > 8192)) {
         statusDiv.innerHTML = '<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">缓存大小必须在 128-8192 之间</div>';
         return;
     }
@@ -850,26 +870,6 @@ async function testSshConnection() {
         resultEl.style.color = '#dc3545';
     }
     if (btnEl) btnEl.disabled = false;
-}
-
-async function manageService(service, action) {
-    try {
-        const response = await fetch(`/api/settings/service/${action}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ service })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showSuccess(`${service} ${action} 成功`);
-        } else {
-            showError(`${service} ${action} 失败: ${data.error}`);
-        }
-    } catch (error) {
-        showError('操作失败: ' + error.message);
-    }
 }
 
 // ==================== 工具函数 ====================

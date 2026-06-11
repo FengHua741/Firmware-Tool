@@ -6,11 +6,13 @@
   "json_repo_url": "https://github.com/FengHua741/board_configs.git",
   "last_json_update": "2026-03-16T10:31:39.151004",
   "katapult_path": "~/katapult",
-  "moonraker_host": "192.168.1.203",
+  "moonraker_host": "192.168.1.59",
   "moonraker_port": 7125,
   "connection_mode": "fast-ssh",
-  "ssh_host": "192.168.1.203",
+  "ssh_host": "192.168.1.59",
   "ssh_port": 22,
   "ssh_user": "root",
-  "sudo_mode": "password"
+  "sudo_mode": "password",
+  "fast_ssh_user": "root",
+  "fast_ssh_password": "mellow"
 }

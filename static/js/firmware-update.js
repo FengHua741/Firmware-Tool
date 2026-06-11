@@ -873,9 +873,4 @@ function addBatchResult(name, status, message) {
     resultsDiv.insertBefore(item, resultsDiv.firstChild);
 }
 
-// 页面加载时初始化
-document.addEventListener('DOMContentLoaded', () => {
-    if (document.getElementById('page-firmware-update')) {
-        initFirmwareUpdatePage();
-    }
-});
+// 页面加载时初始化由 app.js 的 switchPage 统一调度，此处不重复注册
