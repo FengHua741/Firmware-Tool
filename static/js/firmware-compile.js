@@ -1495,3 +1495,69 @@ document.addEventListener('DOMContentLoaded', () => {
         initFirmwarePage();
     }
 });
+
+// ==================== 编译依赖检测 ====================
+async function checkDependencies() {
+    const statusEl = document.getElementById('depsStatus');
+    if (!statusEl) return;
+    statusEl.innerHTML = '<p>检测中...</p>';
+    try {
+        const resp = await fetch('/api/firmware/dependencies');
+        const data = await resp.json();
+        if (data.error) {
+            statusEl.innerHTML = `<p style="color:red">检测失败: ${data.error}</p>`;
+            return;
+        }
+        const rows = data.dependencies.map(dep => {
+            const icon = dep.installed ? '&#10003;' : '&#10007;';
+            const color = dep.installed ? '#4caf50' : '#f44336';
+            const ver = dep.installed ? `<span style="color:#888;font-size:12px">${dep.version}</span>` : `<span style="color:#f44336">未安装 (${dep.pkg})</span>`;
+            return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
+                      <span style="color:${color};font-weight:bold;font-size:16px">${icon}</span>
+                      <span style="font-family:monospace">${dep.name}</span>
+                      ${ver}
+                    </div>`;
+        }).join('');
+        const summary = data.all_ok
+            ? '<p style="color:#4caf50;font-weight:bold">所有依赖已就绪</p>'
+            : '<p style="color:#f44336">存在缺失依赖，请点击"安装依赖"</p>';
+        statusEl.innerHTML = summary + rows;
+    } catch (e) {
+        statusEl.innerHTML = `<p style="color:red">请求失败: ${e.message}</p>`;
+    }
+}
+
+async function installDependencies() {
+    const statusEl = document.getElementById('depsStatus');
+    if (!statusEl) return;
+    statusEl.innerHTML = '<p>正在安装依赖，请稍候...</p><pre id="depsLog" style="background:#111;color:#eee;padding:10px;max-height:300px;overflow-y:auto;font-size:12px"></pre>';
+    const logEl = document.getElementById('depsLog');
+    try {
+        const resp = await fetch('/api/firmware/dependencies/install', { method: 'POST' });
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const msg = line.slice(6);
+                    if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+                    if (msg.startsWith('[DONE]')) {
+                        statusEl.querySelector('p').textContent = '安装完成，重新检测中...';
+                        setTimeout(checkDependencies, 1000);
+                    } else if (msg.startsWith('[ERROR]')) {
+                        statusEl.querySelector('p').style.color = 'red';
+                        statusEl.querySelector('p').textContent = msg;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        if (statusEl.querySelector('p')) statusEl.querySelector('p').textContent = `安装失败: ${e.message}`;
+    }
+}

@@ -1419,6 +1419,66 @@ def get_all_rules():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ==================== 编译依赖检测 API ====================
+@app.route('/api/firmware/dependencies')
+def check_compile_dependencies():
+    """检测固件编译所需依赖工具是否已安装"""
+    try:
+        deps = [
+            {'name': 'make',           'cmd': 'make --version',            'pkg': 'build-essential'},
+            {'name': 'arm-none-eabi-gcc', 'cmd': 'arm-none-eabi-gcc --version', 'pkg': 'gcc-arm-none-eabi'},
+            {'name': 'dfu-util',       'cmd': 'dfu-util --version',         'pkg': 'dfu-util'},
+            {'name': 'avrdude',        'cmd': 'avrdude -v',                 'pkg': 'avrdude'},
+            {'name': 'python3',        'cmd': 'python3 --version',          'pkg': 'python3'},
+        ]
+        results = []
+        all_ok = True
+        for dep in deps:
+            try:
+                r = run_cmd(dep['cmd'], shell=True, capture_output=True, text=True, timeout=5)
+                installed = (r.returncode == 0)
+                version = ''
+                if installed:
+                    out = (r.stdout or r.stderr or '').strip().split('\n')[0]
+                    version = out[:80]
+            except Exception:
+                installed = False
+                version = ''
+            if not installed:
+                all_ok = False
+            results.append({
+                'name': dep['name'],
+                'installed': installed,
+                'version': version,
+                'pkg': dep['pkg'],
+            })
+        return jsonify({'dependencies': results, 'all_ok': all_ok})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/firmware/dependencies/install', methods=['POST'])
+def install_compile_dependencies():
+    """安装缺失的编译依赖（仅本地模式）"""
+    def _stream():
+        pkgs = ['build-essential', 'gcc-arm-none-eabi', 'dfu-util', 'avrdude', 'python3']
+        cmd = f'sudo apt-get install -y {" ".join(pkgs)} 2>&1'
+        try:
+            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True)
+            for line in iter(proc.stdout.readline, ''):
+                yield f'data: {line.rstrip()}\n\n'
+            proc.wait()
+            if proc.returncode == 0:
+                yield 'data: [DONE] 依赖安装完成\n\n'
+            else:
+                yield f'data: [ERROR] 安装失败，退出码 {proc.returncode}\n\n'
+        except Exception as e:
+            yield f'data: [ERROR] {e}\n\n'
+    return Response(_stream(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
 # ==================== 固件编译 API ====================
 @app.route('/api/firmware/compile', methods=['POST'])
 def compile_firmware():
@@ -2263,13 +2323,45 @@ def flash_firmware():
                     # 不指定 -d，让 dfu-util 自动检测所有 DFU 设备
                     device_filter = ''
                 safe_address = shlex.quote(dfu_address)
-                erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
-                flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -D {shlex.quote(firmware_path)}'
-                
-                erase_result = run_cmd(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
-                flash_result = run_cmd(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
-                
-                output = f"擦除: {erase_result.stdout + erase_result.stderr}\n烧录: {flash_result.stdout + flash_result.stderr}"
+
+                def _run_dfu():
+                    LIBUSB_FATAL = ('LIBUSB_ERROR_OTHER', 'LIBUSB_ERROR_NOT_FOUND',
+                                    'LIBUSB_ERROR_NO_DEVICE', 'Cannot claim interface',
+                                    'Cannot set alternate interface')
+                    for alt in (0, 1):
+                        flash_cmd = f'sudo dfu-util -a {alt} {device_filter} --dfuse-address {safe_address} -D {shlex.quote(firmware_path)}'
+                        r = run_cmd(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                        combined = (r.stdout or '') + (r.stderr or '')
+                        if r.returncode == 0:
+                            return r
+                        if not any(e in combined for e in LIBUSB_FATAL):
+                            return r
+                        logger.warning(f'DFU alt={alt} 失败 ({combined.strip().splitlines()[-1] if combined.strip() else ""})，尝试 alt={1-alt}')
+                    r.stdout = (r.stdout or '') + (
+                        '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+                        '[烧录失败] dfu-util 无法访问 DFU 设备\n'
+                        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+                        '\n【请先重新进入 DFU 烧录模式】\n'
+                        '  方法一（推荐）：\n'
+                        '    1. 按住主板上的 BOOT 按键不放\n'
+                        '    2. 同时按一下 RESET 按键后松开\n'
+                        '    3. 再松开 BOOT 按键\n'
+                        '    4. 重新点击烧录按钮\n'
+                        '  方法二（断电重进）：\n'
+                        '    1. 拔掉 USB 线\n'
+                        '    2. 按住 BOOT 按键\n'
+                        '    3. 插上 USB 线后松开 BOOT 按键\n'
+                        '    4. 重新点击烧录按钮\n'
+                        '\n【如果仍然失败，请检查以下问题】\n'
+                        '  1. 更换 USB 线（建议使用短线，避免延长线/hub）\n'
+                        '  2. 直连主机 USB 口，不要经过 USB hub 或扩展坞\n'
+                        '  3. 尝试更换主机上不同的 USB 口\n'
+                        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+                    )
+                    return r
+
+                flash_result = _run_dfu()
+                output = flash_result.stdout + flash_result.stderr
                 returncode = flash_result.returncode
                 
                 if returncode == 0:
@@ -2725,12 +2817,47 @@ def flash_bl_firmware():
                 # 不指定 -d，让 dfu-util 自动检测所有 DFU 设备
                 device_filter = ''
             safe_address = shlex.quote(dfu_address)
-            # 先擦除再烧录
-            erase_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -e'
-            flash_cmd = f'sudo dfu-util -a 0 {device_filter} --dfuse-address {safe_address} -D {shlex.quote(bl_firmware_path)}'
-            
-            run_cmd(erase_cmd, shell=True, capture_output=True, text=True, timeout=30)
-            result = run_cmd(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
+
+            def _run_dfu_flash():
+                """执行 DFU 烧录：先尝试 alt=0，失败则 alt=1，并在 LIBUSB 错误时给出提示"""
+                LIBUSB_FATAL = ('LIBUSB_ERROR_OTHER', 'LIBUSB_ERROR_NOT_FOUND',
+                                'LIBUSB_ERROR_NO_DEVICE', 'Cannot claim interface',
+                                'Cannot set alternate interface')
+                for alt in (0, 1):
+                    flash_cmd = f'sudo dfu-util -a {alt} {device_filter} --dfuse-address {safe_address} -D {shlex.quote(bl_firmware_path)}'
+                    r = run_cmd(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                    combined = (r.stdout or '') + (r.stderr or '')
+                    if r.returncode == 0:
+                        return r
+                    if not any(e in combined for e in LIBUSB_FATAL):
+                        # 其他错误，不需要重试 alt
+                        return r
+                    logger.warning(f'DFU alt={alt} 失败 ({combined.strip().splitlines()[-1] if combined.strip() else ""})，尝试 alt={1-alt}')
+                # 两个 alt 都失败，返回最后一次结果并附加诊断提示
+                r.stdout = (r.stdout or '') + (
+                    '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+                    '[烧录失败] dfu-util 无法访问 DFU 设备\n'
+                    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+                    '\n【请先重新进入 DFU 烧录模式】\n'
+                    '  方法一（推荐）：\n'
+                    '    1. 按住主板上的 BOOT 按键不放\n'
+                    '    2. 同时按一下 RESET 按键后松开\n'
+                    '    3. 再松开 BOOT 按键\n'
+                    '    4. 重新点击烧录按钮\n'
+                    '  方法二（断电重进）：\n'
+                    '    1. 拔掉 USB 线\n'
+                    '    2. 按住 BOOT 按键\n'
+                    '    3. 插上 USB 线后松开 BOOT 按键\n'
+                    '    4. 重新点击烧录按钮\n'
+                    '\n【如果仍然失败，请检查以下问题】\n'
+                    '  1. 更换 USB 线（建议使用短线，避免延长线/hub）\n'
+                    '  2. 直连主机 USB 口，不要经过 USB hub 或扩展坞\n'
+                    '  3. 尝试更换主机上不同的 USB 口\n'
+                    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+                )
+                return r
+
+            result = _run_dfu_flash()
             
         elif flash_mode == 'UF2':
             # UF2烧录（RP2040/RP2350）- 使用rp2040_flash工具

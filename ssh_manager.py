@@ -55,9 +55,22 @@ def _get_fernet():
             logger.error("cryptography 库未安装，无法加密存储凭据")
             return None
 
+        fallback_key_path = os.path.join(CREDENTIALS_DIR, 'ssh_key')
         if os.path.exists(KEY_PATH):
-            with open(KEY_PATH, 'rb') as f:
-                key = f.read()
+            try:
+                with open(KEY_PATH, 'rb') as f:
+                    key = f.read()
+            except PermissionError:
+                # 无权读取 /etc 下的密钥，回退到用户目录
+                if os.path.exists(fallback_key_path):
+                    with open(fallback_key_path, 'rb') as f:
+                        key = f.read()
+                else:
+                    key = Fernet.generate_key()
+                    os.makedirs(CREDENTIALS_DIR, exist_ok=True)
+                    with open(fallback_key_path, 'wb') as f:
+                        f.write(key)
+                    os.chmod(fallback_key_path, 0o600)
         else:
             key = Fernet.generate_key()
             try:
@@ -67,7 +80,6 @@ def _get_fernet():
                 os.chmod(KEY_PATH, 0o600)
             except PermissionError:
                 # 非 root 用户无法写入 /etc，回退到用户目录
-                fallback_key_path = os.path.join(CREDENTIALS_DIR, 'ssh_key')
                 os.makedirs(CREDENTIALS_DIR, exist_ok=True)
                 with open(fallback_key_path, 'wb') as f:
                     f.write(key)
