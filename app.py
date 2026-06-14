@@ -672,8 +672,19 @@ def get_lsusb():
         return jsonify({'devices': [], 'error': str(e)})
 
 # ==================== 串口设备详情 API ====================
+@app.route('/api/system/serial')
 def get_serial_devices():
     """获取串口设备详细信息（模仿FlyTools getSerial）"""
+    try:
+        return _get_serial_devices()
+    except Exception as e:
+        import logging
+        logging.error(f'获取串口设备失败: {e}')
+        return jsonify({'devices': [], 'error': str(e)})
+
+
+def _get_serial_devices():
+    """获取串口设备（内部实现）"""
     devices = []
     
     if is_ssh_mode():
