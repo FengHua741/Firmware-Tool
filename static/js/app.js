@@ -578,6 +578,9 @@ function fallbackCopyToClipboard(text) {
 
 
 // ==================== 系统设置 ====================
+// 当前已加载的连接模式（用于检测模式切换）
+let _loadedConnectionMode = 'local';
+
 async function loadSettings() {
     try {
         const response = await fetch('/api/settings/config');
@@ -597,6 +600,7 @@ async function loadSettings() {
             
             // 加载连接模式
             const mode = config.connection_mode || 'local';
+            _loadedConnectionMode = mode;  // 记录加载时的模式
             const radios = document.querySelectorAll('input[name="connectionMode"]');
             radios.forEach(r => r.checked = r.value === mode);
             
@@ -707,6 +711,11 @@ async function saveSettings() {
             }
             // FAST-SSH 模式凭据由后端自动保存，前端无需处理
             showSuccess('设置已保存');
+            
+            // 模式切换时刷新页面，确保后台线程和前端状态同步
+            if (connectionMode !== _loadedConnectionMode) {
+                setTimeout(() => { location.reload(); }, 800);
+            }
         } else {
             showError('保存失败: ' + data.error);
         }

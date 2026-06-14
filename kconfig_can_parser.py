@@ -36,9 +36,54 @@ PROCESSOR_CAPABILITIES = {
     'STM32H723': ['MACH_STM32H723', 'MACH_STM32H7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
     'STM32H743': ['MACH_STM32H743', 'MACH_STM32H7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
     'STM32H750': ['MACH_STM32H750', 'MACH_STM32H7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
+    # STM32 无USB系列
+    'STM32F031': ['MACH_STM32F031', 'MACH_STM32F0'],
+    'STM32F070': ['MACH_STM32F070', 'MACH_STM32F0'],
+    'STM32G070': ['MACH_STM32G070', 'MACH_STM32G0', 'MACH_STM32G07x', 'HAVE_STM32_FDCANBUS'],
+    'STM32G0B0': ['MACH_STM32G0B0', 'MACH_STM32G0', 'MACH_STM32G0Bx', 'HAVE_STM32_USBFS', 'HAVE_STM32_FDCANBUS'],
+    'STM32F765': ['MACH_STM32F765', 'MACH_STM32F7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS'],
+    'STM32L412': ['MACH_STM32L412', 'MACH_STM32L4', 'HAVE_STM32_USBOTG'],
+    'N32G452': ['MACH_N32G452', 'MACH_N32G45x', 'MACH_STM32F1', 'HAVE_STM32_USBFS', 'HAVE_STM32_CANBUS'],
+    'N32G455': ['MACH_N32G455', 'MACH_N32G45x', 'MACH_STM32F1', 'HAVE_STM32_USBFS', 'HAVE_STM32_CANBUS'],
     # RP2040 系列
     'RP2040': ['MACH_RPXXXX', 'MACH_RP2040'],
     'RP2350': ['MACH_RPXXXX', 'MACH_RP2350'],
+    # ATSAMD 系列
+    'SAMD21G18': ['MACH_SAMD21G18', 'MACH_SAMD21', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAMD21E18': ['MACH_SAMD21E18', 'MACH_SAMD21', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAMD21J18': ['MACH_SAMD21J18', 'MACH_SAMD21', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAMD21E15': ['MACH_SAMD21E15', 'MACH_SAMD21', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAMC21G18': ['MACH_SAMC21G18', 'MACH_SAMC21', 'HAVE_SAMD_CANBUS'],
+    'SAMD51G19': ['MACH_SAMD51G19', 'MACH_SAMD51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAMD51J19': ['MACH_SAMD51J19', 'MACH_SAMD51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAMD51N19': ['MACH_SAMD51N19', 'MACH_SAMD51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAMD51P20': ['MACH_SAMD51P20', 'MACH_SAMD51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAME51J19': ['MACH_SAME51J19', 'MACH_SAME51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAME51N19': ['MACH_SAME51N19', 'MACH_SAME51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    'SAME54P20': ['MACH_SAME54P20', 'MACH_SAME54', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
+    # LPC176x 系列
+    'LPC1768': ['MACH_LPC1768'],
+    'LPC1769': ['MACH_LPC1769'],
+    # HC32F460 系列
+    'HC32F460': ['MACH_HC32F460'],
+    # ATSAM 系列
+    'SAM3X8E': ['MACH_SAM3X8E', 'MACH_SAM3X', 'HAVE_SAM_CANBUS'],
+    'SAM3X8C': ['MACH_SAM3X8C', 'MACH_SAM3X', 'HAVE_SAM_CANBUS'],
+    'SAM4S8C': ['MACH_SAM4S8C', 'MACH_SAM4S'],
+    'SAM4E8E': ['MACH_SAM4E8E', 'MACH_SAM4E', 'HAVE_SAM_CANBUS'],
+    'SAME70Q20B': ['MACH_SAME70Q20B', 'MACH_SAME70', 'HAVE_SAM_CANBUS'],
+    # AVR 系列
+    'ATMEGA2560': ['MACH_atmega2560'],
+    'ATMEGA1280': ['MACH_atmega1280'],
+    'AT90USB1286': ['MACH_at90usb1286'],
+    'AT90USB646': ['MACH_at90usb646'],
+    'ATMEGA32U4': ['MACH_atmega32u4'],
+    'ATMEGA1284P': ['MACH_atmega1284p'],
+    'ATMEGA644P': ['MACH_atmega644p'],
+    'ATMEGA328P': ['MACH_atmega328p'],
+    'ATMEGA328': ['MACH_atmega328'],
+    'ATMEGA168': ['MACH_atmega168'],
+    'LGT8F328P': ['MACH_lgt8f328p'],
 }
 
 # select 值到 comm_type 的映射
@@ -391,92 +436,160 @@ def _parse_rp2040_kconfig(kconfig_path):
 
 def parse_can_options(klipper_path='~/klipper'):
     """
-    从 Klipper Kconfig 中解析所有 CAN 选项
+    从 Klipper Kconfig 中解析所有平台的通信接口选项
 
     Args:
         klipper_path: Klipper 源码目录路径
 
     Returns:
-        dict: 包含 stm32 和 rp2040 CAN 选项的结构化数据
+        dict: 包含各平台通信选项的结构化数据
     """
     klipper_path = os.path.expanduser(klipper_path)
 
-    stm32_kconfig = os.path.join(klipper_path, 'src', 'stm32', 'Kconfig')
-    rp2040_kconfig = os.path.join(klipper_path, 'src', 'rp2040', 'Kconfig')
+    # 平台定义: (目录名, 架构前缀, 结果键名)
+    PLATFORMS = [
+        ('stm32',   'STM32_',   'stm32'),
+        ('rp2040',  'RPXXXX_',  'rp2040'),
+        ('atsamd',  'ATSAMD_',  'atsamd'),
+        ('lpc176x', 'LPC_',     'lpc176x'),
+        ('hc32f460','HC32F460_','hc32f460'),
+        ('atsam',   'ATSAM_',   'atsam'),
+        ('avr',     'AVR_',     'avr'),
+    ]
 
-    # 解析 STM32
-    direct_can, bridge_can = _parse_stm32_kconfig(stm32_kconfig)
+    result = {}
 
-    # 为每个选项计算兼容的处理器列表
-    stm32_processors = [p for p in PROCESSOR_CAPABILITIES.keys()
-                        if p.startswith('STM32')]
+    for platform_dir, arch_prefix, result_key in PLATFORMS:
+        kconfig_path = os.path.join(klipper_path, 'src', platform_dir, 'Kconfig')
+        if not os.path.exists(kconfig_path):
+            logger.warning(f"Kconfig 文件不存在: {kconfig_path}")
+            continue
 
-    for option in direct_can + bridge_can:
-        depends_conditions = _parse_depends(option.get('depends', ''))
-        visibility_conditions = _parse_depends(option.get('visibility', ''))
-        compatible = []
-        for proc in stm32_processors:
-            # 处理器必须同时满足 depends 和 visibility 条件
-            if (_check_processor_match(proc, depends_conditions) and
-                    _check_processor_match(proc, visibility_conditions)):
-                compatible.append(proc)
-        option['compatible_processors'] = compatible
-        # 移除原始字符串（前端不需要）
-        del option['depends']
-        del option['visibility']
+        # 解析通信接口选项
+        comm_options = _parse_communication_choice(kconfig_path, arch_prefix)
 
-    # 构建处理器能力映射 (只包含 STM32)
-    processor_capabilities = {}
-    for proc, caps in PROCESSOR_CAPABILITIES.items():
-        if proc.startswith('STM32'):
-            processor_capabilities[proc] = caps
+        # 获取该平台对应的处理器列表
+        platform_processors = _get_platform_processors(result_key)
 
-    # 解析 STM32 通信接口选项
-    stm32_comm = _parse_communication_choice(stm32_kconfig, 'STM32_')
-    for option in stm32_comm:
-        depends_conditions = _parse_depends(option.get('depends', ''))
-        visibility_conditions = _parse_depends(option.get('visibility', ''))
-        compatible = []
-        for proc in stm32_processors:
-            if (_check_processor_match(proc, depends_conditions) and
-                    _check_processor_match(proc, visibility_conditions)):
-                compatible.append(proc)
-        option['compatible_processors'] = compatible
-        del option['depends']
-        del option['visibility']
+        # 为每个选项计算兼容的处理器列表
+        for option in comm_options:
+            depends_conditions = _parse_depends(option.get('depends', ''))
+            visibility_conditions = _parse_depends(option.get('visibility', ''))
+            compatible = []
+            for proc in platform_processors:
+                if (_check_processor_match(proc, depends_conditions) and
+                        _check_processor_match(proc, visibility_conditions)):
+                    compatible.append(proc)
+            option['compatible_processors'] = compatible
+            del option['depends']
+            del option['visibility']
 
-    # 解析 RP2040
-    rp2040_options = _parse_rp2040_kconfig(rp2040_kconfig)
+        platform_data = {
+            'communication_options': comm_options,
+        }
 
-    # 解析 RP2040 通信接口选项
-    rp2040_processors = [p for p in PROCESSOR_CAPABILITIES.keys()
-                         if not p.startswith('STM32')]
-    rp2040_comm = _parse_communication_choice(rp2040_kconfig, 'RPXXXX_')
-    for option in rp2040_comm:
-        depends_conditions = _parse_depends(option.get('depends', ''))
-        visibility_conditions = _parse_depends(option.get('visibility', ''))
-        compatible = []
-        for proc in rp2040_processors:
-            if (_check_processor_match(proc, depends_conditions) and
-                    _check_processor_match(proc, visibility_conditions)):
-                compatible.append(proc)
-        option['compatible_processors'] = compatible
-        del option['depends']
-        del option['visibility']
+        # STM32 特有: 直接 CAN 和桥接 CAN 引脚选项
+        if platform_dir == 'stm32':
+            direct_can, bridge_can = _parse_stm32_kconfig(kconfig_path)
+            stm32_procs = [p for p in PROCESSOR_CAPABILITIES.keys() if p.startswith('STM32')]
+            for option in direct_can + bridge_can:
+                depends_conditions = _parse_depends(option.get('depends', ''))
+                visibility_conditions = _parse_depends(option.get('visibility', ''))
+                compatible = []
+                for proc in stm32_procs:
+                    if (_check_processor_match(proc, depends_conditions) and
+                            _check_processor_match(proc, visibility_conditions)):
+                        compatible.append(proc)
+                option['compatible_processors'] = compatible
+                del option['depends']
+                del option['visibility']
+            platform_data['direct_can'] = direct_can
+            platform_data['bridge_can'] = bridge_can
+            processor_capabilities = {p: c for p, c in PROCESSOR_CAPABILITIES.items() if p.startswith('STM32')}
+            platform_data['processor_capabilities'] = processor_capabilities
 
-    result = {
-        'stm32': {
-            'communication_options': stm32_comm,
-            'direct_can': direct_can,
-            'bridge_can': bridge_can,
-            'processor_capabilities': processor_capabilities,
-        },
-        'rp2040': rp2040_options,
-    }
-    if rp2040_options:
-        result['rp2040']['communication_options'] = rp2040_comm
+        # RP2040 特有: CAN GPIO 配置
+        if platform_dir == 'rp2040':
+            rp2040_options = _parse_rp2040_kconfig(kconfig_path)
+            if rp2040_options:
+                platform_data.update(rp2040_options)
+
+        # ATSAMD 特有: 桥接 CAN 引脚选项
+        if platform_dir == 'atsamd':
+            _, bridge_can = _parse_generic_bridge_can(kconfig_path, 'ATSAMD')
+            platform_data['bridge_can'] = bridge_can
+
+        # ATSAM 特有: 桥接 CAN 引脚选项
+        if platform_dir == 'atsam':
+            _, bridge_can = _parse_generic_bridge_can(kconfig_path, 'ATSAM')
+            platform_data['bridge_can'] = bridge_can
+
+        result[result_key] = platform_data
 
     return result
+
+
+def _get_platform_processors(result_key):
+    """根据平台键名获取对应的处理器列表"""
+    prefix_map = {
+        'stm32':    lambda p: p.startswith('STM32') or p.startswith('N32'),
+        'rp2040':   lambda p: p in ('RP2040', 'RP2350'),
+        'atsamd':   lambda p: p.startswith('SAM') and p[3] in ('D', 'C', 'E') and not p.startswith('SAM3') and not p.startswith('SAM4') and not p.startswith('SAME7'),
+        'lpc176x':  lambda p: p.startswith('LPC'),
+        'hc32f460': lambda p: p.startswith('HC32'),
+        'atsam':    lambda p: p.startswith('SAM3') or p.startswith('SAM4') or p.startswith('SAME7'),
+        'avr':      lambda p: p.startswith('AT') or p.startswith('LGT'),
+    }
+    matcher = prefix_map.get(result_key, lambda p: False)
+    return [p for p in PROCESSOR_CAPABILITIES.keys() if matcher(p)]
+
+
+def _parse_generic_bridge_can(kconfig_path, prefix):
+    """通用桥接 CAN 解析 (ATSAMD/ATSAM 等)"""
+    if not os.path.exists(kconfig_path):
+        return [], []
+
+    with open(kconfig_path, 'r') as f:
+        content = f.read()
+
+    direct_can = []
+    bridge_can = []
+    lines = content.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        match = re.match(rf'^config\s+{prefix}_(?:CANBUS|MMENU_CANBUS|CMENU_CANBUS)_\w+', line)
+        if match:
+            config_name = match.group(0).split()[1]
+            prompt = ''
+            depends = ''
+            visibility_cond = ''
+            j = i + 1
+            while j < len(lines) and lines[j].strip() and not lines[j].strip().startswith('config '):
+                sline = lines[j].strip()
+                bool_match = re.match(r'bool\s+"([^"]+)"(?:\s+if\s+(.+))?', sline)
+                if bool_match:
+                    prompt = bool_match.group(1)
+                    if bool_match.group(2):
+                        visibility_cond = bool_match.group(2).strip()
+                dep_match = re.match(r'depends\s+on\s+(.+)', sline)
+                if dep_match:
+                    depends = dep_match.group(1).strip()
+                j += 1
+            if prompt:
+                pins_match = re.search(r'on\s+(\w+/\w+)', prompt)
+                pins = pins_match.group(1) if pins_match else ''
+                entry = {
+                    'pins': pins, 'config': config_name,
+                    'display': prompt, 'depends': depends,
+                    'visibility': visibility_cond,
+                }
+                if 'CMENU_CANBUS' in config_name:
+                    bridge_can.append(entry)
+                else:
+                    direct_can.append(entry)
+        i += 1
+    return direct_can, bridge_can
 
 
 def save_cache(data, cache_path=None):
@@ -515,22 +628,17 @@ if __name__ == '__main__':
     save_cache(data, args.output)
 
     # 打印摘要
-    stm32_direct = data['stm32']['direct_can']
-    stm32_bridge = data['stm32']['bridge_can']
-    rp2040 = data['rp2040']
-
-    print(f"\n=== STM32 直接 CAN 选项: {len(stm32_direct)} 个 ===")
-    for opt in stm32_direct:
-        print(f"  {opt['display']} -> CONFIG_{opt['config']}")
-        print(f"    兼容: {', '.join(opt['compatible_processors'])}")
-
-    print(f"\n=== STM32 桥接 CAN 选项: {len(stm32_bridge)} 个 ===")
-    for opt in stm32_bridge:
-        print(f"  {opt['display']} -> CONFIG_{opt['config']}")
-        print(f"    兼容: {', '.join(opt['compatible_processors'])}")
-
-    if rp2040:
-        print(f"\n=== RP2040 CAN 选项 ===")
-        print(f"  GPIO RX 默认: {rp2040['rx_default']}, GPIO TX 默认: {rp2040['tx_default']}")
-        print(f"  GPIO 范围: {rp2040['range']}")
-        print(f"  CAN: {rp2040['has_canbus']}, USB桥接CAN: {rp2040['has_usbcanbus']}")
+    for platform_key, platform_data in data.items():
+        comm_opts = platform_data.get('communication_options', [])
+        print(f"\n=== {platform_key} 通信选项: {len(comm_opts)} 个 ===")
+        for opt in comm_opts:
+            print(f"  {opt['display']} -> {opt['config_symbol']} [{opt.get('comm_type', '?')}]")
+            compat = opt.get('compatible_processors', [])
+            if compat:
+                print(f"    兼容: {', '.join(compat)}")
+        direct_can = platform_data.get('direct_can', [])
+        bridge_can = platform_data.get('bridge_can', [])
+        if direct_can:
+            print(f"\n  直接 CAN: {len(direct_can)} 个")
+        if bridge_can:
+            print(f"  桥接 CAN: {len(bridge_can)} 个")

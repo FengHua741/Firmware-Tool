@@ -81,6 +81,11 @@ async function loadCompilePresetManufacturers() {
                 }
             });
         }
+        // 默认选中 FLY 并自动加载类型
+        if ([...select.options].some(o => o.value === 'FLY')) {
+            select.value = 'FLY';
+            await onCompilePresetManufacturerChange();
+        }
     } catch (error) {
         console.error('加载厂家列表失败:', error);
     }
@@ -114,6 +119,11 @@ function loadCompileMcuPlatforms() {
     
     for (const platform in compileMcuDatabase) {
         select.innerHTML += `<option value="${platform}">${platform}</option>`;
+    }
+    // 默认选中 STM32
+    if (compileMcuDatabase['STM32']) {
+        select.value = 'STM32';
+        onCompileMcuPlatformChange();
     }
 }
 
@@ -224,6 +234,38 @@ async function displayCompileMcuDetails(data) {
     document.getElementById('compileMcuDetails').style.display = 'block';
 }
 
+// MCU ID -> 平台键名映射 (用于从 communication-options API 获取对应平台数据)
+const MCU_PLATFORM_MAP = {
+    // STM32 系列
+    'STM32F103': 'stm32', 'STM32F207': 'stm32', 'STM32F401': 'stm32', 'STM32F405': 'stm32',
+    'STM32F407': 'stm32', 'STM32F429': 'stm32', 'STM32F446': 'stm32', 'STM32F765': 'stm32',
+    'STM32F031': 'stm32', 'STM32F042': 'stm32', 'STM32F070': 'stm32', 'STM32F072': 'stm32',
+    'STM32G070': 'stm32', 'STM32G071': 'stm32', 'STM32G0B0': 'stm32', 'STM32G0B1': 'stm32',
+    'STM32G431': 'stm32', 'STM32G474': 'stm32',
+    'STM32H723': 'stm32', 'STM32H743': 'stm32', 'STM32H750': 'stm32',
+    'STM32L412': 'stm32',
+    'N32G452': 'stm32', 'N32G455': 'stm32',
+    // RP2040 系列
+    'RP2040': 'rp2040', 'RP2350': 'rp2040',
+    // ATSAMD 系列
+    'SAMC21G18': 'atsamd', 'SAMD21G18': 'atsamd', 'SAMD21E18': 'atsamd',
+    'SAMD21J18': 'atsamd', 'SAMD21E15': 'atsamd',
+    'SAMD51G19': 'atsamd', 'SAMD51J19': 'atsamd', 'SAMD51N19': 'atsamd', 'SAMD51P20': 'atsamd',
+    'SAME51J19': 'atsamd', 'SAME51N19': 'atsamd', 'SAME54P20': 'atsamd',
+    // LPC176x 系列
+    'LPC1768': 'lpc176x', 'LPC1769': 'lpc176x',
+    // HC32F460 系列
+    'HC32F460': 'hc32f460',
+    // ATSAM 系列
+    'SAM3X8E': 'atsam', 'SAM3X8C': 'atsam', 'SAM4S8C': 'atsam',
+    'SAM4E8E': 'atsam', 'SAME70Q20B': 'atsam',
+    // AVR 系列
+    'ATMEGA2560': 'avr', 'ATMEGA1280': 'avr', 'AT90USB1286': 'avr',
+    'AT90USB646': 'avr', 'ATMEGA32U4': 'avr', 'ATMEGA1284P': 'avr',
+    'ATMEGA644P': 'avr', 'ATMEGA328P': 'avr', 'ATMEGA328': 'avr',
+    'ATMEGA168': 'avr', 'LGT8F328P': 'avr',
+};
+
 // 加载通信选项（两级选择）
 async function loadCommunicationOptions(mcu) {
     const connSelect = document.getElementById('compileConnection');
@@ -245,27 +287,28 @@ async function loadCommunicationOptions(mcu) {
         }
         
         const mcuId = mcu.id.toUpperCase();
+        // 通过映射找到平台键名，再获取该平台的通信选项
+        const platformKey = MCU_PLATFORM_MAP[mcuId] || mcuId.toLowerCase();
+        const platformData = data[platformKey];
         let commOptions = [];
         _bridgeCanOptions = [];
         _rp2040CanGpio = null;
         
-        if (mcuId.startsWith('STM32') && data.stm32 && data.stm32.communication_options) {
-            commOptions = data.stm32.communication_options;
+        if (platformData && platformData.communication_options) {
+            commOptions = platformData.communication_options;
             // 存储桥接CAN引脚选项，按MCU过滤
-            if (data.stm32.bridge_can) {
-                _bridgeCanOptions = data.stm32.bridge_can.filter(opt => {
+            if (platformData.bridge_can) {
+                _bridgeCanOptions = platformData.bridge_can.filter(opt => {
                     if (!opt.compatible_processors || opt.compatible_processors.length === 0) return true;
                     return opt.compatible_processors.includes(mcuId);
                 });
             }
-        } else if ((mcuId === 'RP2040' || mcuId === 'RP2350') && data.rp2040 && data.rp2040.communication_options) {
-            commOptions = data.rp2040.communication_options;
-            // 存储RP2040 CAN GPIO配置
-            if (data.rp2040.has_canbus || data.rp2040.has_usbcanbus) {
+            // RP2040 CAN GPIO配置
+            if (platformKey === 'rp2040' && (platformData.has_canbus || platformData.has_usbcanbus)) {
                 _rp2040CanGpio = {
-                    rx_default: data.rp2040.rx_default || 4,
-                    tx_default: data.rp2040.tx_default || 5,
-                    range: data.rp2040.range || [0, 29]
+                    rx_default: platformData.rx_default || 4,
+                    tx_default: platformData.tx_default || 5,
+                    range: platformData.range || [0, 29]
                 };
             }
         }
@@ -289,6 +332,11 @@ async function loadCommunicationOptions(mcu) {
         connSelect.innerHTML = '<option value="">-- 选择通信类型 --</option>';
         for (const type in _commGroupedOptions) {
             connSelect.innerHTML += `<option value="${type}">${typeLabels[type] || type}</option>`;
+        }
+        // 默认选中 USB（如果可用）
+        if (_commGroupedOptions['usb']) {
+            connSelect.value = 'usb';
+            onCompileConnectionChange();
         }
     } catch (error) {
         console.error('加载通信选项失败:', error);
@@ -439,6 +487,11 @@ async function onCompilePresetManufacturerChange() {
                 typeSelect.innerHTML += `<option value="${type}">${label}</option>`;
             });
             typeSelect.disabled = false;
+            // 默认选中主板
+            if ([...typeSelect.options].some(o => o.value === 'mainboard')) {
+                typeSelect.value = 'mainboard';
+                await onCompilePresetTypeChange();
+            }
         }
     } catch (error) {
         console.error('加载类型列表失败:', error);
@@ -772,44 +825,64 @@ async function compileFirmware() {
     // 显示编译中
     const resultDiv = document.getElementById('compileResult');
     resultDiv.style.display = 'block';
-    resultDiv.querySelector('.result-box').innerHTML = '<p>⏳ 正在编译，请稍候...</p>';
+    const resultBox = resultDiv.querySelector('.result-box');
+    resultBox.innerHTML = '<p id="compileStatusMsg">⏳ 正在编译，请稍候...</p><pre id="compileLogOutput" style="background:#1a1a2e;color:#e0e0e0;padding:10px;max-height:400px;overflow-y:auto;font-size:12px;margin-top:8px;white-space:pre-wrap"></pre>';
+    const logEl = document.getElementById('compileLogOutput');
+    const statusMsg = document.getElementById('compileStatusMsg');
     
     try {
-        const response = await fetch('/api/firmware/compile', {
+        const resp = await fetch('/api/firmware/compile', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(compileParams)
         });
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let lastResult = null;
         
-        const result = await response.json();
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const msg = line.slice(6);
+                if (msg.startsWith('[LOG] ')) {
+                    if (logEl) { logEl.textContent += msg.slice(6) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+                } else {
+                    try {
+                        const data = JSON.parse(msg);
+                        lastResult = data;
+                        if (data.error) {
+                            if (logEl) { logEl.textContent += (data.detail || data.error) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+                        }
+                    } catch { if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; } }
+                }
+            }
+        }
         
-        if (result.success) {
-            compiledFirmwarePath = result.firmware_path;
-            resultDiv.querySelector('.result-box').innerHTML = `
-                <div class="status-success">
-                    <p>✅ 编译成功！</p>
-                    <p>固件路径: ${result.firmware_path}</p>
-                    <p>固件大小: ${result.firmware_size || '未知'}</p>
-                </div>
-            `;
+        if (lastResult && lastResult.success) {
+            compiledFirmwarePath = lastResult.firmware_path;
+            statusMsg.innerHTML = '✅ 编译成功！';
+            statusMsg.style.color = '#4caf50';
+            if (logEl) logEl.innerHTML += `<br><b>固件路径:</b> ${lastResult.firmware_path}<br><b>固件大小:</b> ${lastResult.firmware_size || '未知'}`;
             showSuccess('固件编译成功！');
+        } else if (lastResult && lastResult.error) {
+            statusMsg.innerHTML = '❌ ' + lastResult.error;
+            statusMsg.style.color = '#f44336';
+            showError('编译失败: ' + lastResult.error);
         } else {
-            resultDiv.querySelector('.result-box').innerHTML = `
-                <div class="status-error">
-                    <p>❌ 编译失败</p>
-                    <pre>${result.error || '未知错误'}</pre>
-                </div>
-            `;
-            showError('编译失败: ' + (result.error || '未知错误'));
+            statusMsg.innerHTML = '❌ 编译异常结束';
+            statusMsg.style.color = '#f44336';
+            showError('编译异常结束');
         }
     } catch (error) {
         console.error('编译失败:', error);
-        resultDiv.querySelector('.result-box').innerHTML = `
-            <div class="status-error">
-                <p>❌ 编译请求失败</p>
-                <pre>${error.message}</pre>
-            </div>
-        `;
+        if (statusMsg) { statusMsg.innerHTML = '❌ 编译请求失败'; statusMsg.style.color = '#f44336'; }
+        if (logEl) logEl.textContent = error.message;
         showError('编译请求失败: ' + error.message);
     }
 }
@@ -1093,12 +1166,15 @@ async function flashFirmware() {
     
     const resultDiv = document.getElementById('flashResult');
     resultDiv.style.display = 'block';
-    resultDiv.querySelector('.result-box').innerHTML = '<p>⏳ 正在烧录，请稍候...</p>';
+    const resultBox = resultDiv.querySelector('.result-box');
+    resultBox.innerHTML = '<p id="flashStatusMsg">⏳ 正在烧录，请稍候...</p><pre id="flashLogOutput" style="background:#1a1a2e;color:#e0e0e0;padding:10px;max-height:400px;overflow-y:auto;font-size:12px;margin-top:8px;white-space:pre-wrap"></pre>';
+    const logEl = document.getElementById('flashLogOutput');
+    const statusMsg = document.getElementById('flashStatusMsg');
     
     try {
         const canIfaceEl = document.getElementById('flashCanIface');
         const canIface = canIfaceEl ? canIfaceEl.value : 'can0';
-        const response = await fetch('/api/firmware/flash', {
+        const resp = await fetch('/api/firmware/flash', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1108,34 +1184,53 @@ async function flashFirmware() {
                 can_iface: canIface
             })
         });
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let lastResult = null;
         
-        const result = await response.json();
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const msg = line.slice(6);
+                if (msg.startsWith('[LOG] ')) {
+                    if (logEl) { logEl.textContent += msg.slice(6) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+                } else {
+                    try {
+                        const data = JSON.parse(msg);
+                        lastResult = data;
+                        if (data.error) {
+                            if (logEl) { logEl.textContent += data.error + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+                        }
+                    } catch { if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; } }
+                }
+            }
+        }
         
-        if (result.success) {
-            resultDiv.querySelector('.result-box').innerHTML = `
-                <div class="status-success">
-                    <p>✅ 烧录成功！</p>
-                </div>
-            `;
+        if (lastResult && lastResult.success) {
+            statusMsg.innerHTML = '✅ 烧录成功！';
+            statusMsg.style.color = '#4caf50';
+            if (lastResult.output && logEl) logEl.textContent += '\n' + lastResult.output;
             showSuccess('固件烧录成功！');
+        } else if (lastResult && lastResult.error) {
+            statusMsg.innerHTML = '❌ ' + lastResult.error;
+            statusMsg.style.color = '#f44336';
+            if (lastResult.output && logEl) logEl.textContent += '\n' + lastResult.output;
+            showError('烧录失败: ' + lastResult.error);
         } else {
-            resultDiv.querySelector('.result-box').innerHTML = `
-                <div class="status-error">
-                    <p>❌ 烧录失败</p>
-                    <pre>${result.error || '未知错误'}</pre>
-                    ${result.output ? '<details><summary>详细输出</summary><pre>' + result.output + '</pre></details>' : ''}
-                </div>
-            `;
-            showError('烧录失败: ' + (result.error || '未知错误'));
+            statusMsg.innerHTML = '❌ 烧录异常结束';
+            statusMsg.style.color = '#f44336';
+            showError('烧录异常结束');
         }
     } catch (error) {
         console.error('烧录失败:', error);
-        resultDiv.querySelector('.result-box').innerHTML = `
-            <div class="status-error">
-                <p>❌ 烧录请求失败</p>
-                <pre>${error.message}</pre>
-            </div>
-        `;
+        if (statusMsg) { statusMsg.innerHTML = '❌ 烧录请求失败'; statusMsg.style.color = '#f44336'; }
+        if (logEl) logEl.textContent = error.message;
         showError('烧录请求失败: ' + error.message);
     }
 }
@@ -1144,42 +1239,63 @@ async function flashFirmware() {
 async function flashHostFirmware(firmwarePath) {
     const resultDiv = document.getElementById('flashResult');
     resultDiv.style.display = 'block';
-    resultDiv.querySelector('.result-box').innerHTML = '<p>正在烧录固件，请稍候...</p>';
+    const resultBox = resultDiv.querySelector('.result-box');
+    resultBox.innerHTML = '<p id="hostStatusMsg">⏳ 正在烧录固件，请稍候...</p><pre id="hostLogOutput" style="background:#1a1a2e;color:#e0e0e0;padding:10px;max-height:400px;overflow-y:auto;font-size:12px;margin-top:8px;white-space:pre-wrap"></pre>';
+    const logEl = document.getElementById('hostLogOutput');
+    const statusMsg = document.getElementById('hostStatusMsg');
     
     try {
-        const response = await fetch('/api/firmware/install-host', {
+        const resp = await fetch('/api/firmware/install-host', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ firmware_path: firmwarePath })
         });
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let lastResult = null;
         
-        const result = await response.json();
-        
-        if (result.success) {
-            let outputHtml = `<div class="status-success"><p>${result.message || '固件烧录成功'}</p>`;
-            if (result.flash_output) {
-                outputHtml += `<pre style="font-size:12px;margin-top:8px;white-space:pre-wrap">${result.flash_output}</pre>`;
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const msg = line.slice(6);
+                if (msg.startsWith('[LOG] ')) {
+                    if (logEl) { logEl.textContent += msg.slice(6) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+                } else {
+                    try {
+                        const data = JSON.parse(msg);
+                        lastResult = data;
+                        if (data.error) {
+                            if (logEl) { logEl.textContent += data.error + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+                        }
+                    } catch { if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; } }
+                }
             }
-            outputHtml += `</div>`;
-            resultDiv.querySelector('.result-box').innerHTML = outputHtml;
+        }
+        
+        if (lastResult && lastResult.success) {
+            statusMsg.innerHTML = '✅ ' + (lastResult.message || '固件烧录成功');
+            statusMsg.style.color = '#4caf50';
+            if (lastResult.flash_output && logEl) logEl.textContent += '\n' + lastResult.flash_output;
             showSuccess('固件烧录成功');
+        } else if (lastResult && lastResult.error) {
+            statusMsg.innerHTML = '❌ ' + lastResult.error;
+            statusMsg.style.color = '#f44336';
+            showError('烧录失败: ' + lastResult.error);
         } else {
-            resultDiv.querySelector('.result-box').innerHTML = `
-                <div class="status-error">
-                    <p>烧录失败</p>
-                    <pre>${result.error || '未知错误'}</pre>
-                </div>
-            `;
-            showError('烧录失败: ' + (result.error || '未知错误'));
+            statusMsg.innerHTML = '❌ 烧录异常结束';
+            statusMsg.style.color = '#f44336';
+            showError('烧录异常结束');
         }
     } catch (error) {
         console.error('烧录失败:', error);
-        resultDiv.querySelector('.result-box').innerHTML = `
-            <div class="status-error">
-                <p>烧录请求失败</p>
-                <pre>${error.message}</pre>
-            </div>
-        `;
+        if (statusMsg) { statusMsg.innerHTML = '❌ 烧录请求失败'; statusMsg.style.color = '#f44336'; }
+        if (logEl) logEl.textContent = error.message;
         showError('烧录请求失败: ' + error.message);
     }
 }

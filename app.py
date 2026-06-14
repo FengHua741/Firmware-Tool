@@ -26,7 +26,7 @@ import sys
 # 导入主板配置
 from board_config_loader import load_all_boards, load_board_config, get_manufacturers, get_board_types, get_bl_firmwares
 from kconfig_can_parser import parse_can_options
-from ssh_manager import run_cmd, run_cmd_check, path_exists, get_file_size, list_dir, is_ssh_mode, is_fast_ssh_mode, download_firmware_from_remote, upload_bl_firmware_for_remote, cleanup_remote_bl_dir, SSHManager, get_fast_ssh_credentials
+from ssh_manager import run_cmd, run_cmd_check, run_cmd_stream, path_exists, get_file_size, list_dir, is_ssh_mode, is_fast_ssh_mode, download_firmware_from_remote, upload_bl_firmware_for_remote, cleanup_remote_bl_dir, SSHManager, get_fast_ssh_credentials
 
 # 配置日志
 _log_handlers = [logging.StreamHandler()]
@@ -462,20 +462,35 @@ def _collect_remote_resources():
 def resource_monitor():
     """后台线程：采集系统资源数据"""
     first_run = True
+    _ssh_fail_count = 0  # SSH 连接连续失败计数
     while True:
         try:
             if is_ssh_mode():
                 # SSH 模式: 每 3 秒采集一次远程资源
-                resources = _collect_remote_resources()
-                if resources:
-                    resource_history['cpu'].append(resources['cpu']['percent'])
-                    resource_history['memory'].append(resources['memory']['percent'])
-                    resource_history['disk'].append(resources['disk']['percent'])
-                    resource_history['timestamps'].append(datetime.now().isoformat())
+                try:
+                    resources = _collect_remote_resources()
+                    if resources:
+                        resource_history['cpu'].append(resources['cpu']['percent'])
+                        resource_history['memory'].append(resources['memory']['percent'])
+                        resource_history['disk'].append(resources['disk']['percent'])
+                        resource_history['timestamps'].append(datetime.now().isoformat())
+                        _ssh_fail_count = 0  # 重置失败计数
+                    else:
+                        _ssh_fail_count += 1
+                        if first_run:
+                            logger.warning("远程资源采集返回 None， 可能 SSH 连接未建立")
+                except ConnectionError as e:
+                    _ssh_fail_count += 1
+                    if '不可用' in str(e) or '断路器' in str(e):
+                        logger.debug(f"远程资源采集跳过: {e}")
+                    else:
+                        logger.warning(f"远程资源采集连接失败: {e}")
+
+                # SSH 连接失败时延长等待间隔，避免堆积阻塞请求
+                if _ssh_fail_count >= 3:
+                    time.sleep(5)  # 连续失败后降低采集频率
                 else:
-                    if first_run:
-                        logger.warning("远程资源采集返回 None， 可能 SSH 连接未建立")
-                time.sleep(2)  # 合计约 3 秒间隔
+                    time.sleep(2)  # 合计约 3 秒间隔
                 first_run = False
             else:
                 # 本地模式: 使用 psutil
@@ -579,19 +594,23 @@ def get_system_resources():
                 except:
                     net_info['interfaces'] = []
         
-        # 服务状态
+        # 服务状态 — SSH 模式下连接不可用时跳过，避免阻塞
         service_status = {}
-        for service in SERVICES:
-            try:
-                result = run_cmd(
-                    ['systemctl', 'is-active', service],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-                service_status[service] = result.returncode == 0
-            except:
-                service_status[service] = False
+        try:
+            for service in SERVICES:
+                try:
+                    result = run_cmd(
+                        ['systemctl', 'is-active', service],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    service_status[service] = result.returncode == 0
+                except Exception:
+                    service_status[service] = False
+        except ConnectionError:
+            # SSH 连接不可用（断路器打开），跳过服务检测
+            service_status = {s: False for s in SERVICES}
         
         return jsonify({
             'current': {
@@ -647,10 +666,12 @@ def get_lsusb():
                 devices.append({'name': line.strip(), 'formatted': line.strip()})
         return jsonify({'devices': devices})
     except Exception as e:
+        # 区分 SSH 连接不可用和其他异常
+        if isinstance(e, ConnectionError) or 'SSH' in str(e):
+            return jsonify({'devices': [], 'error': f'SSH连接不可用: {e}'})
         return jsonify({'devices': [], 'error': str(e)})
 
 # ==================== 串口设备详情 API ====================
-@app.route('/api/system/serial')
 def get_serial_devices():
     """获取串口设备详细信息（模仿FlyTools getSerial）"""
     devices = []
@@ -712,6 +733,9 @@ def get_serial_devices():
                     'pid': info.get('ID_USB_MODEL_ID', info.get('ID_MODEL_ID', '')),
                     'driver': info.get('ID_USB_DRIVER', ''),
                 })
+        except ConnectionError as e:
+            # SSH 连接不可用，返回空设备列表和明确错误
+            pass
         except Exception:
             pass
     else:
@@ -791,6 +815,9 @@ def get_can_interfaces():
                     'flags': iface.get('flags', []),
                 })
         return jsonify({'ifaces': result})
+    except ConnectionError as e:
+        # SSH 连接不可用，直接返回错误，不再回退到纯文本解析
+        return jsonify({'ifaces': [], 'error': f'SSH连接不可用: {e}'})
     except (subprocess.CalledProcessError, Exception):
         # JSON 模式失败，回退到纯文本解析
         try:
@@ -1168,6 +1195,8 @@ def search_can_uuid():
                 'error': error_msg or 'Moonraker 不可达且无法读取 printer.cfg',
             })
         return jsonify({'uuids': uuids})
+    except ConnectionError as e:
+        return jsonify({'uuids': [], 'error': f'SSH连接不可用: {e}'})
     except subprocess.TimeoutExpired:
         return jsonify({'uuids': [], 'error': 'CAN查询超时'})
     except Exception as e:
@@ -1220,7 +1249,10 @@ def detect_can_for_flash():
     iface = request.args.get('iface', 'can0')
     if not iface.startswith('can'):
         return jsonify({'devices': [], 'error': f'无效的CAN接口: {iface}'})
-    devices, error = _scan_can_uuids(iface)
+    try:
+        devices, error = _scan_can_uuids(iface)
+    except ConnectionError as e:
+        return jsonify({'devices': [], 'error': f'SSH连接不可用: {e}'})
     # 移除 app/raw 字段，保持返回格式简洁（仅 uuid）
     simple_devices = [{'uuid': d['uuid']} for d in devices]
     return jsonify({'devices': simple_devices, 'error': error})
@@ -1333,6 +1365,8 @@ def get_all_ids():
             pass
         
         return jsonify(result)
+    except ConnectionError as e:
+        return jsonify({'usb': [], 'can': [], 'camera': [], 'kat_usb': [], 'rp_boot': [], 'error': f'SSH连接不可用: {e}'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1482,9 +1516,11 @@ def install_compile_dependencies():
 # ==================== 固件编译 API ====================
 @app.route('/api/firmware/compile', methods=['POST'])
 def compile_firmware():
-    """编译Klipper固件 - 支持预设配置和自定义MCU"""
-    try:
-        data = request.json
+    """编译Klipper固件 - 支持预设配置和自定义MCU（SSE 流式输出）"""
+    req_data = request.json  # 在请求上下文中提前捕获
+    def _compile_stream():
+     try:
+        data = req_data
         
         # 获取 Klipper 路径，优先使用用户传入的，其次是配置的，最后是默认值
         # 编译在远程设备上执行（SSH模式下远程有 Klipper 源码和编译环境）
@@ -1551,7 +1587,8 @@ def compile_firmware():
         processor_upper = processor.upper()
         
         if not path_exists(klipper_path):
-            return jsonify({'error': f'Klipper目录不存在: {klipper_path}'}), 400
+            yield f'data: {json.dumps({"error": f"Klipper目录不存在: {klipper_path}"})}\n\n'
+            return
         
         # 清理之前的编译
         run_cmd(f'cd {klipper_path} && rm -rf .config out', 
@@ -1852,12 +1889,17 @@ def compile_firmware():
             
             # RP2040不应包含STM32格式引脚
             if is_rp2040 and has_stm32_pin and not has_rp2040_pin:
-                return jsonify({'error': 'RP2040/RP2350启动引脚格式错误，应使用gpio格式（如gpio5）'}), 400
+                yield f'data: {json.dumps({"error": "RP2040/RP2350启动引脚格式错误，应使用gpio格式（如gpio5）"})}\n\n'
+                return
             # STM32不应包含RP2040格式引脚
             if not is_rp2040 and has_rp2040_pin and not has_stm32_pin:
-                return jsonify({'error': 'STM32启动引脚格式错误，应使用大写格式（如PA2, PB9）'}), 400
+                yield f'data: {json.dumps({"error": "STM32启动引脚格式错误，应使用大写格式（如PA2, PB9）"})}\n\n'
+                return
             
             config_lines.append(f'CONFIG_INITIAL_PINS="{startup_pin}"')
+            yield f'data: [LOG] 启动引脚已配置: {startup_pin}\n\n'
+        else:
+            yield f'data: [LOG] 未设置启动引脚\n\n'
         
         # 写入配置
         config_content = '\n'.join(config_lines) + '\n'
@@ -1868,6 +1910,11 @@ def compile_firmware():
         else:
             with open(config_path, 'w') as f:
                 f.write(config_content)
+        
+        # 调试日志: 显示写入的配置内容中与引脚相关的行
+        for line in config_lines:
+            if 'INITIAL_PINS' in line or 'CONFIG_USB' in line or 'CONFIG_SERIAL' in line or 'CONFIG_CAN' in line:
+                yield f'data: [LOG] .config: {line}\n\n'
         
         # 确保 out 目录存在且权限正确
         out_dir = os.path.join(klipper_path, 'out')
@@ -1880,26 +1927,34 @@ def compile_firmware():
             except:
                 pass
         
-        # 使用make olddefconfig补全配置
-        olddefconfig_result = run_cmd(
-            f'cd {klipper_path} && make olddefconfig',
-            shell=True, capture_output=True, text=True, timeout=60
-        )
+        # 使用make olddefconfig补全配置（流式输出）
+        yield 'data: [LOG] 生成配置中...\n\n'
+        olddefconfig_failed = False
+        for line in run_cmd_stream(f'cd {klipper_path} && make olddefconfig', shell=True, timeout=60):
+            if line.startswith('[DONE]'):
+                pass
+            elif line.startswith('[ERROR]'):
+                olddefconfig_failed = True
+                yield f'data: {json.dumps({"error": "配置生成失败", "detail": line})}\n\n'
+                return
+            else:
+                yield f'data: [LOG] {line}\n\n'
         
-        if olddefconfig_result.returncode != 0:
-            return jsonify({
-                'success': False,
-                'error': '配置生成失败',
-                'output': olddefconfig_result.stderr
-            }), 500
+        # 编译（流式输出）
+        yield 'data: [LOG] 开始编译...\n\n'
+        compile_ok = False
+        for line in run_cmd_stream(f'cd {klipper_path} && make -j4', shell=True, timeout=300):
+            if line.startswith('[DONE]'):
+                compile_ok = True
+            elif line.startswith('[ERROR]'):
+                yield f'data: {json.dumps({"error": "编译失败", "detail": line})}\n\n'
+                return
+            else:
+                yield f'data: [LOG] {line}\n\n'
         
-        # 编译
-        compile_result = run_cmd(
-            f'cd {klipper_path} && make -j4',
-            shell=True, capture_output=True, text=True, timeout=300
-        )
-        
-        output = compile_result.stdout + compile_result.stderr
+        if not compile_ok:
+            yield f'data: {json.dumps({"error": "编译失败"})}\n\n'
+            return
         
         # 检查编译是否成功 - 支持多种固件格式
         out_dir = os.path.join(klipper_path, 'out')
@@ -1912,8 +1967,9 @@ def compile_firmware():
                 firmware_path = fw_path
                 break
         
-        if compile_result.returncode == 0 and firmware_path:
+        if firmware_path:
             # 修改文件权限
+            yield 'data: [LOG] 编译成功，正在设置文件权限...\n\n'
             try:
                 if is_ssh_mode():
                     # SSH 模式: 通过远程命令修改权限
@@ -1963,25 +2019,18 @@ def compile_firmware():
             else:
                 size_str = f'{firmware_size / (1024 * 1024):.2f} MB'
             
-            return jsonify({
-                'success': True,
-                'message': '编译成功',
-                'output': output,
-                'firmware_path': firmware_path,
-                'firmware_size': size_str,
-                'firmware_size_bytes': firmware_size
-            })
+            yield f'data: {json.dumps({"success": True, "message": "编译成功", "firmware_path": firmware_path, "firmware_size": size_str, "firmware_size_bytes": firmware_size})}\n\n'
+            return
         else:
-            return jsonify({
-                'success': False,
-                'error': '编译失败',
-                'output': output
-            }), 500
+            yield f'data: {json.dumps({"success": False, "error": "编译失败：未找到固件文件"})}\n\n'
+            return
             
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': '编译超时'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+     except subprocess.TimeoutExpired:
+            yield f'data: {json.dumps({"error": "编译超时"})}\n\n'
+     except Exception as e:
+            yield f'data: {json.dumps({"error": str(e)})}\n\n'
+    return Response(_compile_stream(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 # ==================== 固件下载 API ====================
 @app.route('/api/firmware/download')
@@ -2263,9 +2312,11 @@ def scan_can_devices():
 # ==================== 固件烧录 API ====================
 @app.route('/api/firmware/flash', methods=['POST'])
 def flash_firmware():
-    """烧录固件"""
-    try:
-        data = request.json
+    """烧录固件（SSE 流式输出）"""
+    req_data = request.json  # 在请求上下文中提前捕获
+    def _flash_stream():
+     try:
+        data = req_data
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
@@ -2292,7 +2343,8 @@ def flash_firmware():
                 firmware_path = firmware_bin
         
         if not path_exists(firmware_path):
-            return jsonify({'error': f'固件文件不存在: {firmware_path}'}), 400
+            yield f'data: {json.dumps({"error": f"固件文件不存在: {firmware_path}"})}\n\n'
+            return
         
         # SSH 模式下上传固件到远程（仅本地文件需要上传，远程编译的固件已在目标机器上）
         if is_ssh_mode() and os.path.exists(firmware_path):
@@ -2300,12 +2352,8 @@ def flash_firmware():
         
         # TF卡模式 - 返回下载链接
         if flash_mode == 'TF':
-            return jsonify({
-                'success': True,
-                'message': 'TF卡模式: 请下载固件并复制到TF卡',
-                'download_url': '/api/firmware/download',
-                'mode': 'tf_card'
-            })
+            yield f'data: {json.dumps({"success": True, "message": "TF卡模式: 请下载固件并复制到TF卡", "download_url": "/api/firmware/download", "mode": "tf_card"})}\n\n'
+            return
         
         if flash_mode == 'DFU':
             # rp2040_boot 是 RP2040/RP2350 的 BOOTSEL 模式，应走 UF2 路径而非 STM32 DFU
@@ -2365,9 +2413,11 @@ def flash_firmware():
                 returncode = flash_result.returncode
                 
                 if returncode == 0:
-                    return jsonify({'success': True, 'message': '烧录成功', 'output': output})
+                    yield f'data: {json.dumps({"success": True, "message": "烧录成功", "output": output})}\n\n'
+                    return
                 else:
-                    return jsonify({'success': False, 'error': '烧录失败', 'output': output}), 500
+                    yield f'data: {json.dumps({"success": False, "error": "烧录失败", "output": output})}\n\n'
+                    return
         
         if flash_mode in ('KAT', 'CAN'):
             # Katapult 烧录（或 CAN Bus 烧录）- 自动判断 USB 或 CAN 方式
@@ -2405,9 +2455,8 @@ def flash_firmware():
                         cmd = f'{python_bin} {fast_flash_can} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                         logging.info(f'FAST-SSH 旧版烧录命令 (canboot/flash_can.py, {can_iface}): {cmd}')
                     else:
-                        return jsonify({
-                            'error': f'未找到烧录工具。请确认 Klipper 已安装。\n查找路径:\n  {fast_flashtool}\n  {fast_flash_can}'
-                        }), 500
+                        yield f'data: {json.dumps({"error": f"未找到烧录工具。请确认 Klipper 已安装。\\n查找路径:\\n  {fast_flashtool}\\n  {fast_flash_can}"})}\n\n'
+                        return
                     
                     result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
                     
@@ -2480,7 +2529,8 @@ def flash_firmware():
             rp2040_flash_tool = os.path.join(klipper_path, 'lib/rp2040_flash/rp2040_flash')
             
             if not path_exists(rp2040_flash_tool):
-                return jsonify({'error': 'rp2040_flash工具不存在，请检查Klipper安装'}), 500
+                yield f'data: {json.dumps({"error": "rp2040_flash工具不存在，请检查Klipper安装"})}\n\n'
+                return
             
             # 先卸载RP2040 BOOT设备（避免设备占用）
             _umount_rp2040_boot()
@@ -2495,33 +2545,42 @@ def flash_firmware():
                 returncode = 1
                 output = '【错误】未找到处于 BOOTSEL 模式的 RP2040 设备\n' + output
         else:
-            return jsonify({'error': f'不支持的烧录方式: {flash_mode}'}), 400
+            yield f'data: {json.dumps({"error": f"不支持的烧录方式: {flash_mode}"})}\n\n'
+            return
         
         if returncode == 0:
-            return jsonify({'success': True, 'message': '烧录成功', 'output': output})
+            yield f'data: {json.dumps({"success": True, "message": "烧录成功", "output": output})}\n\n'
+            return
         else:
-            return jsonify({'success': False, 'error': '烧录失败', 'output': output}), 500
+            yield f'data: {json.dumps({"success": False, "error": "烧录失败", "output": output})}\n\n'
+            return
             
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': '烧录超时'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+     except subprocess.TimeoutExpired:
+            yield f'data: {json.dumps({"error": "烧录超时"})}\n\n'
+     except Exception as e:
+            yield f'data: {json.dumps({"error": str(e)})}\n\n'
+    return Response(_flash_stream(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 # ==================== HOST固件安装 API ====================
 @app.route('/api/firmware/install-host', methods=['POST'])
 def install_host_firmware():
-    """安装固件到主板 MCU（通过 HOST 设备烧录）"""
-    try:
-        data = request.json
+    """安装固件到主板 MCU（通过 HOST 设备烧录）（SSE 流式输出）"""
+    req_data = request.json  # 在请求上下文中提前捕获
+    def _install_stream():
+     try:
+        data = req_data
         firmware_path = data.get('firmware_path', '')
         
         if not firmware_path:
-            return jsonify({'error': '固件路径不能为空'}), 400
+            yield f'data: {json.dumps({"error": "固件路径不能为空"})}\n\n'
+            return
         
         firmware_path = expand_klipper_path(firmware_path)
         
         if not path_exists(firmware_path):
-            return jsonify({'error': f'固件文件不存在: {firmware_path}'}), 400
+            yield f'data: {json.dumps({"error": f"固件文件不存在: {firmware_path}"})}\n\n'
+            return
         
         # FAST-SSH 模式: 使用 fly-flash 烧录
         if is_fast_ssh_mode():
@@ -2531,7 +2590,8 @@ def install_host_firmware():
             output = (result.stdout + '\n' + result.stderr).strip()
             
             if result.returncode != 0:
-                return jsonify({'error': f'fly-flash 烧录失败: {output}'}), 500
+                yield f'data: {json.dumps({"error": f"fly-flash 烧录失败: {output}"})}\n\n'
+                return
             
             # 烧录成功后重启 Klipper 服务
             restart_result = run_cmd(
@@ -2542,13 +2602,8 @@ def install_host_firmware():
             if restart_result.returncode != 0:
                 logger.warning(f'Klipper 重启失败: {restart_output}')
             
-            return jsonify({
-                'success': True,
-                'message': f'固件烧录成功: {firmware_path}',
-                'flash_output': output,
-                'restart_output': restart_output,
-                'method': 'fly-flash'
-            })
+            yield f'data: {json.dumps({"success": True, "message": f"固件烧录成功: {firmware_path}", "flash_output": output, "restart_output": restart_output, "method": "fly-flash"})}\n\n'
+            return
         
         # 标准 SSH / 本地模式: 复制到 klipper out 目录
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
@@ -2558,21 +2613,20 @@ def install_host_firmware():
             run_cmd(f'mkdir -p {shlex.quote(os.path.dirname(target_path))}', shell=True, capture_output=True)
             result = run_cmd(f'cp {shlex.quote(firmware_path)} {shlex.quote(target_path)}', shell=True, capture_output=True, text=True, timeout=10)
             if result.returncode != 0:
-                return jsonify({'error': f'复制失败: {result.stderr}'}), 500
+                yield f'data: {json.dumps({"error": f"复制失败: {result.stderr}"})}\n\n'
+                return
         else:
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             import shutil
             shutil.copy2(firmware_path, target_path)
         
-        return jsonify({
-            'success': True,
-            'message': f'固件已复制到 {target_path}',
-            'target_path': target_path,
-            'method': 'copy'
-        })
+        yield f'data: {json.dumps({"success": True, "message": f"固件已复制到 {target_path}", "target_path": target_path, "method": "copy"})}\n\n'
+        return
         
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+     except Exception as e:
+            yield f'data: {json.dumps({"error": str(e)})}\n\n'
+    return Response(_install_stream(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 # ==================== HOST 固件信息 API ====================
 @app.route('/api/firmware/host-info')
@@ -2828,10 +2882,10 @@ def flash_bl_firmware():
                     r = run_cmd(flash_cmd, shell=True, capture_output=True, text=True, timeout=60)
                     combined = (r.stdout or '') + (r.stderr or '')
                     if r.returncode == 0:
-                        return r
+                        return None, r
                     if not any(e in combined for e in LIBUSB_FATAL):
                         # 其他错误，不需要重试 alt
-                        return r
+                        return None, r
                     logger.warning(f'DFU alt={alt} 失败 ({combined.strip().splitlines()[-1] if combined.strip() else ""})，尝试 alt={1-alt}')
                 # 两个 alt 都失败，返回最后一次结果并附加诊断提示
                 r.stdout = (r.stdout or '') + (
@@ -2855,7 +2909,7 @@ def flash_bl_firmware():
                     '  3. 尝试更换主机上不同的 USB 口\n'
                     '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
                 )
-                return r
+                return None, r
 
             result = _run_dfu_flash()
             
@@ -2931,6 +2985,10 @@ def handle_config():
         if 'json_repo_url' in data:
             config['json_repo_url'] = data['json_repo_url']
         
+        # 连接模式变更时处理 SSH 连接
+        old_mode = config.get('connection_mode', 'local')
+        new_mode = data.get('connection_mode', old_mode)
+        
         # FAST-SSH 模式: 自动设置凭据
         if config.get('connection_mode') == 'fast-ssh':
             from ssh_manager import save_credential
@@ -2943,6 +3001,15 @@ def handle_config():
             if not config.get('fast_ssh_user'):
                 config['fast_ssh_user'] = _fast_user
                 config['fast_ssh_password'] = _fast_pwd
+        
+        # 切换到本地模式时立即断开 SSH 连接，避免后台线程继续尝试连接不可达设备
+        if new_mode == 'local' and old_mode in ('ssh', 'fast-ssh'):
+            try:
+                manager = SSHManager.get_instance()
+                manager.disconnect()
+                logger.info(f"连接模式从 {old_mode} 切换到 local，已断开 SSH 连接")
+            except Exception as e:
+                logger.warning(f"断开 SSH 连接时出错: {e}")
         
         # 连接模式或主机变更时重置 FlyOS 版本缓存
         global _remote_flyos_version, _remote_board_name
@@ -3276,7 +3343,7 @@ def detect_can_config():
                             result['txqueuelen'] = int(m.group(1))
                     except:
                         pass
-                    return result
+                    return r.stdout, result
 
     return result
 
@@ -4563,10 +4630,10 @@ def get_versions():
         'klipper_version': None
     }
     
-    # 获取 Klipper 版本 - 使用绝对路径避免systemd的~扩展问题
+    # 获取 Klipper 版本 - 使用 path_exists 兼容 SSH 模式
     try:
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
-        if os.path.exists(os.path.join(klipper_path, '.git')):
+        if path_exists(os.path.join(klipper_path, '.git')):
             output = run_cmd(
                 ['git', '-C', klipper_path, 'describe', '--tags', '--always'],
                 capture_output=True, text=True, timeout=5
