@@ -1980,7 +1980,6 @@ def compile_firmware():
         
         if firmware_path:
             # 修改文件权限
-            yield 'data: [LOG] 编译成功，正在设置文件权限...\n\n'
             try:
                 if is_ssh_mode():
                     # SSH 模式: 通过远程命令修改权限
