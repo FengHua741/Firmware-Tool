@@ -1480,6 +1480,7 @@ async function flashBootloader() {
     const blFile = document.getElementById('blFileSelect').value;
     const address = document.getElementById('blFlashAddress').value;
     const tool = document.getElementById('blFlashTool').value;
+    const eraseFlash = document.getElementById('blEraseFlash').checked;
     
     if (!blFile) {
         showError('请选择 BL 文件');
@@ -1488,7 +1489,9 @@ async function flashBootloader() {
     
     const resultDiv = document.getElementById('blFlashResult');
     resultDiv.style.display = 'block';
-    resultDiv.querySelector('.result-box').innerHTML = '<p>⏳ 正在烧录 BL，请稍候...</p>';
+    resultDiv.querySelector('.result-box').innerHTML = eraseFlash
+        ? '<p>⏳ 正在擦除 Flash 并烧录 BL，请稍候...</p>'
+        : '<p>⏳ 正在烧录 BL，请稍候...</p>';
     
     try {
         const response = await fetch('/api/firmware/bl/flash', {
@@ -1498,7 +1501,8 @@ async function flashBootloader() {
                 bl_firmware_path: blFile,
                 dfu_address: address,
                 flash_mode: tool === 'dfu-util' ? 'DFU' : tool === 'st-flash' ? 'st-flash' : 'openocd',
-                device_id: document.getElementById('flashDeviceId').value || ''
+                device_id: document.getElementById('flashDeviceId').value || '',
+                erase_flash: eraseFlash
             })
         });
         

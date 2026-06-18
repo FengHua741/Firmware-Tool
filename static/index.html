@@ -47,7 +47,11 @@
                 </div>
                 
                 <div class="resource-grid">
-                    <!-- Row 1: 实时资源监控 (span 2) + 网络状态 -->
+                    <!-- SSH 连接状态栏 -->
+                    <div id="sshConnectionBar" style="display:none; grid-column: 1 / -1; margin-bottom: 8px;">
+                        <div id="sshConnectionContent" style="display:flex; align-items:center; justify-content:space-between; padding:8px 14px; border-radius:6px; font-size:13px;"></div>
+                    </div>
+                    <!-- Row 1: 实时资源监控 (Span 2) + 网络状态 -->
                     <div class="card resource-monitor">
                         <div class="card-header"><h3>实时资源监控</h3></div>
                         <div class="card-body">
@@ -413,6 +417,12 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="form-row" style="align-items:center;">
+                            <label class="form-label" style="margin-bottom:0; margin-right:15px; cursor:pointer;">
+                                <input type="checkbox" id="blEraseFlash" checked style="margin-right:5px; vertical-align:middle;">
+                                烧录前擦除整个 Flash（防止 BL 烧录后自动跳入旧固件）
+                            </label>
+                        </div>
                         <div class="form-row">
                             <button class="btn btn-warning" onclick="flashBootloader()">🔥 烧录 BL</button>
                         </div>
@@ -761,61 +771,9 @@
                 <div class="card">
                     <div class="card-header"><h3>🔧 服务管理</h3></div>
                     <div class="card-body">
-                        <div class="service-grid">
-                            <div class="service-item">
-                                <span>Klipper 服务</span>
-                                <div class="btn-group">
-                                    <button class="btn btn-sm btn-success" onclick="controlService('klipper', 'start')">启动</button>
-                                    <button class="btn btn-sm btn-danger" onclick="controlService('klipper', 'stop')">停止</button>
-                                    <button class="btn btn-sm btn-warning" onclick="controlService('klipper', 'restart')">重启</button>
-                                </div>
-                            </div>
-                            <div class="service-item">
-                                <span>Moonraker 服务</span>
-                                <div class="btn-group">
-                                    <button class="btn btn-sm btn-success" onclick="controlService('moonraker', 'start')">启动</button>
-                                    <button class="btn btn-sm btn-danger" onclick="controlService('moonraker', 'stop')">停止</button>
-                                    <button class="btn btn-sm btn-warning" onclick="controlService('moonraker', 'restart')">重启</button>
-                                </div>
-                            </div>
-                            <div class="service-item">
-                                <span>KlipperScreen 服务</span>
-                                <div class="btn-group">
-                                    <button class="btn btn-sm btn-success" onclick="controlService('KlipperScreen', 'start')">启动</button>
-                                    <button class="btn btn-sm btn-danger" onclick="controlService('KlipperScreen', 'stop')">停止</button>
-                                    <button class="btn btn-sm btn-warning" onclick="controlService('KlipperScreen', 'restart')">重启</button>
-                                </div>
-                            </div>
-                            <div class="service-item">
-                                <span> crowsnest 服务</span>
-                                <div class="btn-group">
-                                    <button class="btn btn-sm btn-success" onclick="controlService('crowsnest', 'start')">启动</button>
-                                    <button class="btn btn-sm btn-danger" onclick="controlService('crowsnest', 'stop')">停止</button>
-                                    <button class="btn btn-sm btn-warning" onclick="controlService('crowsnest', 'restart')">重启</button>
-                                </div>
-                            </div>
-                            <div class="service-item">
-                                <span> mainsail 服务</span>
-                                <div class="btn-group">
-                                    <button class="btn btn-sm btn-success" onclick="controlService('mainsail', 'start')">启动</button>
-                                    <button class="btn btn-sm btn-danger" onclick="controlService('mainsail', 'stop')">停止</button>
-                                    <button class="btn btn-sm btn-warning" onclick="controlService('mainsail', 'restart')">重启</button>
-                                </div>
-                            </div>
-                            <div class="service-item">
-                                <span> fluidd 服务</span>
-                                <div class="btn-group">
-                                    <button class="btn btn-sm btn-success" onclick="controlService('fluidd', 'start')">启动</button>
-                                    <button class="btn btn-sm btn-danger" onclick="controlService('fluidd', 'stop')">停止</button>
-                                    <button class="btn btn-sm btn-warning" onclick="controlService('fluidd', 'restart')">重启</button>
-                                </div>
-                            </div>
-                            <div class="service-item">
-                                <span> Firmware-Tool 服务</span>
-                                <div class="btn-group">
-                                    <button class="btn btn-sm btn-warning" onclick="controlService('firmware-tool', 'restart')">重启</button>
-                                </div>
-                            </div>
+                        <div id="serviceList" class="service-grid">
+                            <!-- 服务列表将通过 JavaScript 动态加载 -->
+                            <p class="text-muted">正在加载服务列表...</p>
                         </div>
                     </div>
                 </div>

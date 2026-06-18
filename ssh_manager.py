@@ -205,12 +205,16 @@ class SSHManager:
     _instance_lock = threading.Lock()
 
     # 断路器参数
-    CIRCUIT_BREAKER_THRESHOLD = 3   # 连续失败 N 次后打开断路器
-    CIRCUIT_BREAKER_COOLDOWN = 15   # 断路器打开后冷却时间（秒）
-    CONNECT_TIMEOUT = 8             # 单次连接超时（秒）
-    CONNECT_RETRIES = 2             # 连接重试次数
-    CONNECT_RETRY_INTERVAL = 1      # 重试间隔（秒）
-    CMD_RETRIES = 1                 # 命令执行重试次数（不含首次）
+    CIRCUIT_BREAKER_THRESHOLD = 3       # 连续失败 N 次后打开断路器
+    CIRCUIT_BREAKER_COOLDOWN_BASE = 15  # 断路器基础冷却时间（秒）
+    CIRCUIT_BREAKER_COOLDOWN_MAX = 300  # 断路器最大冷却时间（秒），5 分钟
+    CONNECT_TIMEOUT = 8                 # 单次连接超时（秒）
+    CONNECT_RETRIES = 2                 # 连接重试次数
+    CONNECT_RETRY_INTERVAL = 1          # 重试间隔（秒）
+    CMD_RETRIES = 1                     # 命令执行重试次数（不含首次）
+    KEEPALIVE_INTERVAL = 15            # SSH keepalive 间隔（秒）
+    KEEPALIVE_COUNT_MAX = 3             # keepalive 最大无响应次数
+    TRANSPORT_PROBE_TIMEOUT = 5         # 传输层探测超时（秒）
 
     def __init__(self):
         self._client = None
@@ -218,9 +222,10 @@ class SSHManager:
         self._config_hash_value = None
         self._cmd_lock = threading.Lock()       # 命令执行锁（粒度：命令执行，不含连接建立）
         self._conn_lock = threading.Lock()      # 连接建立锁（粒度：连接建立/重建）
-        # 断路器状态
+        # 断路器状态（支持指数退避）
         self._consecutive_failures = 0          # 连续失败计数
         self._circuit_open_until = 0            # 断路器打开至该时间戳（0=关闭）
+        self._circuit_cooldown_level = 0        # 退避级别，每次断路打开递增
 
     @classmethod
     def get_instance(cls):
@@ -255,19 +260,52 @@ class SSHManager:
         return False
 
     def _mark_connection_success(self):
-        """标记连接成功，重置断路器"""
+        """标记连接成功，重置断路器和退避级别"""
         self._consecutive_failures = 0
         self._circuit_open_until = 0
+        self._circuit_cooldown_level = 0
 
     def _mark_connection_failure(self):
-        """标记连接失败，达到阈值时打开断路器"""
+        """标记连接失败，达到阈值时打开断路器（指数退避）"""
         self._consecutive_failures += 1
         if self._consecutive_failures >= self.CIRCUIT_BREAKER_THRESHOLD:
-            self._circuit_open_until = time.time() + self.CIRCUIT_BREAKER_COOLDOWN
+            # 指数退避: cooldown = base * 2^level，上限为 max
+            cooldown = min(
+                self.CIRCUIT_BREAKER_COOLDOWN_BASE * (2 ** self._circuit_cooldown_level),
+                self.CIRCUIT_BREAKER_COOLDOWN_MAX
+            )
+            self._circuit_open_until = time.time() + cooldown
+            self._circuit_cooldown_level += 1
             logger.warning(
                 f"SSH 断路器打开: 连续 {self._consecutive_failures} 次失败，"
-                f"冷却 {self.CIRCUIT_BREAKER_COOLDOWN} 秒"
+                f"冷却 {cooldown} 秒（退避级别 {self._circuit_cooldown_level}）"
             )
+
+    def _is_transport_alive(self):
+        """深度检测传输层是否真正存活（解决 stale transport 问题）
+
+        检查逻辑：
+        1. transport 对象存在
+        2. is_active() 返回 True（TCP 层面连接存在）
+        3. is_authenticated() 返回 True（已通过认证）
+        4. 主动发送 ignore 消息探测（检测半开连接）
+        """
+        if self._client is None:
+            return False
+        try:
+            transport = self._client.get_transport()
+            if transport is None:
+                return False
+            if not (transport.is_active() and transport.is_authenticated()):
+                return False
+            # 主动探测: 发送 ignore 消息，如果连接已死会立即触发异常
+            try:
+                transport.send_ignore()
+            except Exception:
+                return False
+            return True
+        except Exception:
+            return False
 
     def get_connection(self):
         """获取活跃的 SSH 连接，必要时建立或重建"""
@@ -275,21 +313,20 @@ class SSHManager:
 
         # 断路器打开时快速失败
         if self._is_circuit_open():
+            remaining = int(self._circuit_open_until - time.time()) if self._circuit_open_until > 0 else 0
             raise ConnectionError(
                 f"SSH 连接不可用（连续 {self._consecutive_failures} 次失败），"
-                f"将在 {int(self._circuit_open_until - time.time())} 秒后重试"
+                f"将在 {remaining} 秒后重试"
             )
 
         # 使用连接锁，防止多线程同时建立连接
         with self._conn_lock:
             # 双重检查：获取锁后再次确认是否已有可用连接
             if self._client is not None:
-                try:
-                    transport = self._client.get_transport()
-                    if transport and transport.is_active() and transport.is_authenticated():
-                        return self._client
-                except Exception:
-                    pass
+                if self._is_transport_alive():
+                    return self._client
+                # 传输层已死，强制断开
+                logger.info("SSH 传输层已失效，断开并准备重连")
                 self._disconnect()
 
             cfg = self._current_ssh_config()
@@ -324,6 +361,10 @@ class SSHManager:
             for attempt in range(self.CONNECT_RETRIES):
                 try:
                     self._client.connect(**connect_kwargs)
+                    # 设置 keepalive：定期发送心跳包，检测死连接
+                    transport = self._client.get_transport()
+                    if transport:
+                        transport.set_keepalive(self.KEEPALIVE_INTERVAL)
                     self._config_hash_value = cfg_hash
                     self._mark_connection_success()
                     logger.info(f"SSH 连接成功: {cfg['ssh_user']}@{host}:{cfg.get('ssh_port', 22)}")
@@ -373,7 +414,60 @@ class SSHManager:
         """公开断开方法 — 同时重置断路器"""
         self._consecutive_failures = 0
         self._circuit_open_until = 0
+        if hasattr(self, '_circuit_cooldown_level'):
+            self._circuit_cooldown_level = 0
         self._disconnect()
+
+    def force_reconnect(self):
+        """强制重连：断开现有连接并重置断路器，然后尝试重新连接
+
+        返回: (success, message)
+        """
+        # 先完整重置状态
+        self.disconnect()
+        logger.info("SSH 强制重连: 已重置连接状态，尝试重新连接")
+        try:
+            self.get_connection()
+            cfg = self._current_ssh_config()
+            host = cfg.get('ssh_host', '')
+            user = cfg.get('ssh_user', '')
+            port = cfg.get('ssh_port', 22)
+            return True, f"重连成功: {user}@{host}:{port}"
+        except ConnectionError as e:
+            return False, f"重连失败: {e}"
+        except Exception as e:
+            return False, f"重连异常: {e}"
+
+    def get_connection_status(self):
+        """获取当前连接状态信息
+
+        返回 dict: {
+            'connected': bool,
+            'circuit_open': bool,
+            'consecutive_failures': int,
+            'cooldown_remaining': int (秒),
+            'cooldown_level': int,
+            'host': str,
+            'last_error': str or None
+        }
+        """
+        cfg = self._current_ssh_config()
+        is_alive = self._is_transport_alive()
+        circuit_open = self._circuit_open_until > 0 and time.time() < self._circuit_open_until
+        cooldown_remaining = 0
+        if circuit_open and self._circuit_open_until > 0:
+            cooldown_remaining = max(0, int(self._circuit_open_until - time.time()))
+
+        return {
+            'connected': is_alive,
+            'circuit_open': circuit_open,
+            'consecutive_failures': self._consecutive_failures,
+            'cooldown_remaining': cooldown_remaining,
+            'cooldown_level': getattr(self, '_circuit_cooldown_level', 0),
+            'host': cfg.get('ssh_host', ''),
+            'port': cfg.get('ssh_port', 22),
+            'user': cfg.get('ssh_user', ''),
+        }
 
     def wrap_sudo(self, cmd):
         """包装 sudo 命令"""
@@ -664,21 +758,27 @@ def run_cmd_stream(cmd, shell=False, timeout=None, sudo=False):
     """
     if not is_ssh_mode():
         # 本地模式 — subprocess.Popen 逐行读取
+        # 注意: Popen 不支持 timeout 参数，需要手动跟踪时间
         try:
             kwargs = {
                 'stdout': subprocess.PIPE,
                 'stderr': subprocess.STDOUT,
                 'text': True,
             }
-            if timeout is not None:
-                kwargs['timeout'] = timeout
             if shell:
                 kwargs['shell'] = True
             elif isinstance(cmd, str):
                 kwargs['shell'] = True
 
             proc = subprocess.Popen(cmd, **kwargs)
+            start_time = time.time()
             for line in iter(proc.stdout.readline, ''):
+                # 检查超时
+                if timeout and (time.time() - start_time) > timeout:
+                    proc.kill()
+                    proc.wait()
+                    yield '[ERROR] 命令执行超时'
+                    return
                 stripped = line.rstrip('\n')
                 if stripped:
                     yield stripped
@@ -687,12 +787,6 @@ def run_cmd_stream(cmd, shell=False, timeout=None, sudo=False):
                 yield '[DONE] exit_code=0'
             else:
                 yield f'[ERROR] exit_code={proc.returncode}'
-        except subprocess.TimeoutExpired:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            yield '[ERROR] 命令执行超时'
         except Exception as e:
             yield f'[ERROR] {e}'
     else:

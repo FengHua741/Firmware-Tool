@@ -49,6 +49,7 @@ function switchPage(pageId) {
     } else if (pageId === 'settings') {
         loadSettings();
         loadVersionInfo();
+        loadAvailableServices();
     }
 }
 
@@ -908,6 +909,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // 更新资源显示
+let _lastSshConnected = null;  // 缓存上一次连接状态，避免重复请求
+let _sshStatusCheckInterval = 0;  // 状态检查间隔计数器
+
 async function updateResources() {
     try {
         const response = await fetch('/api/system/resources');
@@ -978,9 +982,143 @@ async function updateResources() {
                 boardBar.style.display = 'none';
             }
         }
+
+        // 每 3 秒检查一次 SSH 连接状态（非本地模式时）
+        _sshStatusCheckInterval++;
+        if (_sshStatusCheckInterval >= 3) {
+            _sshStatusCheckInterval = 0;
+            updateSshConnectionStatus();
+        }
         
     } catch (error) {
         console.error('获取系统资源失败:', error);
+    }
+}
+
+// 更新 SSH 连接状态栏
+async function updateSshConnectionStatus() {
+    const bar = document.getElementById('sshConnectionBar');
+    const content = document.getElementById('sshConnectionContent');
+    if (!bar || !content) return;
+
+    try {
+        const resp = await fetch('/api/ssh/status');
+        const status = await resp.json();
+
+        // 本地模式不显示
+        if (status.mode === 'local' || status.connected === null) {
+            bar.style.display = 'none';
+            _lastSshConnected = null;
+            return;
+        }
+
+        bar.style.display = 'block';
+
+        if (status.connected) {
+            // 连接正常
+            if (_lastSshConnected === false) {
+                // 从断连恢复
+                content.style.background = 'rgba(76,175,80,0.1)';
+                content.style.color = '#4caf50';
+                content.style.border = '1px solid rgba(76,175,80,0.3)';
+                content.innerHTML = `
+                    <span>SSH 连接已恢复: ${status.user}@${status.host}:${status.port}</span>
+                    <span></span>
+                `;
+                // 3 秒后切为简洁状态
+                setTimeout(() => {
+                    if (bar.style.display !== 'none') {
+                        content.style.background = 'rgba(76,175,80,0.05)';
+                        content.innerHTML = `
+                            <span style="color:#4caf50;">SSH 已连接: ${status.user}@${status.host}:${status.port}</span>
+                            <span></span>
+                        `;
+                    }
+                }, 3000);
+            } else {
+                // 持续正常
+                content.style.background = 'rgba(76,175,80,0.05)';
+                content.style.color = '#4caf50';
+                content.style.border = '1px solid rgba(76,175,80,0.2)';
+                content.innerHTML = `
+                    <span>SSH 已连接: ${status.user}@${status.host}:${status.port}</span>
+                    <span></span>
+                `;
+            }
+            _lastSshConnected = true;
+        } else {
+            // 连接断开
+            _lastSshConnected = false;
+            const modeLabel = status.mode === 'fast-ssh' ? 'FAST-SSH' : 'SSH';
+            let detailHtml = '';
+
+            if (status.circuit_open) {
+                detailHtml = `<span style="color:#e65100;">断路器已打开，冷却 ${status.cooldown_remaining} 秒后自动重试</span>`;
+            } else if (status.reconnect_attempts > 0) {
+                detailHtml = `<span style="color:#856404;">已自动重连 ${status.reconnect_attempts} 次</span>`;
+            } else {
+                detailHtml = '<span style="color:#856404;">连接中断，正在尝试恢复...</span>';
+            }
+
+            content.style.background = 'rgba(244,67,54,0.08)';
+            content.style.color = '#d32f2f';
+            content.style.border = '1px solid rgba(244,67,54,0.25)';
+            content.innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                    <span style="font-weight:600;">${modeLabel} 连接已断开: ${status.host}:${status.port}</span>
+                    ${detailHtml}
+                </div>
+                <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:#d32f2f;cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
+            `;
+        }
+    } catch (error) {
+        // 请求失败时不显示状态栏
+        console.debug('SSH 状态检查失败:', error);
+    }
+}
+
+// 手动重连
+async function manualReconnect() {
+    const content = document.getElementById('sshConnectionContent');
+    if (!content) return;
+
+    // 显示正在重连状态
+    content.style.background = 'rgba(33,150,243,0.08)';
+    content.style.color = '#1976d2';
+    content.style.border = '1px solid rgba(33,150,243,0.25)';
+    content.innerHTML = '<span>正在重新连接...</span><span></span>';
+
+    try {
+        const resp = await fetch('/api/ssh/reconnect', { method: 'POST' });
+        const data = await resp.json();
+
+        if (data.success) {
+            _lastSshConnected = true;
+            content.style.background = 'rgba(76,175,80,0.1)';
+            content.style.color = '#4caf50';
+            content.style.border = '1px solid rgba(76,175,80,0.3)';
+            content.innerHTML = `<span>${data.message}</span><span></span>`;
+        } else {
+            _lastSshConnected = false;
+            content.style.background = 'rgba(244,67,54,0.08)';
+            content.style.color = '#d32f2f';
+            content.style.border = '1px solid rgba(244,67,54,0.25)';
+            content.innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                    <span style="font-weight:600;">重连失败</span>
+                    <span style="font-size:12px;">${data.error || '未知错误'}</span>
+                </div>
+                <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:#d32f2f;cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
+            `;
+        }
+    } catch (error) {
+        content.style.background = 'rgba(244,67,54,0.08)';
+        content.style.color = '#d32f2f';
+        content.style.border = '1px solid rgba(244,67,54,0.25)';
+        content.innerHTML = `
+            <span>重连请求失败: ${error.message}</span>
+            <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:#d32f2f;cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
+        `;
     }
 }
 
@@ -999,12 +1137,58 @@ async function controlService(serviceName, action) {
         
         if (data.success) {
             showSuccess(`${serviceName} 服务${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}成功`);
+            // 延迟刷新服务列表以更新状态
+            setTimeout(loadAvailableServices, 1000);
         } else {
             showError(`${serviceName} 服务操作失败: ${data.error}`);
         }
     } catch (error) {
         showError(`服务操作失败: ${error.message}`);
     }
+}
+
+// 加载可用服务列表
+async function loadAvailableServices() {
+    const container = document.getElementById('serviceList');
+    if (!container) return;
+    
+    try {
+        const response = await fetch('/api/system/services');
+        const data = await response.json();
+        renderServiceButtons(data.services || []);
+    } catch (error) {
+        console.error('加载服务列表失败:', error);
+        container.innerHTML = '<p class="text-muted">加载服务列表失败</p>';
+    }
+}
+
+// 渲染服务按钮
+function renderServiceButtons(services) {
+    const container = document.getElementById('serviceList');
+    if (!container) return;
+    
+    if (services.length === 0) {
+        container.innerHTML = '<p class="text-muted">未检测到可用服务</p>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    services.forEach(service => {
+        const statusText = service.active ? '运行中' : '已停止';
+        const statusClass = service.active ? 'text-success' : 'text-danger';
+        
+        const div = document.createElement('div');
+        div.className = 'service-item';
+        div.innerHTML = `
+            <span>${service.name} 服务 <span class="${statusClass}">(${statusText})</span></span>
+            <div class="btn-group">
+                <button class="btn btn-sm btn-success" onclick="controlService('${service.name}', 'start')">启动</button>
+                <button class="btn btn-sm btn-danger" onclick="controlService('${service.name}', 'stop')">停止</button>
+                <button class="btn btn-sm btn-warning" onclick="controlService('${service.name}', 'restart')">重启</button>
+            </div>
+        `;
+        container.appendChild(div);
+    });
 }
 
 // 加载版本信息

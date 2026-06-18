@@ -459,10 +459,28 @@ def _collect_remote_resources():
         return None
 
 # ==================== 资源监控 ====================
+# 全局 SSH 连接状态（供 API 和前端读取）
+_ssh_connection_status = {
+    'connected': False,
+    'circuit_open': False,
+    'consecutive_failures': 0,
+    'cooldown_remaining': 0,
+    'cooldown_level': 0,
+    'last_disconnect_time': None,   # 最近一次断连时间
+    'reconnect_attempts': 0,        # 自动重连尝试次数
+}
+
+# SSH 自动重连参数
+SSH_RECONNECT_COOLDOWN = 10        # 自动重连冷却间隔（秒）
+SSH_RECONNECT_MAX_INTERVAL = 120   # 自动重连最大间隔（秒）
+
+
 def resource_monitor():
     """后台线程：采集系统资源数据"""
+    global _ssh_connection_status
     first_run = True
     _ssh_fail_count = 0  # SSH 连接连续失败计数
+    _last_reconnect_attempt = 0  # 上次自动重连尝试时间戳
     while True:
         try:
             if is_ssh_mode():
@@ -475,19 +493,53 @@ def resource_monitor():
                         resource_history['disk'].append(resources['disk']['percent'])
                         resource_history['timestamps'].append(datetime.now().isoformat())
                         _ssh_fail_count = 0  # 重置失败计数
+                        # 更新连接状态：已恢复
+                        if not _ssh_connection_status['connected']:
+                            logger.info("SSH 连接已自动恢复")
+                        _ssh_connection_status.update({
+                            'connected': True,
+                            'circuit_open': False,
+                            'consecutive_failures': 0,
+                            'cooldown_remaining': 0,
+                            'cooldown_level': 0,
+                            'reconnect_attempts': 0,
+                            'last_disconnect_time': None,
+                        })
                     else:
                         _ssh_fail_count += 1
                         if first_run:
                             logger.warning("远程资源采集返回 None， 可能 SSH 连接未建立")
+                        _update_ssh_disconnect_status()
                 except ConnectionError as e:
                     _ssh_fail_count += 1
                     if '不可用' in str(e) or '断路器' in str(e):
                         logger.debug(f"远程资源采集跳过: {e}")
                     else:
                         logger.warning(f"远程资源采集连接失败: {e}")
+                    _update_ssh_disconnect_status()
 
-                # SSH 连接失败时延长等待间隔，避免堆积阻塞请求
+                # SSH 长时间断连时尝试主动重连
                 if _ssh_fail_count >= 3:
+                    now = time.time()
+                    # 指数退避计算重连间隔: 10s, 20s, 40s, 80s, 最大 120s
+                    reconnect_interval = min(
+                        SSH_RECONNECT_COOLDOWN * (2 ** min(_ssh_connection_status['reconnect_attempts'], 4)),
+                        SSH_RECONNECT_MAX_INTERVAL
+                    )
+                    if now - _last_reconnect_attempt >= reconnect_interval:
+                        _last_reconnect_attempt = now
+                        _ssh_connection_status['reconnect_attempts'] += 1
+                        logger.info(
+                            f"SSH 自动重连尝试 (第 {_ssh_connection_status['reconnect_attempts']} 次)..."
+                        )
+                        try:
+                            manager = SSHManager.get_instance()
+                            # 强制断开现有连接并重置断路器，再重连
+                            manager.disconnect()
+                            manager.get_connection()
+                            logger.info("SSH 自动重连成功")
+                        except Exception as re:
+                            logger.debug(f"SSH 自动重连失败: {re}")
                     time.sleep(5)  # 连续失败后降低采集频率
                 else:
                     time.sleep(2)  # 合计约 3 秒间隔
@@ -506,6 +558,25 @@ def resource_monitor():
         except Exception as e:
             logger.error(f"资源监控错误: {e}")
             time.sleep(3)
+
+
+def _update_ssh_disconnect_status():
+    """更新 SSH 断连状态（供资源监控和 API 使用）"""
+    global _ssh_connection_status
+    try:
+        manager = SSHManager.get_instance()
+        status = manager.get_connection_status()
+        _ssh_connection_status.update({
+            'connected': status['connected'],
+            'circuit_open': status['circuit_open'],
+            'consecutive_failures': status['consecutive_failures'],
+            'cooldown_remaining': status['cooldown_remaining'],
+            'cooldown_level': status['cooldown_level'],
+        })
+        if not status['connected'] and _ssh_connection_status.get('last_disconnect_time') is None:
+            _ssh_connection_status['last_disconnect_time'] = datetime.now().isoformat()
+    except Exception:
+        _ssh_connection_status['connected'] = False
 
 monitor_thread = threading.Thread(target=resource_monitor, daemon=True)
 monitor_thread.start()
@@ -2862,8 +2933,11 @@ def flash_bl_firmware():
         flash_mode = data.get('flash_mode', 'DFU')
         dfu_address = data.get('dfu_address', '0x08000000')
         katapult_serial = data.get('katapult_serial', '')
+        erase_flash = data.get('erase_flash', True)  # 默认启用擦除
         
-        if not bl_firmware_path or not path_exists(bl_firmware_path):
+        # BL固件文件始终存储在本地 board_configs/ 目录，使用 os.path.exists 检查
+        # 而不是 path_exists()（SSH模式下会检查远程机器导致失败）
+        if not bl_firmware_path or not os.path.exists(bl_firmware_path):
             return jsonify({'error': f'BL固件文件不存在: {bl_firmware_path}'}), 400
         
         # SSH 模式下上传 BL 固件到远程
@@ -2881,6 +2955,16 @@ def flash_bl_firmware():
                 # 不指定 -d，让 dfu-util 自动检测所有 DFU 设备
                 device_filter = ''
             safe_address = shlex.quote(dfu_address)
+
+            # 烧录前擦除整个 Flash，防止 BL 烧录后自动跳入旧固件
+            if erase_flash:
+                logger.info('BL 烧录前执行 Flash 全片擦除...')
+                erase_cmd = f'sudo dfu-util -a 0 {device_filter} -s {safe_address}:mass-erase:force'
+                erase_result = run_cmd(erase_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                if erase_result.returncode != 0:
+                    logger.warning(f'Flash 擦除失败 (rc={erase_result.returncode})，继续尝试烧录')
+                else:
+                    logger.info('Flash 擦除完成')
 
             def _run_dfu_flash():
                 """执行 DFU 烧录：先尝试 alt=0，失败则 alt=1，并在 LIBUSB 错误时给出提示"""
@@ -2921,7 +3005,7 @@ def flash_bl_firmware():
                 )
                 return None, r
 
-            result = _run_dfu_flash()
+            _, result = _run_dfu_flash()
             
         elif flash_mode == 'UF2':
             # UF2烧录（RP2040/RP2350）- 使用rp2040_flash工具
@@ -3083,6 +3167,53 @@ def test_ssh_connection():
         if success:
             return jsonify({'success': True, 'message': message})
         else:
+            return jsonify({'success': False, 'error': message}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 200
+
+
+@app.route('/api/ssh/status')
+def get_ssh_connection_status():
+    """获取 SSH 连接状态"""
+    if not is_ssh_mode():
+        return jsonify({'mode': 'local', 'connected': None})
+    try:
+        manager = SSHManager.get_instance()
+        status = manager.get_connection_status()
+        status['mode'] = config.get('connection_mode', 'ssh')
+        status['last_disconnect_time'] = _ssh_connection_status.get('last_disconnect_time')
+        status['reconnect_attempts'] = _ssh_connection_status.get('reconnect_attempts', 0)
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({
+            'mode': config.get('connection_mode', 'ssh'),
+            'connected': False,
+            'error': str(e)
+        })
+
+
+@app.route('/api/ssh/reconnect', methods=['POST'])
+def reconnect_ssh():
+    """手动触发 SSH 重连"""
+    global _ssh_connection_status
+    if not is_ssh_mode():
+        return jsonify({'success': False, 'error': '当前不是 SSH 模式'}), 400
+    try:
+        manager = SSHManager.get_instance()
+        success, message = manager.force_reconnect()
+        if success:
+            _ssh_connection_status.update({
+                'connected': True,
+                'circuit_open': False,
+                'consecutive_failures': 0,
+                'cooldown_remaining': 0,
+                'cooldown_level': 0,
+                'reconnect_attempts': 0,
+                'last_disconnect_time': None,
+            })
+            return jsonify({'success': True, 'message': message})
+        else:
+            _update_ssh_disconnect_status()
             return jsonify({'success': False, 'error': message}), 200
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 200
@@ -4658,6 +4789,70 @@ def get_versions():
     
     return jsonify(result)
 
+@app.route('/api/system/services', methods=['GET'])
+def get_available_services():
+    """获取系统中实际安装的服务及其状态"""
+    # systemd 直接管理的服务（nginx 仅用于内部判断前端状态，不展示）
+    systemd_services = [
+        'klipper', 'moonraker', 'KlipperScreen',
+        'crowsnest', 'firmware-tool'
+    ]
+    
+    # nginx 托管的 Web 前端（不是独立 systemd 服务）
+    web_frontends = {
+        'mainsail': {
+            'nginx_configs': ['/etc/nginx/sites-enabled/mainsail', '/etc/nginx/conf.d/mainsail.conf'],
+            'web_roots': ['/home/pi/mainsail', '/home/fenghua/mainsail', '/usr/share/mainsail'],
+        },
+        'fluidd': {
+            'nginx_configs': ['/etc/nginx/sites-enabled/fluidd', '/etc/nginx/conf.d/fluidd.conf'],
+            'web_roots': ['/home/pi/fluidd', '/home/fenghua/fluidd', '/usr/share/fluidd'],
+        },
+    }
+    
+    available_services = []
+    
+    # 1. 检测 systemd 服务
+    for service in systemd_services:
+        try:
+            result = run_cmd(['systemctl', 'list-unit-files', f'{service}.service'],
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and f'{service}.service' in result.stdout:
+                status_result = run_cmd(['systemctl', 'is-active', service],
+                                             capture_output=True, text=True, timeout=5)
+                is_active = status_result.returncode == 0
+                available_services.append({
+                    'name': service,
+                    'active': is_active
+                })
+        except Exception as e:
+            logger.warning(f'检查服务 {service} 状态失败: {e}')
+            continue
+    
+    # 2. 检测 nginx 托管的 Web 前端（单独判断 nginx 是否活跃，但不展示 nginx 本身）
+    try:
+        nginx_result = run_cmd(['systemctl', 'is-active', 'nginx'],
+                                    capture_output=True, text=True, timeout=5)
+        nginx_active = nginx_result.returncode == 0
+    except Exception:
+        nginx_active = False
+    
+    for frontend_name, paths in web_frontends.items():
+        try:
+            config_exists = any(os.path.isfile(cfg) for cfg in paths['nginx_configs'])
+            root_exists = any(os.path.isdir(root) for root in paths['web_roots'])
+            
+            if config_exists or root_exists:
+                available_services.append({
+                    'name': frontend_name,
+                    'active': nginx_active
+                })
+        except Exception as e:
+            logger.warning(f'检查 Web 前端 {frontend_name} 失败: {e}')
+            continue
+    
+    return jsonify({'services': available_services})
+
 @app.route('/api/system/service', methods=['POST'])
 def control_service():
     """控制服务（启动/停止/重启）- 委托给 manage_service 处理"""
@@ -4671,7 +4866,12 @@ def control_service():
     if action not in ['start', 'stop', 'restart']:
         return jsonify({'success': False, 'error': '无效的操作'}), 400
     
-    # 委托给 manage_service 处理
+    # mainsail / fluidd 是 nginx 托管的 Web 前端，没有独立 systemd 服务
+    # 对它们的操作映射到 nginx
+    nginx_frontends = ['mainsail', 'fluidd']
+    if service_name in nginx_frontends:
+        service_name = 'nginx'
+    
     try:
         result = run_cmd(['sudo', 'systemctl', action, service_name],
                               capture_output=True, text=True, timeout=30)
