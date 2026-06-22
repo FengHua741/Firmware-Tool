@@ -233,7 +233,7 @@ async function searchCanUuid() {
             return;
         }
     }
-    container.innerHTML = '<p class="empty">搜索中（约2.5秒）...</p>';
+    container.innerHTML = '<p class="empty">搜索中...</p>';
     try {
         const response = await fetch('/api/system/can-uuid', {
             method: 'POST',
