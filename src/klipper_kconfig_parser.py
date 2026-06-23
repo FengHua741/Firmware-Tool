@@ -347,13 +347,17 @@ class KlipperKconfigParser:
         
         return None
     
-    def save_database(self, output_path='mcu_database.json'):
+    def save_database(self, output_path=None):
         """保存数据库到 JSON 文件"""
+        if output_path is None:
+            output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'mcu_database.json')
         with open(output_path, 'w') as f:
             json.dump(self.mcu_database, f, indent=2)
     
-    def load_database(self, input_path='mcu_database.json'):
+    def load_database(self, input_path=None):
         """从 JSON 文件加载数据库"""
+        if input_path is None:
+            input_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'mcu_database.json')
         with open(input_path, 'r') as f:
             self.mcu_database = json.load(f)
         return self.mcu_database

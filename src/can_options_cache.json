@@ -1,0 +1,1590 @@
+{
+  "stm32": {
+    "communication_options": [
+      {
+        "config_symbol": "STM32_USB_PA11_PA12",
+        "display": "USB (on PA11/PA12)",
+        "select": "USBSERIAL",
+        "comm_type": "usb",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F401",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G0B0",
+          "STM32F765",
+          "STM32L412",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_USB_PA11_PA12_REMAP",
+        "display": "USB (on PA9/PA10)",
+        "select": "USBSERIAL",
+        "comm_type": "usb",
+        "compatible_processors": [
+          "STM32F042"
+        ]
+      },
+      {
+        "config_symbol": "STM32_USB_PB14_PB15",
+        "display": "USB (on PB14/PB15)",
+        "select": "USBSERIAL",
+        "comm_type": "usb",
+        "compatible_processors": [
+          "STM32H743",
+          "STM32H750"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART1",
+        "display": "Serial (on USART1 PA10/PA9)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F401",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32F031",
+          "STM32F070",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "STM32L412",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART1_ALT_PB7_PB6",
+        "display": "Serial (on USART1 PB7/PB6)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F401",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32F031",
+          "STM32F070",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "STM32L412",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART2",
+        "display": "Serial (on USART2 PA3/PA2)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F401",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32F031",
+          "STM32F070",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "STM32L412",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART2_ALT_PA15_PA14",
+        "display": "Serial (on USART2 PA15/PA14)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32G431",
+          "STM32G474",
+          "STM32F031",
+          "STM32F070"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART2_ALT_PB4_PB3",
+        "display": "Serial (on USART2 PB4/PB3)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32G431",
+          "STM32G474"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART2_ALT_PD6_PD5",
+        "display": "Serial (on USART2 PD6/PD5)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32F103",
+          "STM32F207",
+          "STM32F401",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "STM32L412",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART3",
+        "display": "Serial (on USART3 PB11/PB10)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "STM32L412",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART3_ALT_PD9_PD8",
+        "display": "Serial (on USART3 PD9/PD8)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "STM32L412",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART3_ALT_PC11_PC10",
+        "display": "Serial (on USART3 PC11/PC10)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32G474"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_UART4",
+        "display": "Serial (on UART4 PA0/PA1)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32H723",
+          "STM32H743",
+          "STM32H750"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART5",
+        "display": "Serial (on USART5 PD2/PD3)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G0B0"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART6",
+        "display": "Serial (on USART6 PA12/PA11)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32F401"
+        ]
+      },
+      {
+        "config_symbol": "STM32_SERIAL_USART6_ALT_PC7_PC6",
+        "display": "Serial (on USART6 PC7/PC6)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "STM32F401"
+        ]
+      },
+      {
+        "config_symbol": "STM32_CANBUS_PA11_PA12",
+        "display": "CAN bus (on PA11/PA12)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_CANBUS_PA11_PA12_REMAP",
+        "display": "CAN bus (on PA9/PA10)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32F042"
+        ]
+      },
+      {
+        "config_symbol": "STM32_CANBUS_PA11_PB9",
+        "display": "CAN bus (on PA11/PB9)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_MMENU_CANBUS_PB8_PB9",
+        "display": "CAN bus (on PB8/PB9)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_MMENU_CANBUS_PI9_PH13",
+        "display": "CAN bus (on PI9/PH13)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446"
+        ]
+      },
+      {
+        "config_symbol": "STM32_MMENU_CANBUS_PB5_PB6",
+        "display": "CAN bus (on PB5/PB6)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750"
+        ]
+      },
+      {
+        "config_symbol": "STM32_MMENU_CANBUS_PB12_PB13",
+        "display": "CAN bus (on PB12/PB13)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "config_symbol": "STM32_MMENU_CANBUS_PD0_PD1",
+        "display": "CAN bus (on PD0/PD1)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "N32G452",
+          "N32G455"
+        ]
+      },
+      {
+        "config_symbol": "STM32_MMENU_CANBUS_PB0_PB1",
+        "display": "CAN bus (on PB0/PB1)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "config_symbol": "STM32_MMENU_CANBUS_PD12_PD13",
+        "display": "CAN bus (on PD12/PD13)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "config_symbol": "STM32_MMENU_CANBUS_PC2_PC3",
+        "display": "CAN bus (on PC2/PC3)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "config_symbol": "STM32_MMENU_CANBUS_PH13_PH14",
+        "display": "CAN bus (on PH13/PH14)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "STM32H743"
+        ]
+      },
+      {
+        "config_symbol": "STM32_USBCANBUS_PA11_PA12",
+        "display": "USB to CAN bus bridge (USB on PA11/PA12)",
+        "select": "USBCANBUS",
+        "comm_type": "usbcanbridge",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750"
+        ]
+      }
+    ],
+    "direct_can": [
+      {
+        "pins": "PA11/PA12",
+        "config": "STM32_CANBUS_PA11_PA12",
+        "display": "CAN bus (on PA11/PA12)",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PA9/PA10",
+        "config": "STM32_CANBUS_PA11_PA12_REMAP",
+        "display": "CAN bus (on PA9/PA10)",
+        "compatible_processors": [
+          "STM32F042"
+        ]
+      },
+      {
+        "pins": "PA11/PB9",
+        "config": "STM32_CANBUS_PA11_PB9",
+        "display": "CAN bus (on PA11/PB9)",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PB8/PB9",
+        "config": "STM32_MMENU_CANBUS_PB8_PB9",
+        "display": "CAN bus (on PB8/PB9)",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PI9/PH13",
+        "config": "STM32_MMENU_CANBUS_PI9_PH13",
+        "display": "CAN bus (on PI9/PH13)",
+        "compatible_processors": [
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446"
+        ]
+      },
+      {
+        "pins": "PB5/PB6",
+        "config": "STM32_MMENU_CANBUS_PB5_PB6",
+        "display": "CAN bus (on PB5/PB6)",
+        "compatible_processors": [
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750"
+        ]
+      },
+      {
+        "pins": "PB12/PB13",
+        "config": "STM32_MMENU_CANBUS_PB12_PB13",
+        "display": "CAN bus (on PB12/PB13)",
+        "compatible_processors": [
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PD0/PD1",
+        "config": "STM32_MMENU_CANBUS_PD0_PD1",
+        "display": "CAN bus (on PD0/PD1)",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PB0/PB1",
+        "config": "STM32_MMENU_CANBUS_PB0_PB1",
+        "display": "CAN bus (on PB0/PB1)",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PD12/PD13",
+        "config": "STM32_MMENU_CANBUS_PD12_PD13",
+        "display": "CAN bus (on PD12/PD13)",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PC2/PC3",
+        "config": "STM32_MMENU_CANBUS_PC2_PC3",
+        "display": "CAN bus (on PC2/PC3)",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PH13/PH14",
+        "config": "STM32_MMENU_CANBUS_PH13_PH14",
+        "display": "CAN bus (on PH13/PH14)",
+        "compatible_processors": [
+          "STM32H743"
+        ]
+      }
+    ],
+    "bridge_can": [
+      {
+        "pins": "PB8/PB9",
+        "config": "STM32_CMENU_CANBUS_PB8_PB9",
+        "display": "CAN bus (on PB8/PB9)",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F401",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32F031",
+          "STM32F070",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765",
+          "STM32L412"
+        ]
+      },
+      {
+        "pins": "PI9/PH13",
+        "config": "STM32_CMENU_CANBUS_PI9_PH13",
+        "display": "CAN bus (on PI9/PH13)",
+        "compatible_processors": [
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446"
+        ]
+      },
+      {
+        "pins": "PB5/PB6",
+        "config": "STM32_CMENU_CANBUS_PB5_PB6",
+        "display": "CAN bus (on PB5/PB6)",
+        "compatible_processors": [
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750"
+        ]
+      },
+      {
+        "pins": "PB12/PB13",
+        "config": "STM32_CMENU_CANBUS_PB12_PB13",
+        "display": "CAN bus (on PB12/PB13)",
+        "compatible_processors": [
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PD0/PD1",
+        "config": "STM32_CMENU_CANBUS_PD0_PD1",
+        "display": "CAN bus (on PD0/PD1)",
+        "compatible_processors": [
+          "STM32F042",
+          "STM32F072",
+          "STM32F103",
+          "STM32F207",
+          "STM32F405",
+          "STM32F407",
+          "STM32F429",
+          "STM32F446",
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PB0/PB1",
+        "config": "STM32_CMENU_CANBUS_PB0_PB1",
+        "display": "CAN bus (on PB0/PB1)",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PD12/PD13",
+        "config": "STM32_CMENU_CANBUS_PD12_PD13",
+        "display": "CAN bus (on PD12/PD13)",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PC2/PC3",
+        "config": "STM32_CMENU_CANBUS_PC2_PC3",
+        "display": "CAN bus (on PC2/PC3)",
+        "compatible_processors": [
+          "STM32G0B1",
+          "STM32G431",
+          "STM32G474",
+          "STM32H723",
+          "STM32H743",
+          "STM32H750",
+          "STM32G070",
+          "STM32G0B0",
+          "STM32F765"
+        ]
+      },
+      {
+        "pins": "PH13/PH14",
+        "config": "STM32_CMENU_CANBUS_PH13_PH14",
+        "display": "CAN bus (on PH13/PH14)",
+        "compatible_processors": [
+          "STM32H743"
+        ]
+      }
+    ],
+    "processor_capabilities": {
+      "STM32F042": [
+        "MACH_STM32F042",
+        "MACH_STM32F0x2",
+        "MACH_STM32F0",
+        "HAVE_STM32_USBFS",
+        "HAVE_STM32_CANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32F072": [
+        "MACH_STM32F072",
+        "MACH_STM32F0x2",
+        "MACH_STM32F0",
+        "HAVE_STM32_USBFS",
+        "HAVE_STM32_CANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32F103": [
+        "MACH_STM32F103",
+        "MACH_STM32F1",
+        "HAVE_STM32_USBFS",
+        "HAVE_STM32_CANBUS"
+      ],
+      "STM32F207": [
+        "MACH_STM32F207",
+        "MACH_STM32F2",
+        "HAVE_STM32_USBOTG",
+        "HAVE_STM32_CANBUS"
+      ],
+      "STM32F401": [
+        "MACH_STM32F401",
+        "MACH_STM32F4",
+        "HAVE_STM32_USBOTG"
+      ],
+      "STM32F405": [
+        "MACH_STM32F405",
+        "MACH_STM32F4",
+        "MACH_STM32F4x5",
+        "HAVE_STM32_USBOTG",
+        "HAVE_STM32_CANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32F407": [
+        "MACH_STM32F407",
+        "MACH_STM32F4",
+        "MACH_STM32F4x5",
+        "HAVE_STM32_USBOTG",
+        "HAVE_STM32_CANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32F429": [
+        "MACH_STM32F429",
+        "MACH_STM32F4",
+        "MACH_STM32F4x5",
+        "HAVE_STM32_USBOTG",
+        "HAVE_STM32_CANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32F446": [
+        "MACH_STM32F446",
+        "MACH_STM32F4",
+        "HAVE_STM32_USBOTG",
+        "HAVE_STM32_CANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32G0B1": [
+        "MACH_STM32G0B1",
+        "MACH_STM32G0",
+        "MACH_STM32G0Bx",
+        "HAVE_STM32_USBFS",
+        "HAVE_STM32_FDCANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32G431": [
+        "MACH_STM32G431",
+        "MACH_STM32G4",
+        "HAVE_STM32_USBFS",
+        "HAVE_STM32_FDCANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32G474": [
+        "MACH_STM32G474",
+        "MACH_STM32G4",
+        "HAVE_STM32_USBFS",
+        "HAVE_STM32_FDCANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32H723": [
+        "MACH_STM32H723",
+        "MACH_STM32H7",
+        "HAVE_STM32_USBOTG",
+        "HAVE_STM32_FDCANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32H743": [
+        "MACH_STM32H743",
+        "MACH_STM32H7",
+        "HAVE_STM32_USBOTG",
+        "HAVE_STM32_FDCANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32H750": [
+        "MACH_STM32H750",
+        "MACH_STM32H7",
+        "HAVE_STM32_USBOTG",
+        "HAVE_STM32_FDCANBUS",
+        "HAVE_STM32_USBCANBUS"
+      ],
+      "STM32F031": [
+        "MACH_STM32F031",
+        "MACH_STM32F0"
+      ],
+      "STM32F070": [
+        "MACH_STM32F070",
+        "MACH_STM32F0"
+      ],
+      "STM32G070": [
+        "MACH_STM32G070",
+        "MACH_STM32G0",
+        "MACH_STM32G07x",
+        "HAVE_STM32_FDCANBUS"
+      ],
+      "STM32G0B0": [
+        "MACH_STM32G0B0",
+        "MACH_STM32G0",
+        "MACH_STM32G0Bx",
+        "HAVE_STM32_USBFS",
+        "HAVE_STM32_FDCANBUS"
+      ],
+      "STM32F765": [
+        "MACH_STM32F765",
+        "MACH_STM32F7",
+        "HAVE_STM32_USBOTG",
+        "HAVE_STM32_FDCANBUS"
+      ],
+      "STM32L412": [
+        "MACH_STM32L412",
+        "MACH_STM32L4",
+        "HAVE_STM32_USBOTG"
+      ]
+    }
+  },
+  "rp2040": {
+    "communication_options": [
+      {
+        "config_symbol": "RPXXXX_USB",
+        "display": "USBSERIAL",
+        "select": "USBSERIAL",
+        "comm_type": "usb",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_SERIAL_UART0_PINS_0_1",
+        "display": "UART0 on GPIO0/GPIO1",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_SERIAL_UART0_PINS_12_13",
+        "display": "UART0 on GPIO12/GPIO13",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_SERIAL_UART0_PINS_16_17",
+        "display": "UART0 on GPIO16/GPIO17",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_SERIAL_UART0_PINS_28_29",
+        "display": "UART0 on GPIO28/GPIO29",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_SERIAL_UART1_PINS_4_5",
+        "display": "UART1 on GPIO4/GPIO5",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_SERIAL_UART1_PINS_8_9",
+        "display": "UART1 on  GPIO8/GPIO9",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_SERIAL_UART1_PINS_20_21",
+        "display": "UART1 on  GPIO20/GPIO21",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_SERIAL_UART1_PINS_24_25",
+        "display": "UART1 on GPIO24/GPIO25",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_CANBUS",
+        "display": "CAN bus",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      },
+      {
+        "config_symbol": "RPXXXX_USBCANBUS",
+        "display": "USB to CAN bus bridge",
+        "select": "USBCANBUS",
+        "comm_type": "usbcanbridge",
+        "compatible_processors": [
+          "RP2040",
+          "RP2350"
+        ]
+      }
+    ],
+    "type": "gpio_integer",
+    "rx_config": "RPXXXX_CANBUS_GPIO_RX",
+    "tx_config": "RPXXXX_CANBUS_GPIO_TX",
+    "rx_default": 4,
+    "tx_default": 5,
+    "range": [
+      0,
+      29
+    ],
+    "has_canbus": true,
+    "has_usbcanbus": true
+  },
+  "atsamd": {
+    "communication_options": [
+      {
+        "config_symbol": "ATSAMD_USB",
+        "display": "USB",
+        "select": "USBSERIAL",
+        "comm_type": "usb",
+        "compatible_processors": [
+          "SAMD21G18",
+          "SAMD21E18",
+          "SAMD21J18",
+          "SAMD21E15",
+          "SAMD51G19",
+          "SAMD51J19",
+          "SAMD51N19",
+          "SAMD51P20",
+          "SAME51J19",
+          "SAME51N19",
+          "SAME54P20"
+        ]
+      },
+      {
+        "config_symbol": "ATSAMD_SERIAL",
+        "display": "Serial",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "SAMD21G18",
+          "SAMD21E18",
+          "SAMD21J18",
+          "SAMD21E15",
+          "SAMD51G19",
+          "SAMD51J19",
+          "SAMD51N19",
+          "SAMD51P20",
+          "SAME51J19",
+          "SAME51N19",
+          "SAME54P20"
+        ]
+      },
+      {
+        "config_symbol": "ATSAMD_MMENU_CANBUS_PA23_PA22",
+        "display": "CAN bus (on PA23/PA22)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "SAMD21G18",
+          "SAMD21E18",
+          "SAMD21J18",
+          "SAMD21E15",
+          "SAMC21G18",
+          "SAMD51G19",
+          "SAMD51J19",
+          "SAMD51N19",
+          "SAMD51P20",
+          "SAME51J19",
+          "SAME51N19",
+          "SAME54P20"
+        ]
+      },
+      {
+        "config_symbol": "ATSAMD_MMENU_CANBUS_PA25_PA24",
+        "display": "CAN bus (on PA25/PA24)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "SAMD21G18",
+          "SAMD21E18",
+          "SAMD21J18",
+          "SAMD21E15",
+          "SAMC21G18",
+          "SAMD51G19",
+          "SAMD51J19",
+          "SAMD51N19",
+          "SAMD51P20",
+          "SAME51J19",
+          "SAME51N19",
+          "SAME54P20"
+        ]
+      },
+      {
+        "config_symbol": "ATSAMD_MMENU_CANBUS_PB11_PB10",
+        "display": "CAN bus (on PB11/PB10)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "SAMC21G18"
+        ]
+      },
+      {
+        "config_symbol": "ATSAMD_MMENU_CANBUS_PB13_PB12",
+        "display": "CAN bus (on PB13/PB12)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "SAMD21G18",
+          "SAMD21E18",
+          "SAMD21J18",
+          "SAMD21E15",
+          "SAMD51G19",
+          "SAMD51J19",
+          "SAMD51N19",
+          "SAMD51P20",
+          "SAME51J19",
+          "SAME51N19",
+          "SAME54P20"
+        ]
+      },
+      {
+        "config_symbol": "ATSAMD_MMENU_CANBUS_PB15_PB14",
+        "display": "CAN bus (on PB15/PB14)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "SAMD21G18",
+          "SAMD21E18",
+          "SAMD21J18",
+          "SAMD21E15",
+          "SAMC21G18",
+          "SAMD51G19",
+          "SAMD51J19",
+          "SAMD51N19",
+          "SAMD51P20",
+          "SAME51J19",
+          "SAME51N19",
+          "SAME54P20"
+        ]
+      },
+      {
+        "config_symbol": "ATSAMD_USBCANBUS",
+        "display": "USB to CAN bus bridge",
+        "select": "USBCANBUS",
+        "comm_type": "usbcanbridge",
+        "compatible_processors": [
+          "SAMD21G18",
+          "SAMD21E18",
+          "SAMD21J18",
+          "SAMD21E15",
+          "SAMD51G19",
+          "SAMD51J19",
+          "SAMD51N19",
+          "SAMD51P20",
+          "SAME51J19",
+          "SAME51N19",
+          "SAME54P20"
+        ]
+      }
+    ],
+    "bridge_can": [
+      {
+        "pins": "PA23/PA22",
+        "config": "ATSAMD_CMENU_CANBUS_PA23_PA22",
+        "display": "CAN bus (on PA23/PA22)",
+        "depends": "",
+        "visibility": ""
+      },
+      {
+        "pins": "PB13/PB12",
+        "config": "ATSAMD_CMENU_CANBUS_PB13_PB12",
+        "display": "CAN bus (on PB13/PB12)",
+        "depends": "",
+        "visibility": ""
+      },
+      {
+        "pins": "PB15/PB14",
+        "config": "ATSAMD_CMENU_CANBUS_PB15_PB14",
+        "display": "CAN bus (on PB15/PB14)",
+        "depends": "",
+        "visibility": ""
+      }
+    ]
+  },
+  "lpc176x": {
+    "communication_options": [
+      {
+        "config_symbol": "LPC_USB",
+        "display": "USB",
+        "select": "USBSERIAL",
+        "comm_type": "usb",
+        "compatible_processors": [
+          "LPC1768",
+          "LPC1769"
+        ]
+      },
+      {
+        "config_symbol": "LPC_SERIAL_UART0_P03_P02",
+        "display": "Serial (on UART0 P0.3/P0.2)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "LPC1768",
+          "LPC1769"
+        ]
+      },
+      {
+        "config_symbol": "LPC_SERIAL_UART3_P429_P428",
+        "display": "Serial (on UART3 P4.29/P4.28)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "LPC1768",
+          "LPC1769"
+        ]
+      }
+    ]
+  },
+  "hc32f460": {
+    "communication_options": [
+      {
+        "config_symbol": "HC32F460_SERIAL_PA7_PA8",
+        "display": "Serial (PA7 & PA8)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "HC32F460"
+        ]
+      },
+      {
+        "config_symbol": "HC32F460_SERIAL_PA13_PA14",
+        "display": "Serial (PA13 & PA14)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "HC32F460"
+        ]
+      },
+      {
+        "config_symbol": "HC32F460_SERIAL_PA3_PA2",
+        "display": "Serial (PA3 & PA2)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "HC32F460"
+        ]
+      },
+      {
+        "config_symbol": "HC32F460_SERIAL_PH2_PB10",
+        "display": "Serial (PH2 & PB10)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "HC32F460"
+        ]
+      },
+      {
+        "config_symbol": "HC32F460_SERIAL_PA15_PA9",
+        "display": "Serial (PA15 & PA09)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "HC32F460"
+        ]
+      },
+      {
+        "config_symbol": "HC32F460_SERIAL_PC0_PC1",
+        "display": "Serial (PC0 & PC1)",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "HC32F460"
+        ]
+      }
+    ]
+  },
+  "atsam": {
+    "communication_options": [
+      {
+        "config_symbol": "ATSAM_USB",
+        "display": "USB",
+        "select": "USBSERIAL",
+        "comm_type": "usb",
+        "compatible_processors": [
+          "SAM3X8E",
+          "SAM3X8C",
+          "SAM4S8C",
+          "SAM4E8E",
+          "SAME70Q20B"
+        ]
+      },
+      {
+        "config_symbol": "ATSAM_SERIAL",
+        "display": "Serial",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "SAM3X8E",
+          "SAM3X8C",
+          "SAM4S8C",
+          "SAM4E8E",
+          "SAME70Q20B"
+        ]
+      },
+      {
+        "config_symbol": "ATSAM_MMENU_CANBUS_PC12_PD12",
+        "display": "CAN bus (on PC12/PD12)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "SAM3X8E",
+          "SAM3X8C",
+          "SAM4E8E",
+          "SAME70Q20B"
+        ]
+      },
+      {
+        "config_symbol": "ATSAM_MMENU_CANBUS_PB3_PB2",
+        "display": "CAN bus (on PB3/PB2)",
+        "select": "CANSERIAL",
+        "comm_type": "can",
+        "compatible_processors": [
+          "SAM3X8E",
+          "SAM3X8C",
+          "SAM4E8E",
+          "SAME70Q20B"
+        ]
+      },
+      {
+        "config_symbol": "ATSAM_USBCANBUS",
+        "display": "USB to CAN bus bridge",
+        "select": "USBCANBUS",
+        "comm_type": "usbcanbridge",
+        "compatible_processors": [
+          "SAM3X8E",
+          "SAM3X8C",
+          "SAM4E8E",
+          "SAME70Q20B"
+        ]
+      }
+    ],
+    "bridge_can": [
+      {
+        "pins": "PC12/PD12",
+        "config": "ATSAM_CMENU_CANBUS_PC12_PD12",
+        "display": "CAN bus (on PC12/PD12)",
+        "depends": "",
+        "visibility": ""
+      },
+      {
+        "pins": "PB3/PB2",
+        "config": "ATSAM_CMENU_CANBUS_PB3_PB2",
+        "display": "CAN bus (on PB3/PB2)",
+        "depends": "",
+        "visibility": ""
+      }
+    ]
+  },
+  "avr": {
+    "communication_options": [
+      {
+        "config_symbol": "AVR_USB",
+        "display": "USB",
+        "select": "USBSERIAL",
+        "comm_type": "usb",
+        "compatible_processors": [
+          "AT90USB1286",
+          "AT90USB646",
+          "ATMEGA32U4"
+        ]
+      },
+      {
+        "config_symbol": "AVR_SERIAL_UART0",
+        "display": "UART0",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "ATMEGA2560",
+          "ATMEGA1280",
+          "AT90USB1286",
+          "AT90USB646",
+          "ATMEGA32U4",
+          "ATMEGA1284P",
+          "ATMEGA644P",
+          "ATMEGA328P",
+          "ATMEGA328",
+          "ATMEGA168",
+          "LGT8F328P"
+        ]
+      },
+      {
+        "config_symbol": "AVR_SERIAL_UART1",
+        "display": "UART1",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "ATMEGA2560",
+          "ATMEGA1280",
+          "AT90USB1286",
+          "AT90USB646",
+          "ATMEGA32U4",
+          "ATMEGA1284P",
+          "ATMEGA644P",
+          "ATMEGA328P",
+          "ATMEGA328",
+          "ATMEGA168",
+          "LGT8F328P"
+        ]
+      },
+      {
+        "config_symbol": "AVR_SERIAL_UART2",
+        "display": "UART2",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "ATMEGA2560",
+          "ATMEGA1280"
+        ]
+      },
+      {
+        "config_symbol": "AVR_SERIAL_UART3",
+        "display": "UART3",
+        "select": "SERIAL",
+        "comm_type": "serial",
+        "compatible_processors": [
+          "ATMEGA2560",
+          "ATMEGA1280"
+        ]
+      }
+    ]
+  }
+}

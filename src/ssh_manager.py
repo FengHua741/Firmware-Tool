@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # ==================== 配置文件读取（避免循环导入） ====================
 
-_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+_CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'config.json')
 
 
 def _load_config_file():
@@ -687,7 +687,7 @@ def is_ssh_mode():
     # 避免循环导入: 直接读取配置文件，不通过 from app import config
     try:
         import json, os
-        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'config.json')
         if os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 cfg = json.load(f)

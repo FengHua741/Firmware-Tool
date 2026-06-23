@@ -85,7 +85,7 @@ fi
 
 # 创建配置文件
 echo "创建配置文件..."
-cat > "$PROJECT_DIR/config.json" << EOF
+cat > "$PROJECT_DIR/data/config.json" << EOF
 {
   "port": $PORT,
   "klipper_path": "~/klipper",
@@ -94,7 +94,7 @@ cat > "$PROJECT_DIR/config.json" << EOF
 }
 EOF
 
-chown $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR/config.json"
+chown $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR/data/config.json"
 
 # 安装依赖
 echo "安装依赖..."
@@ -107,7 +107,7 @@ pip3 install paramiko cryptography 2>/dev/null || pip install paramiko cryptogra
 # 设置目录权限
 echo "设置目录权限..."
 chown -R $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR"
-chmod +x "$PROJECT_DIR/app.py"
+chmod +x "$PROJECT_DIR/src/app.py"
 chmod +x "$SCRIPT_DIR"/*.sh 2>/dev/null || true
 
 # 删除logs文件夹（如果存在）
@@ -131,7 +131,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=$PROJECT_DIR
-ExecStart=/usr/bin/python3 $PROJECT_DIR/app.py
+ExecStart=/usr/bin/python3 $PROJECT_DIR/src/app.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -139,7 +139,7 @@ StandardError=journal
 
 # 环境变量
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=PYTHONPATH=$PROJECT_DIR
+Environment=PYTHONPATH=$PROJECT_DIR/src
 
 [Install]
 WantedBy=multi-user.target
