@@ -122,11 +122,9 @@ git clone https://github.com/FengHua741/Firmware-Tool.git
 cd Firmware-Tool
 
 pip install flask flask-cors psutil paramiko requests
-
-nano config.json
 ```
 
-`config.json` 基础配置：
+编辑 `data/config.json` 基础配置：
 ```json
 {
   "klipper_path": "~/klipper",
@@ -135,7 +133,7 @@ nano config.json
 ```
 
 ```bash
-python3 app.py
+python3 src/app.py
 ```
 
 ## 卸载方法
@@ -163,26 +161,35 @@ sudo journalctl -u firmware-tool -f
 
 ```
 Firmware-Tool/
-├── app.py                    # Flask 主程序
-├── ssh_manager.py            # SSH 远程执行管理
-├── kconfig_can_parser.py     # Klipper Kconfig 解析（全平台）
-├── board_config_loader.py    # 主板配置加载
-├── mcu_database.json         # MCU 数据库
-├── klipper_rules.json        # Klipper 编译规则
-├── config.json               # 运行时配置
-├── board_configs/            # 主板固件与配置
+├── src/                          # 后端源码（Flask 蓝图模块）
+│   ├── app.py                    # 主入口 - 应用初始化与蓝图注册
+│   ├── shared.py                 # 共享资源 - 全局常量、配置、工具函数
+│   ├── routes_system.py          # 系统管理蓝图 - 资源监控、设备检测、服务管理
+│   ├── routes_firmware.py        # 固件蓝图 - 编译、烧录、下载
+│   ├── routes_config.py          # 板级配置蓝图 - 配置增删改查
+│   ├── routes_settings.py        # 系统设置蓝图 - SSH配置、CAN配置诊断、时区
+│   ├── routes_klipper.py         # Klipper MCU 数据库蓝图 - Kconfig 解析
+│   ├── routes_update.py          # 固件更新蓝图 - 更新配置管理
+│   ├── ssh_manager.py            # SSH 远程执行管理
+│   ├── kconfig_can_parser.py     # Klipper Kconfig CAN 解析
+│   └── klipper_kconfig_parser.py # Klipper Kconfig 全平台解析
+├── data/                         # 数据文件
+│   ├── config.json               # 运行时配置
+│   ├── klipper_rules.json        # Klipper 编译规则
+│   └── mcu_database.json         # MCU 芯片数据库
+├── board_configs/                # 主板固件与配置
 │   └── FLY/
-│       ├── mainboard/        # 主板 JSON 配置
-│       ├── toolboard/        # 工具板 JSON 配置
-│       └── BL/               # Bootloader 固件
-├── static/
-│   ├── index.html            # 主页面
-│   ├── pages/                # 子页面
-│   ├── js/                   # 前端逻辑
-│   └── css/                  # 样式
+│       ├── mainboard/            # 主板 JSON 配置
+│       ├── toolboard/            # 工具板 JSON 配置
+│       └── BL/                   # Bootloader 固件
+├── static/                       # 前端静态资源
+│   ├── index.html                # 主页面
+│   ├── pages/                    # 子页面
+│   ├── js/                       # 前端逻辑
+│   └── css/                      # 样式
 └── scripts/
-    ├── install.sh            # 安装脚本
-    └── uninstall.sh          # 卸载脚本
+    ├── install.sh                # 安装脚本
+    └── uninstall.sh              # 卸载脚本
 ```
 
 ## 主要 API
