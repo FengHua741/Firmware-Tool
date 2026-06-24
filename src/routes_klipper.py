@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify
 
 from shared import app, config, logger
 from klipper_kconfig_parser import KlipperKconfigParser
+from kconfig_can_parser import parse_can_options, load_cache, save_cache
 
 klipper_bp = Blueprint('klipper', __name__, url_prefix='/api/klipper')
 
@@ -31,10 +32,34 @@ def init_klipper_mcu_db():
 init_klipper_mcu_db()
 
 
+# 通信选项缓存（启动时加载）
+_can_options_data = {}
+
+def init_can_options():
+    """初始化通信选项：优先从缓存加载，缓存不存在则从 Klipper 源码解析"""
+    global _can_options_data
+    try:
+        cached = load_cache()
+        if cached:
+            _can_options_data = cached
+            logger.info(f"✓ CAN 通信选项已从缓存加载: {len(cached)} 个平台")
+        else:
+            klipper_path = config.get('klipper_path', '~/klipper')
+            _can_options_data = parse_can_options(klipper_path)
+            save_cache(_can_options_data)
+            logger.info(f"✓ CAN 通信选项已从 Klipper 源码解析: {len(_can_options_data)} 个平台")
+    except Exception as e:
+        logger.error(f"加载 CAN 通信选项失败: {e}")
+        _can_options_data = {}
+
+# 启动时初始化通信选项
+init_can_options()
+
+
 @klipper_bp.route('/communication-options')
 def get_communication_options():
-    """获取通信选项（兼容旧接口）"""
-    return jsonify({'success': True, 'options': []})
+    """获取通信选项（返回按平台分类的完整数据）"""
+    return jsonify(_can_options_data)
 
 
 @klipper_bp.route('/mcu-database')

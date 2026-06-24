@@ -595,7 +595,7 @@ def _parse_generic_bridge_can(kconfig_path, prefix):
 def save_cache(data, cache_path=None):
     """保存解析结果到缓存文件"""
     if cache_path is None:
-        cache_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   'can_options_cache.json')
     with open(cache_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -605,7 +605,7 @@ def save_cache(data, cache_path=None):
 def load_cache(cache_path=None):
     """从缓存文件加载解析结果"""
     if cache_path is None:
-        cache_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   'can_options_cache.json')
     if os.path.exists(cache_path):
         with open(cache_path, 'r', encoding='utf-8') as f:

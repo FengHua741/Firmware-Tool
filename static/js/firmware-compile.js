@@ -333,8 +333,8 @@ async function loadCommunicationOptions(mcu) {
         for (const type in _commGroupedOptions) {
             connSelect.innerHTML += `<option value="${type}">${typeLabels[type] || type}</option>`;
         }
-        // 默认选中 USB（如果可用）
-        if (_commGroupedOptions['usb']) {
+        // 默认选中 USB（如果可用，但从预设加载时跳过，由 _autoSelectPresetConnection 处理）
+        if (_commGroupedOptions['usb'] && !window._fromPreset) {
             connSelect.value = 'usb';
             onCompileConnectionChange();
         }
@@ -373,8 +373,8 @@ function onCompileConnectionChange() {
     const connGroup = connEl ? connEl.closest('.form-group') : null;
     if (!connGroup) return;
     
-    // 多个选项时显示第二级选择
-    if (options.length > 1) {
+    // 有选项时显示第二级选择
+    if (options.length >= 1) {
         subContainer = document.createElement('div');
         subContainer.id = 'compileConnectionSub';
         subContainer.className = 'form-group';
@@ -394,6 +394,10 @@ function onCompileConnectionChange() {
         options.forEach(opt => {
             detailSelect.innerHTML += `<option value="${opt.config_symbol}" data-comm='${JSON.stringify(opt).replace(/'/g, '&apos;')}'>${opt.display}</option>`;
         });
+        // 只有1个选项时自动选中
+        if (options.length === 1) {
+            detailSelect.value = options[0].config_symbol;
+        }
     }
     
     // USB-CAN桥接(STM32)：显示CAN引脚选择
