@@ -11,8 +11,9 @@
     "CANBUS",
     "USB"
   ],
+  "crystal": "12000000",
   "default_connection": "CAN bus",
-  "default_flash": "UF2",
+  "default_flash": "CAN",
   "firmware_update": {
     "custom_config": "",
     "device_id": "",
@@ -29,6 +30,5 @@
   "mcu": "rp2040",
   "name": "FLY-SHT36 V3",
   "platform": "RP2040",
-  "type": "toolboard",
-  "crystal": "12000000"
+  "type": "toolboard"
 }

@@ -403,6 +403,7 @@
                                 <label class="form-label">🔧 烧录工具</label>
                                 <select class="form-control form-select" id="blFlashTool">
                                     <option value="dfu-util">dfu-util</option>
+                                    <option value="rp2040_flash">rp2040_flash (UF2)</option>
                                     <option value="st-flash">st-flash</option>
                                     <option value="openocd">OpenOCD</option>
                                 </select>
@@ -412,8 +413,8 @@
                             <div class="form-group" style="flex: 2;">
                                 <label class="form-label">📤 或上传 BL 文件</label>
                                 <div class="upload-area" id="blUploadArea" style="padding: 20px;">
-                                    <p>拖拽 BL 文件 (.bin) 到此处</p>
-                                    <input type="file" id="blFileInput" accept=".bin" style="display:none;">
+                                    <p>拖拽 BL 文件 (.bin / .uf2) 到此处</p>
+                                    <input type="file" id="blFileInput" accept=".bin,.uf2" style="display:none;">
                                 </div>
                             </div>
                         </div>
@@ -712,6 +713,16 @@
                             <div class="form-row" style="gap:10px;align-items:center;">
                                 <button class="btn btn-secondary" onclick="testSshConnection()" id="btnTestSsh">测试连接</button>
                                 <span id="sshTestResult" style="font-size:14px;"></span>
+                            </div>
+                        </div>
+                        <!-- 本地执行确认区 -->
+                        <div id="localConfigSection" style="display:none;">
+                            <div style="background:rgba(76,175,80,0.06);padding:12px 16px;border-radius:8px;border-left:4px solid #4CAF50;margin-bottom:14px;font-size:13px;color:#555;">
+                                本地执行模式：直接在当前设备上执行命令，无需远程连接。
+                            </div>
+                            <div class="form-row" style="gap:10px;align-items:center;">
+                                <button class="btn btn-secondary" onclick="testLocalConnection()" id="btnTestLocal">测试连接</button>
+                                <span id="localTestResult" style="font-size:14px;"></span>
                             </div>
                         </div>
                         <!-- FAST-SSH 配置区（仅显示 IP 地址） -->

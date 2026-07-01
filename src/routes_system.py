@@ -1113,7 +1113,7 @@ def get_versions():
 
 @system_bp.route('/api/system/services', methods=['GET'])
 def get_available_services():
-    """获取系统中实际安装的服务及其状态"""
+    """获取系统中实际安装的服务及其状态（优先通过 Moonraker API 获取）"""
     systemd_services = ['klipper', 'moonraker', 'KlipperScreen', 'crowsnest', 'firmware-tool']
     web_frontends = {
         'mainsail': {
@@ -1126,26 +1126,94 @@ def get_available_services():
         },
     }
 
-    available_services = []
-    for service in systemd_services:
-        try:
-            result = run_cmd(['systemctl', 'list-unit-files', f'{service}.service'],
-                                  capture_output=True, text=True, timeout=5)
-            if result.returncode == 0 and f'{service}.service' in result.stdout:
-                status_result = run_cmd(['systemctl', 'is-active', service],
-                                             capture_output=True, text=True, timeout=5)
-                is_active = status_result.returncode == 0
-                available_services.append({'name': service, 'active': is_active})
-        except Exception as e:
-            logger.warning(f'检查服务 {service} 状态失败: {e}')
-            continue
+    # 通过 Moonraker system_info 获取所有服务的安装和运行状态
+    moonraker_active = False
+    klipper_active = False
+    mr_base = get_moonraker_base_url()
+    mr_service_state = {}  # Moonraker system_info 中的服务状态 {name: {active_state, sub_state}}
+    try:
+        r = requests.get(f'{mr_base}/server/info', timeout=3)
+        if r.status_code == 200:
+            info = r.json().get('result', {})
+            moonraker_active = True
+            klipper_active = info.get('klippy_connected', False)
+    except Exception:
+        pass
 
+    # 通过 Moonraker machine/system_info 获取所有服务的状态
+    try:
+        r2 = requests.get(f'{mr_base}/machine/system_info', timeout=5)
+        if r2.status_code == 200:
+            sys_info = r2.json().get('result', {}).get('system_info', {})
+            mr_service_state = sys_info.get('service_state', {})
+    except Exception:
+        pass
+
+    # 检测 nginx 状态（用于 web 前端）
     try:
         nginx_result = run_cmd(['systemctl', 'is-active', 'nginx'],
                                     capture_output=True, text=True, timeout=5)
         nginx_active = nginx_result.returncode == 0
     except Exception:
         nginx_active = False
+
+    # 构建 Moonraker 服务状态的小写映射（处理名称变体，如 helixscreen → KlipperScreen）
+    mr_state_map = {}
+    for svc_name, state_info in mr_service_state.items():
+        mr_state_map[svc_name.lower()] = state_info
+
+    # 已知的服务名称别名映射
+    service_aliases = {
+        'klipperscreen': ['helixscreen'],  # KlipperScreen 在某些发行版中可能叫 helixscreen
+    }
+
+    available_services = []
+    for service in systemd_services:
+        try:
+            svc_lower = service.lower()
+
+            if service == 'firmware-tool':
+                # 自身服务，能响应请求说明一定在运行
+                available_services.append({'name': service, 'active': True, 'self_service': True})
+                continue
+
+            # 优先通过 Moonraker system_info 判断服务是否安装及运行状态
+            mr_state = mr_state_map.get(svc_lower)
+            # 检查别名（如 KlipperScreen 可能注册为 helixscreen）
+            if mr_state is None and svc_lower in service_aliases:
+                for alias in service_aliases[svc_lower]:
+                    if alias in mr_state_map:
+                        mr_state = mr_state_map[alias]
+                        break
+            if mr_state is not None:
+                is_installed = True
+                is_active = mr_state.get('active_state') == 'active'
+            else:
+                # 回退到 systemctl 检测
+                is_installed = False
+                is_active = False
+                # 检查主名称和别名
+                check_names = [service]
+                if svc_lower in service_aliases:
+                    check_names.extend(service_aliases[svc_lower])
+                for check_name in check_names:
+                    result = run_cmd(['systemctl', 'list-unit-files', f'{check_name}.service'],
+                                          capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0 and f'{check_name}.service' in result.stdout:
+                        is_installed = True
+                        status_result = run_cmd(['systemctl', 'is-active', check_name],
+                                                     capture_output=True, text=True, timeout=5)
+                        is_active = status_result.returncode == 0
+                        break
+
+            if is_installed:
+                # klipper 使用 Moonraker klippy_connected 状态更准确
+                if service == 'klipper' and moonraker_active:
+                    is_active = klipper_active
+                available_services.append({'name': service, 'active': is_active})
+        except Exception as e:
+            logger.warning(f'检查服务 {service} 状态失败: {e}')
+            continue
 
     for frontend_name, paths in web_frontends.items():
         try:
@@ -1175,6 +1243,13 @@ def control_service():
     nginx_frontends = ['mainsail', 'fluidd']
     if service_name in nginx_frontends:
         service_name = 'nginx'
+
+    # firmware-tool 重启自身时，需要用后台方式执行，否则当前进程会被杀掉无法返回响应
+    if service_name == 'firmware-tool' and action == 'restart':
+        import subprocess as _sp
+        _sp.Popen(['sudo', 'systemctl', 'restart', 'firmware-tool'],
+                   stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        return jsonify({'success': True, 'message': 'firmware-tool 正在重启...'})
 
     try:
         result = run_cmd(['sudo', 'systemctl', action, service_name],

@@ -116,6 +116,55 @@ def resolve_paths():
         return jsonify({'error': str(e)}), 500
 
 
+@settings_bp.route('/api/settings/local-test', methods=['POST'])
+def test_local_connection():
+    """测试本地执行环境"""
+    try:
+        checks = []
+        all_ok = True
+
+        # 1. 检查 Klipper 路径
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
+        if os.path.isdir(klipper_path):
+            checks.append({'name': 'Klipper 路径', 'status': 'ok', 'detail': klipper_path})
+        else:
+            checks.append({'name': 'Klipper 路径', 'status': 'fail', 'detail': f'{klipper_path} 不存在'})
+            all_ok = False
+
+        # 2. 检查 Klipper 服务状态
+        try:
+            r = run_cmd(['systemctl', 'is-active', 'klipper'], capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                checks.append({'name': 'Klipper 服务', 'status': 'ok', 'detail': '运行中'})
+            else:
+                checks.append({'name': 'Klipper 服务', 'status': 'warn', 'detail': '未运行'})
+        except Exception:
+            checks.append({'name': 'Klipper 服务', 'status': 'warn', 'detail': '无法检测'})
+
+        # 3. 检查 Katapult 路径（可选）
+        katapult_path = expand_klipper_path(config.get('katapult_path', '~/katapult'))
+        if os.path.isdir(katapult_path):
+            checks.append({'name': 'Katapult 路径', 'status': 'ok', 'detail': katapult_path})
+        else:
+            checks.append({'name': 'Katapult 路径', 'status': 'warn', 'detail': f'{katapult_path} 不存在（可选）'})
+
+        # 4. 系统信息
+        try:
+            r = run_cmd(['uname', '-r'], capture_output=True, text=True, timeout=5)
+            kernel = r.stdout.strip() if r.returncode == 0 else '未知'
+            checks.append({'name': '系统内核', 'status': 'ok', 'detail': kernel})
+        except Exception:
+            checks.append({'name': '系统内核', 'status': 'ok', 'detail': '未知'})
+
+        return jsonify({
+            'success': all_ok,
+            'message': '本地环境检测通过' if all_ok else '本地环境存在问题',
+            'checks': checks
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 200
+
+
 @settings_bp.route('/api/settings/ssh-test', methods=['POST'])
 def test_ssh_connection():
     """测试 SSH 连接"""

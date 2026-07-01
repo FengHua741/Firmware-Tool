@@ -488,6 +488,12 @@ body {
     font-weight: 500;
 }
 
+/* 文本颜色工具类 */
+.text-success { color: var(--success-color); }
+.text-danger { color: var(--danger-color); }
+.text-warning { color: var(--warning-color); }
+.text-muted { color: var(--text-secondary); }
+
 /* Toast提示 */
 .toast {
     position: fixed;

@@ -731,6 +731,7 @@ function toggleSshConfig() {
     const mode = modeRadio ? modeRadio.value : 'local';
     const sshSection = document.getElementById('sshConfigSection');
     const fastSshSection = document.getElementById('fastSshConfigSection');
+    const localSection = document.getElementById('localConfigSection');
     
     // 标准 SSH 配置区
     if (sshSection) {
@@ -739,6 +740,10 @@ function toggleSshConfig() {
     // FAST-SSH 配置区
     if (fastSshSection) {
         fastSshSection.style.display = mode === 'fast-ssh' ? 'block' : 'none';
+    }
+    // 本地执行确认区
+    if (localSection) {
+        localSection.style.display = mode === 'local' ? 'block' : 'none';
     }
     
     // 联动 Moonraker 地址
@@ -840,6 +845,40 @@ function updateMoonrakerHostFromSsh() {
         mrHost.style.backgroundColor = '';
         mrHost.title = '';
     }
+}
+
+// 测试本地执行环境
+async function testLocalConnection() {
+    const resultEl = document.getElementById('localTestResult');
+    const btnEl = document.getElementById('btnTestLocal');
+    if (!resultEl) return;
+
+    resultEl.textContent = '检测中...';
+    resultEl.style.color = '#888';
+    if (btnEl) btnEl.disabled = true;
+
+    // 先保存当前设置
+    await saveSettings();
+
+    try {
+        const response = await fetch('/api/settings/local-test', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            const detail = (data.checks || []).map(c => `${c.name}: ${c.detail}`).join(' | ');
+            resultEl.textContent = data.message || '本地环境检测通过';
+            if (detail) resultEl.textContent += ' (' + detail + ')';
+            resultEl.style.color = '#28a745';
+        } else {
+            const failItems = (data.checks || []).filter(c => c.status === 'fail' || c.status === 'warn');
+            const detail = failItems.map(c => `${c.name}: ${c.detail}`).join('; ');
+            resultEl.textContent = (data.message || '本地环境存在问题') + (detail ? ' — ' + detail : '');
+            resultEl.style.color = '#dc3545';
+        }
+    } catch (error) {
+        resultEl.textContent = '测试失败: ' + error.message;
+        resultEl.style.color = '#dc3545';
+    }
+    if (btnEl) btnEl.disabled = false;
 }
 
 // 测试 SSH 连接（支持标准 SSH 和 FAST-SSH）
@@ -1126,6 +1165,7 @@ async function manualReconnect() {
 
 // 控制服务
 async function controlService(serviceName, action) {
+    const isSelfRestart = serviceName === 'firmware-tool' && action === 'restart';
     try {
         const response = await fetch('/api/system/service', {
             method: 'POST',
@@ -1136,14 +1176,26 @@ async function controlService(serviceName, action) {
         const data = await response.json();
         
         if (data.success) {
-            showSuccess(`${serviceName} 服务${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}成功`);
-            // 延迟刷新服务列表以更新状态
-            setTimeout(loadAvailableServices, 1000);
+            if (isSelfRestart) {
+                showSuccess('firmware-tool 正在重启，请稍候...');
+                // 自身重启后需要等更久才能恢复
+                setTimeout(loadAvailableServices, 5000);
+            } else {
+                showSuccess(`${serviceName} 服务${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}成功`);
+                // 延迟刷新服务列表以更新状态
+                setTimeout(loadAvailableServices, 1000);
+            }
         } else {
             showError(`${serviceName} 服务操作失败: ${data.error}`);
         }
     } catch (error) {
-        showError(`服务操作失败: ${error.message}`);
+        if (isSelfRestart) {
+            // 自身重启时可能会因为服务断开导致请求失败，这是正常的
+            showSuccess('firmware-tool 正在重启，请稍候...');
+            setTimeout(loadAvailableServices, 5000);
+        } else {
+            showError(`服务操作失败: ${error.message}`);
+        }
     }
 }
 
@@ -1176,16 +1228,31 @@ function renderServiceButtons(services) {
     services.forEach(service => {
         const statusText = service.active ? '运行中' : '已停止';
         const statusClass = service.active ? 'text-success' : 'text-danger';
+        const isSelf = service.self_service === true;
+        
+        // firmware-tool 是自身服务，只显示重启按钮
+        let buttonsHtml;
+        if (isSelf) {
+            buttonsHtml = `
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-warning" onclick="controlService('${service.name}', 'restart')">重启</button>
+                </div>
+            `;
+        } else {
+            buttonsHtml = `
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-success" onclick="controlService('${service.name}', 'start')">启动</button>
+                    <button class="btn btn-sm btn-danger" onclick="controlService('${service.name}', 'stop')">停止</button>
+                    <button class="btn btn-sm btn-warning" onclick="controlService('${service.name}', 'restart')">重启</button>
+                </div>
+            `;
+        }
         
         const div = document.createElement('div');
         div.className = 'service-item';
         div.innerHTML = `
             <span>${service.name} 服务 <span class="${statusClass}">(${statusText})</span></span>
-            <div class="btn-group">
-                <button class="btn btn-sm btn-success" onclick="controlService('${service.name}', 'start')">启动</button>
-                <button class="btn btn-sm btn-danger" onclick="controlService('${service.name}', 'stop')">停止</button>
-                <button class="btn btn-sm btn-warning" onclick="controlService('${service.name}', 'restart')">重启</button>
-            </div>
+            ${buttonsHtml}
         `;
         container.appendChild(div);
     });

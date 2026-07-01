@@ -643,11 +643,9 @@ async function onCompilePresetModelChange() {
         }
     }
 
-    // 自动填充启动引脚
-    if (config.boot_pins) {
-        const pinInput = document.getElementById('compileStartupPin');
-        if (pinInput) pinInput.value = config.boot_pins;
-    }
+    // 自动填充启动引脚（始终更新，避免切换预设时残留旧值）
+    const pinInput = document.getElementById('compileStartupPin');
+    if (pinInput) pinInput.value = config.boot_pins || '';
 
     // 自动选择通信方式
     if (config.default_connection) {
@@ -991,13 +989,13 @@ async function refreshDeviceIds() {
                 select.innerHTML += `<option disabled>━━━━━━━━ CAN 设备 (${canIface}) ━━━━━━━━</option>`;
                 
                 canData.uuids.forEach(d => {
-                    // 根据应用类型显示不同图标
+                    // 根据应用类型和来源构建标签
                     let icon = '';
                     let appLabel = '';
                     
                     if (d.app === 'Klipper') {
                         icon = '';
-                        appLabel = 'Klipper';
+                        appLabel = d.source === 'moonraker' || d.source === 'filesystem' ? 'Klipper (config)' : 'Klipper';
                     } else if (d.app === 'Katapult') {
                         icon = '';
                         appLabel = 'Katapult';
@@ -1008,7 +1006,23 @@ async function refreshDeviceIds() {
                         appLabel = '';
                     }
                     
-                    const label = appLabel ? `[${appLabel}] ${d.uuid}` : `[CAN] ${d.uuid}`;
+                    // 构建完整显示信息
+                    let parts = [];
+                    // 第一部分：应用类型
+                    if (appLabel) {
+                        parts.push(appLabel);
+                    }
+                    // 第二部分：MCU 型号和频率
+                    if (d.mcu_model) {
+                        const mcuDisplay = d.mcu_freq ? `${d.mcu_model} @ ${d.mcu_freq}` : d.mcu_model;
+                        parts.push(mcuDisplay);
+                    }
+                    const bracketInfo = parts.length > 0 ? ` [${parts.join(' / ')}]` : '';
+                    
+                    // 第三部分：section 名称（如 [mcu SHT36]）
+                    const sectionInfo = d.section ? ` [${d.section}]` : '';
+                    
+                    const label = `${d.uuid}${bracketInfo}${sectionInfo}`;
                     select.innerHTML += `<option value="${d.uuid}">${icon} ${label}</option>`;
                     canCount++;
                 });
@@ -1504,7 +1518,7 @@ async function flashBootloader() {
             body: JSON.stringify({
                 bl_firmware_path: blFile,
                 dfu_address: address,
-                flash_mode: tool === 'dfu-util' ? 'DFU' : tool === 'st-flash' ? 'st-flash' : 'openocd',
+                flash_mode: tool === 'dfu-util' ? 'DFU' : tool === 'rp2040_flash' ? 'UF2' : tool === 'st-flash' ? 'st-flash' : 'openocd',
                 device_id: document.getElementById('flashDeviceId').value || '',
                 erase_flash: eraseFlash
             })
