@@ -7,6 +7,7 @@
     "CANBUS",
     "USB"
   ],
+  "crystal": "12000000",
   "default_connection": "USB",
   "default_flash": "UF2",
   "firmware_update": {
@@ -17,8 +18,6 @@
     "katapult_mode": "USB"
   },
   "flash_modes": [
-    "KAT",
-    "CAN",
     "UF2"
   ],
   "id": "fly-usb-adxl",
@@ -26,6 +25,5 @@
   "mcu": "rp2040",
   "name": "FLY-USB-ADXL",
   "platform": "RP2040",
-  "type": "toolboard",
-  "crystal": "12000000"
+  "type": "toolboard"
 }

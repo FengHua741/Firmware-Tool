@@ -788,6 +788,11 @@ def flash_firmware():
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
+        # CAN Bridge 烧录方式映射：实际使用 DFU 或 KAT 方式烧录
+        if flash_mode == 'CAN_BRIDGE_DFU':
+            flash_mode = 'DFU'
+        elif flash_mode == 'CAN_BRIDGE_KAT':
+            flash_mode = 'KAT'
         dfu_address = data.get('dfu_address', '0x08000000')
         firmware_path = data.get('firmware_path', '')
         if firmware_path:

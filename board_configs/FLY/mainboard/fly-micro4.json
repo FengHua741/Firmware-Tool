@@ -1,29 +1,31 @@
 {
-  "type": "mainboard",
-  "name": "FLY-Micro4",
-  "platform": "RP2040",
-  "mcu": "rp2040",
+  "bl_default_flash": "UF2",
+  "bl_flash_support": "支持",
   "bl_offset": "16384",
+  "boot_pins": "gpio5",
   "connections": [
     "USB",
     "USB转CAN"
   ],
   "default_connection": "USB",
-  "flash_modes": [
-    "UF2",
-    "KAT"
-  ],
   "default_flash": "KAT",
-  "boot_pins": "gpio5",
-  "bl_flash_support": "支持",
-  "bl_default_flash": "UF2",
-  "id": "fly-micro4",
   "firmware_update": {
-    "enabled": false,
-    "katapult_mode": "USB",
+    "custom_config": "",
     "device_id": "",
+    "enabled": false,
     "flash_mode": "KAT",
-    "custom_config": ""
+    "katapult_mode": "USB"
   },
-  "manufacturer": "FLY"
+  "flash_modes": [
+    "KAT",
+    "CAN_BRIDGE_KAT",
+    "UF2"
+  ],
+  "id": "fly-micro4",
+  "manufacturer": "FLY",
+  "mcu": "rp2040",
+  "name": "FLY-Micro4",
+  "platform": "RP2040",
+  "type": "mainboard",
+  "crystal": "12000000"
 }

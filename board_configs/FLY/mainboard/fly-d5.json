@@ -19,7 +19,8 @@
   },
   "flash_modes": [
     "DFU",
-    "KAT"
+    "KAT",
+    "CAN_BRIDGE_KAT"
   ],
   "id": "fly-d5",
   "manufacturer": "FLY",

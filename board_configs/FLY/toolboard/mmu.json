@@ -1,32 +1,33 @@
 {
-  "type": "toolboard",
-  "name": "FLY-MMU",
-  "platform": "STM32",
-  "mcu": "stm32h723",
+  "bl_default_flash": "DFU",
+  "bl_flash_support": "支持",
   "bl_offset": "131072",
+  "boot_pins": "!PA15",
   "connections": [
     "CANBUS",
     "USB",
     "串口"
   ],
+  "crystal": "25000000",
   "default_connection": "CAN bus (on PB8/PB9)",
+  "default_flash": "KAT",
+  "firmware_update": {
+    "custom_config": "",
+    "device_id": "",
+    "enabled": false,
+    "flash_mode": "KAT",
+    "katapult_mode": "USB"
+  },
   "flash_modes": [
     "DFU",
     "KAT",
-    "CAN"
+    "CAN",
+    "CAN_BRIDGE_KAT"
   ],
-  "default_flash": "KAT",
-  "boot_pins": "!PA15",
-  "crystal": "25000000",
-  "bl_flash_support": "支持",
-  "bl_default_flash": "DFU",
   "id": "mmu",
-  "firmware_update": {
-    "enabled": false,
-    "katapult_mode": "USB",
-    "device_id": "",
-    "flash_mode": "KAT",
-    "custom_config": ""
-  },
-  "manufacturer": "FLY"
+  "manufacturer": "FLY",
+  "mcu": "stm32h723",
+  "name": "FLY-MMU",
+  "platform": "STM32",
+  "type": "toolboard"
 }

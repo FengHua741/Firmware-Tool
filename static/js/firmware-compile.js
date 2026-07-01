@@ -903,7 +903,7 @@ async function refreshDeviceIds() {
     try {
         // 根据烧录模式决定是否需要扫描 CAN 设备
         const currentFlashMode = document.getElementById('flashMode')?.value || '';
-        const needCan = (currentFlashMode === 'KAT' || currentFlashMode === 'CAN');
+        const needCan = (currentFlashMode === 'KAT' || currentFlashMode === 'CAN' || currentFlashMode === 'CAN_BRIDGE_KAT');
         
         // 并行：USB检测 + (可选)CAN UUID搜索
         const fetches = [fetch('/api/firmware/detect')];
@@ -928,13 +928,13 @@ async function refreshDeviceIds() {
             if (usbData.devices && usbData.devices.length > 0) {
                 // 根据烧录模式过滤USB设备类型
                 const filteredDevices = usbData.devices.filter(device => {
-                    if (currentFlashMode === 'DFU') {
+                    if (currentFlashMode === 'DFU' || currentFlashMode === 'CAN_BRIDGE_DFU') {
                         // DFU模式：只显示DFU设备
                         return device.type === 'dfu';
                     } else if (currentFlashMode === 'UF2') {
                         // UF2模式：只显示UF2设备
                         return device.id === 'rp2040_boot';
-                    } else if (currentFlashMode === 'KAT') {
+                    } else if (currentFlashMode === 'KAT' || currentFlashMode === 'CAN_BRIDGE_KAT') {
                         // KAT模式：只显示 by-id 串口设备（完整路径），过滤 ttyACM/ttyUSB
                         return device.type === 'usb_serial';
                     } else if (currentFlashMode === 'CAN') {
@@ -1071,7 +1071,7 @@ function onFlashModeChange(skipRefresh = false) {
     const deviceIdEl = document.getElementById('flashDeviceId');
     const deviceIdGroup = deviceIdEl ? deviceIdEl.closest('.form-group') : null;
     const canIfaceEl = document.getElementById('flashCanIface');
-    const needCan = (flashMode === 'KAT' || flashMode === 'CAN');
+    const needCan = (flashMode === 'KAT' || flashMode === 'CAN' || flashMode === 'CAN_BRIDGE_KAT');
     
     if (flashMode === 'TF') {
         // TF卡模式：显示下载区域，隐藏烧录按钮和设备选择
@@ -1172,7 +1172,7 @@ async function flashFirmware() {
         return await flashHostFirmware(firmwarePath);
     }
     
-    if (!deviceId && (flashMode === 'KAT' || flashMode === 'CAN')) {
+    if (!deviceId && (flashMode === 'KAT' || flashMode === 'CAN' || flashMode === 'CAN_BRIDGE_KAT')) {
         showError('请选择设备 ID');
         return;
     }
