@@ -6,6 +6,8 @@
     <title>Firmware-Tool - 固件工具</title>
     <link rel="stylesheet" href="/static/css/style.css?v=20260605c">
     <link rel="stylesheet" href="/static/css/config-manager.css?v=20260320f">
+    <link rel="stylesheet" href="/static/css/tools-pages.css?v=20260704a">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="app-container">
@@ -34,6 +36,15 @@
                 <a href="#" class="nav-item" data-page="settings">
                     <span class="nav-icon">⚙️</span>
                     <span>系统设置</span>
+                </a>
+                <div style="border-top:1px solid var(--border-color); margin:8px 0;"></div>
+                <a href="#" class="nav-item" data-page="klipper-parser">
+                    <span class="nav-icon">🔍</span>
+                    <span>配置解析器</span>
+                </a>
+                <a href="#" class="nav-item" data-page="config-generator">
+                    <span class="nav-icon">📝</span>
+                    <span>配置生成器</span>
                 </a>
             </nav>
         </aside>
@@ -822,6 +833,308 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ==================== Klipper配置解析器页面 ==================== -->
+            <div id="page-klipper-parser" class="page">
+                <div class="page-header">
+                    <h2>🔍 Klipper配置解析器</h2>
+                </div>
+
+                <!-- 远程加载区域 -->
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-header"><h3><i class="fas fa-network-wired" style="margin-right:8px; color:var(--primary-color)"></i> 远程加载配置</h3></div>
+                    <div class="card-body">
+                        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                            <button class="btn btn-primary" id="remoteLoadBtn" onclick="loadRemoteConfigList()"><i class="fas fa-server"></i> 从被控机器加载</button>
+                            <button class="btn btn-secondary" id="updateBaselineBtn" onclick="updateMainsailBaseline()" title="从被控机器获取最新 mainsail.cfg 更新本地基准"><i class="fas fa-sync-alt"></i> 更新宏基准</button>
+                            <span id="remoteLoadStatus" style="font-size:13px; color:var(--text-secondary);"></span>
+                            <span id="baselineStatus" style="font-size:12px; color:var(--text-secondary);"></span>
+                        </div>
+                        <div id="remoteProgress" class="remote-progress-bar" style="display:none;"><div class="bar" style="width:100%"></div></div>
+                        <div id="remoteFileList" style="display:none; margin-top:15px;">
+                            <div class="file-list" id="remoteFileListContent" style="max-height:200px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3><i class="fas fa-file-upload" style="margin-right:8px; color:var(--primary-color)"></i> 上传配置文件</h3></div>
+                    <div class="card-body">
+                        <div class="file-upload-area" id="dropArea">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <p><strong>点击或拖放文件到此处</strong></p>
+                            <p style="color:var(--text-secondary); font-size:13px;">支持 .cfg 和 .txt 文件格式（可上传多个文件）</p>
+                            <input type="file" id="fileInput" class="file-input" multiple accept=".cfg,.txt">
+                        </div>
+                        <div class="file-list" id="fileList"><p style="text-align:center; color:var(--text-secondary); padding:15px;">未选择文件</p></div>
+                        <div class="status-bar">
+                            <span><i class="fas fa-info-circle"></i> <span id="fileCount">0 个文件已选择</span></span>
+                            <span><i class="fas fa-database"></i> <span id="totalSize">0 KB</span></span>
+                        </div>
+
+                        <div style="margin-top:20px;">
+                            <label style="font-weight:500; margin-bottom:8px; display:block;">配置文件内容</label>
+                            <textarea id="configInput" class="config-textarea" placeholder="配置文件内容将在此处显示..."></textarea>
+                        </div>
+                        <div class="btn-group" style="margin-top:15px; justify-content:center;">
+                            <button class="btn btn-primary" id="parseBtn"><i class="fas fa-cogs"></i> 解析配置</button>
+                            <button class="btn btn-secondary" id="resetBtn"><i class="fas fa-redo"></i> 重置</button>
+                            <button class="btn btn-warning" id="uploadBtn"><i class="fas fa-upload"></i> 上传文件</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-header"><h3><i class="fas fa-file-code" style="margin-right:8px; color:var(--primary-color)"></i> 配置解析结果</h3></div>
+                    <div class="card-body">
+                        <div class="result-content" id="resultOutput"><p style="text-align:center; color:var(--text-secondary); padding:30px 0;">解析结果将显示在这里...</p></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== Klipper配置生成器页面 ==================== -->
+            <div id="page-config-generator" class="page">
+                <div class="page-header">
+                    <h2>📝 Klipper配置生成器</h2>
+                </div>
+
+                <!-- 选项卡导航 -->
+                <div class="cg-tabs-nav" id="cgTabsNav">
+                    <button class="cg-tab-btn active" data-tab="1" onclick="switchCgTab(1)"><i class="fas fa-cog"></i> 机器设置</button>
+                    <button class="cg-tab-btn" data-tab="2" onclick="switchCgTab(2)"><i class="fas fa-server"></i> 轴分配与TMC</button>
+                    <button class="cg-tab-btn" data-tab="3" onclick="switchCgTab(3)"><i class="fas fa-hand-paper"></i> 限位与调平</button>
+                    <button class="cg-tab-btn" data-tab="4" onclick="switchCgTab(4)"><i class="fas fa-home"></i> 归位与调平</button>
+                    <button class="cg-tab-btn" data-tab="5" onclick="switchCgTab(5)"><i class="fas fa-thermometer-half"></i> 温控与冷却</button>
+                </div>
+
+                <!-- Tab 1: 主板与连接 -->
+                <div class="cg-tab-panel active" data-tab="1">
+                    <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-microchip" style="margin-right:8px;color:var(--primary-color)"></i> 主板与连接</h3></div>
+                        <div class="card-body">
+                            <div class="cg-row">
+                                <label>品牌：</label>
+                                <select id="cgBrand" onchange="onBrandChange()">
+                                    <option value="">加载中...</option>
+                                </select>
+                                <label>主板型号：</label>
+                                <select id="cgBoard" onchange="onBoardChange()">
+                                    <option value="">-- 选择型号 --</option>
+                                </select>
+                                <span id="cgBoardInfo" class="cg-board-info"></span>
+                            </div>
+                            <div id="cgBoardImageContainer" class="cg-board-image-container">
+                                <img id="cgBoardImage" class="cg-board-image" alt="板卡图片">
+                            </div>
+                            <div class="cg-row" style="margin-top:10px;">
+                                <label>连接方式：</label>
+                                <select id="cgConnection" onchange="onConnectionTypeChange()">
+                                    <option value="">选择板卡后显示</option>
+                                </select>
+                                <label id="cgSerialLabel">MCU serial：</label>
+                                <input type="text" id="cgSerial" placeholder="/dev/serial/by-id/xxx" style="flex:1;min-width:200px;">
+                                <button class="btn btn-sm btn-primary cg-detect-btn" id="cgDetectBtn" onclick="detectMcuDevices()" title="自动扫描可用设备">
+                                    <i class="fas fa-search"></i> 自动检测
+                                </button>
+                                <label id="cgBaudLabel">baud：</label>
+                                <input type="number" id="cgBaud" value="250000" style="width:90px;">
+                                <span id="cgSerialHint" class="cg-hint">USB: /dev/serial/by-id/usb-xxx; CAN: canbus_uuid=xxx</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 工具板配置（移入Tab1） -->
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header"><h3><i class="fas fa-puzzle-piece" style="margin-right:8px;color:var(--primary-color)"></i> 工具板</h3></div>
+                        <div class="card-body">
+                            <div class="cg-row">
+                                <label>工具板数量：</label>
+                                <select id="cgToolCount" onchange="onToolCountChange()">
+                                    <option value="0" selected>0</option>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                </select>
+                            </div>
+                            <div id="cgToolboardConfig" style="display:none;margin-top:12px;">
+                                <div id="cgToolboardContainer"></div>
+                            </div>
+                            <div id="cgToolboardSection"></div>
+                        </div>
+                    </div>
+                    <!-- 打印机型号 -->
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header"><h3><i class="fas fa-print" style="margin-right:8px;color:var(--primary-color)"></i> 打印机型号</h3></div>
+                        <div class="card-body">
+                            <div class="cg-row">
+                                <label>打印机型号：</label>
+                                <select id="cgPrinterModel" onchange="onPrinterModelChange()">
+                                    <option value="">加载机型预设中...</option>
+                                </select>
+                            </div>
+                            <div id="cgCustomPrinterSection" style="display:none;margin-top:16px;">
+                                <h4 class="cg-section-title"><i class="fas fa-pencil-alt"></i> 自定义打印机参数</h4>
+                                <div class="cg-param-grid">
+                                    <div class="cg-param-item">
+                                        <label>运动学类型：</label>
+                                        <select id="cgCustomKinematics">
+                                            <option value="corexy">CoreXY</option>
+                                            <option value="cartesian">Cartesian (笛卡尔)</option>
+                                            <option value="delta">Delta</option>
+                                            <option value="polar">Polar</option>
+                                        </select>
+                                    </div>
+                                    <div class="cg-param-item">
+                                        <label>轴数：</label>
+                                        <select id="cgCustomAxisCount">
+                                            <option value="3">3轴 (XYZ)</option>
+                                            <option value="4">4轴 (XYZ+E)</option>
+                                            <option value="5">5轴 (XYZ+Z2+E)</option>
+                                            <option value="6">6轴 (XYZ+Z1Z2+E)</option>
+                                        </select>
+                                    </div>
+                                    <div class="cg-param-item">
+                                        <label>X行程(mm)：</label>
+                                        <input type="number" id="cgCustomXMax" value="250" class="cg-xs">
+                                    </div>
+                                    <div class="cg-param-item">
+                                        <label>Y行程(mm)：</label>
+                                        <input type="number" id="cgCustomYMax" value="250" class="cg-xs">
+                                    </div>
+                                    <div class="cg-param-item">
+                                        <label>Z行程(mm)：</label>
+                                        <input type="number" id="cgCustomZMax" value="250" class="cg-xs">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: 轴分配与TMC驱动配置 -->
+                <div class="cg-tab-panel" data-tab="2">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-server" style="margin-right:8px;color:var(--primary-color)"></i> 驱动器轴分配与TMC配置</h3>
+                            <button class="btn btn-sm btn-primary" onclick="smartAutoAssign()">
+                                <i class="fas fa-magic"></i> 智能分配
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="cgDriverContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header"><h3><i class="fas fa-arrows-alt" style="margin-right:8px;color:var(--primary-color)"></i> 运动参数</h3></div>
+                        <div class="card-body">
+                            <div id="cgMotionContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板和打印机型号</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: 限位开关与调平传感器 -->
+                <div class="cg-tab-panel" data-tab="3">
+                    <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-hand-paper" style="margin-right:8px;color:var(--primary-color)"></i> 限位开关</h3></div>
+                        <div class="card-body">
+                            <div id="cgEndstopContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header"><h3><i class="fas fa-ruler-combined" style="margin-right:8px;color:var(--primary-color)"></i> 调平传感器</h3></div>
+                        <div class="card-body">
+                            <div id="cgProbeContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: 归位与调平 -->
+                <div class="cg-tab-panel" data-tab="4">
+                    <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-home" style="margin-right:8px;color:var(--primary-color)"></i> 原点归位</h3></div>
+                        <div class="card-body">
+                            <div id="cgHomingContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板和打印机型号</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header"><h3><i class="fas fa-th" style="margin-right:8px;color:var(--primary-color)"></i> 调平与可选配置</h3></div>
+                        <div class="card-body">
+                            <div id="cgLevelingContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 配置预览 -->
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header">
+                            <h3><i class="fas fa-code" style="margin-right:8px;color:var(--primary-color)"></i> 配置预览</h3>
+                            <div class="status-indicator" id="configStatus"><span class="dot"></span><span>未生成</span></div>
+                        </div>
+                        <div class="card-body">
+                            <div id="errorMessage" class="error-message"></div>
+                            <pre id="output" class="output-pre">请完成配置后点击"生成配置"按钮...</pre>
+                            <div class="action-buttons">
+                                <button class="btn btn-primary" onclick="generateConfig()"><i class="fas fa-cogs"></i> 生成配置</button>
+                                <button class="btn btn-secondary" id="downloadBtn" onclick="downloadConfig()" disabled><i class="fas fa-download"></i> 下载配置</button>
+                                <button class="btn btn-secondary" onclick="copyConfig()" id="copyBtn" disabled><i class="fas fa-copy"></i> 复制配置</button>
+                                <button class="btn btn-danger" onclick="resetForm()"><i class="fas fa-redo"></i> 重置</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+<!-- Tab 5: 加热器 -->
+                <div class="cg-tab-panel" data-tab="5">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-thermometer-half" style="margin-right:8px;color:var(--primary-color)"></i> 温控与冷却</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="addExtraHeater()" id="cgAddHeaterBtn">
+                                <i class="fas fa-plus"></i> 添加加热器
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="cgHeaterContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header"><h3><i class="fas fa-fan" style="margin-right:8px;color:var(--primary-color)"></i> 风扇配置</h3></div>
+                        <div class="card-body">
+                            <div id="cgFanContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 挤出机参数 -->
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header"><h3><i class="fas fa-compress-arrows-alt" style="margin-right:8px;color:var(--primary-color)"></i> 挤出机参数</h3></div>
+                        <div class="card-body">
+                            <div id="cgExtruderParamContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 热床参数 -->
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header"><h3><i class="fas fa-bed" style="margin-right:8px;color:var(--primary-color)"></i> 热床参数</h3></div>
+                        <div class="card-body">
+                            <div id="cgBedParamContainer">
+                                <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                            </div>
         </main>
     </div>
 
@@ -830,5 +1143,7 @@
     <script src="/static/js/config-manager.js?v=20260320f"></script>
     <script src="/static/js/firmware-compile.js?v=20260605g"></script>
     <script src="/static/js/firmware-update.js?v=20260320f"></script>
+    <script src="/static/js/klipper-parser.js?v=20260702b"></script>
+    <script src="/static/js/config-generator.js?v=20260704za"></script>
 </body>
 </html>

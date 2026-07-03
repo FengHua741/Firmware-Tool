@@ -1,0 +1,49 @@
+{
+    "Drives0": {
+        "step_pin": "PC13",
+        "dir_pin": "PC0",
+        "enable_pin": "PC15",
+        "uart_pin": "PC14"
+    },
+    "Drives1": {
+        "step_pin": "PE3",
+        "dir_pin": "PE2",
+        "enable_pin": "PE5",
+        "uart_pin": "PE4"
+    },
+    "Drives2": {
+        "step_pin": "PD1",
+        "dir_pin": "PD0",
+        "enable_pin": "PE1",
+        "uart_pin": "PE0"
+    },
+    "Drives3": {
+        "step_pin": "PA15",
+        "dir_pin": "PD7",
+        "enable_pin": "PC2",
+        "uart_pin": "PA8"
+    },
+    "Drives4": {
+        "step_pin": "PD4",
+        "dir_pin": "PD3",
+        "enable_pin": "PD6",
+        "uart_pin": "PD5"
+    },
+    "BED_OUT": "PA0",
+    "heat0": "PA2",
+    "heat1": "PC6",
+    "temp_bed": "PA3",
+    "temp0": "PA4",
+    "temp1": "PA1",
+    "fan0": "PD15",
+    "fan1": "PD14",
+    "fan2": "PB6",
+    "fan3": "PB7",
+    "stop0": "PD12",
+    "stop1": "PB10",
+    "stop2": "PC4",
+    "servo": "PB0",
+    "probe": "PC5",
+    "uart-tx": "PA9",
+    "uart-rx": "PA10"
+}

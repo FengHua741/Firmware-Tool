@@ -1,0 +1,143 @@
+{
+  "id": "voron-trident-awd",
+  "name": "Voron Trident AWD",
+  "description": "CoreXY 八电机全轮驱动三Z配置",
+  "geometry": {
+    "type": "corexy",
+    "mins": [0, 0, 0],
+    "maxes": [250, 250, 250]
+  },
+  "drives": [
+    {
+      "axis": "X", "direction": false, "microstepping": 16, "interpolation": true,
+      "rotation_distance": 40, "full_steps_per_rotation": 200,
+      "homing_speed": 50, "homing_retract_dist": 5,
+      "position_min": 0, "position_max": 250, "position_endstop": 0,
+      "homing_positive_dir": false, "second_homing_speed": 25,
+      "stepper_driver": "tmc2209", "run_current": 0.8
+    },
+    {
+      "axis": "X1", "direction": false, "microstepping": 16, "interpolation": true,
+      "rotation_distance": 40, "full_steps_per_rotation": 200,
+      "homing_speed": 50, "homing_retract_dist": 5,
+      "position_min": 0, "position_max": 250, "position_endstop": 0,
+      "homing_positive_dir": false, "second_homing_speed": 25,
+      "stepper_driver": "tmc2209", "run_current": 0.8
+    },
+    {
+      "axis": "Y", "direction": false, "microstepping": 16, "interpolation": true,
+      "rotation_distance": 40, "full_steps_per_rotation": 200,
+      "homing_speed": 50, "homing_retract_dist": 5,
+      "position_min": 0, "position_max": 250, "position_endstop": 0,
+      "homing_positive_dir": false, "second_homing_speed": 25,
+      "stepper_driver": "tmc2209", "run_current": 0.8
+    },
+    {
+      "axis": "Y1", "direction": false, "microstepping": 16, "interpolation": true,
+      "rotation_distance": 40, "full_steps_per_rotation": 200,
+      "homing_speed": 50, "homing_retract_dist": 5,
+      "position_min": 0, "position_max": 250, "position_endstop": 0,
+      "homing_positive_dir": false, "second_homing_speed": 25,
+      "stepper_driver": "tmc2209", "run_current": 0.8
+    },
+    {
+      "axis": "Z", "direction": false, "microstepping": 16, "interpolation": true,
+      "rotation_distance": 8, "full_steps_per_rotation": 200,
+      "homing_speed": 15, "homing_retract_dist": 5,
+      "position_min": 0, "position_max": 250, "position_endstop": 0,
+      "homing_positive_dir": false, "second_homing_speed": 8,
+      "stepper_driver": "tmc2209", "run_current": 0.8
+    },
+    {
+      "axis": "Z1", "direction": false, "microstepping": 16, "interpolation": true,
+      "rotation_distance": 8, "full_steps_per_rotation": 200,
+      "homing_speed": 15, "homing_retract_dist": 5,
+      "position_min": 0, "position_max": 250, "position_endstop": 0,
+      "homing_positive_dir": false, "second_homing_speed": 8,
+      "stepper_driver": "tmc2209", "run_current": 0.8
+    },
+    {
+      "axis": "Z2", "direction": false, "microstepping": 16, "interpolation": true,
+      "rotation_distance": 8, "full_steps_per_rotation": 200,
+      "homing_speed": 15, "homing_retract_dist": 5,
+      "position_min": 0, "position_max": 250, "position_endstop": 0,
+      "homing_positive_dir": false, "second_homing_speed": 8,
+      "stepper_driver": "tmc2209", "run_current": 0.8
+    },
+    {
+      "axis": "E", "direction": false, "microstepping": 16, "interpolation": true,
+      "stepper_driver": "tmc2209", "run_current": 0.5
+    }
+  ],
+  "extruder": {
+    "model": "bondtech_5mm",
+    "rotation_distance": 22.6789522,
+    "microstepping": 16,
+    "full_steps_per_rotation": 200,
+    "filament_diameter": 1.75,
+    "nozzle_diameter": 0.4,
+    "sensor_type": "NTC 100K beta 3950",
+    "max_temp": 285,
+    "min_temp": -235,
+    "min_extrude_temp": 170,
+    "gear_ratio": "50:17",
+    "pressure_advance": 0.05,
+    "pressure_advance_smooth_time": 0.040,
+    "max_extrude_only_distance": 100,
+    "max_extrude_cross_section": 50,
+    "max_power": 1.0,
+    "control": "watermark"
+  },
+  "bed": {
+    "present": true,
+    "sensor_type": "NTC 100K beta 3950",
+    "max_temp": 110,
+    "min_temp": -235,
+    "max_power": 1.0,
+    "control": "watermark"
+  },
+  "probe": {
+    "type": "bltouch",
+    "z_offset": 2.0,
+    "speed": 5.0,
+    "second_speed": 2.0,
+    "samples": 3,
+    "sample_retract_dist": 1.0,
+    "x_offset": 0,
+    "y_offset": 0,
+    "samples_result": "median",
+    "samples_tolerance": 0.006,
+    "samples_tolerance_retries": 3
+  },
+  "homing": {
+    "speed_fast": 50,
+    "speed_slow": 25,
+    "z_dive_height": 5,
+    "x_positive": false,
+    "y_positive": false,
+    "z_positive": false
+  },
+  "kinematics": {
+    "max_velocity": 300,
+    "max_accel": 3000,
+    "max_z_velocity": 15,
+    "max_z_accel": 100,
+    "square_corner_velocity": 5.0
+  },
+  "fans": [
+    { "name": "Part Cooling Fan", "type": "part_fan", "kick_start_time": 0.5, "off_below": 0.10 },
+    { "name": "Hotend Fan", "type": "throat_fan", "max_power": 1.0, "kick_start_time": 0.5, "heater_temp": 50, "fan_speed": 1.0 }
+  ],
+  "bed_mesh": {
+    "speed": 50, "horizontal_move_z": 5,
+    "mesh_min": "30,30", "mesh_max": "220,220",
+    "probe_count": "4,4", "algorithm": "bicubic"
+  },
+  "optional_sections": {
+    "safe_z_home": false, "force_move": false,
+    "verify_heater": true, "idle_timeout": true,
+    "exclude_object": false, "temperature_monitor": true,
+    "client_variable": false, "print_macros": false,
+        "adxl345": true
+  }
+}

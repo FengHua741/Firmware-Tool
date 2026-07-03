@@ -1,0 +1,48 @@
+{
+    "Drives0": {
+        "step_pin": "PC13",
+        "dir_pin": "PC1",
+        "enable_pin": "PA3",
+        "uart_pin": "PB11",
+        "spi_bus": "SPI",
+        "diag_pin": "PA4"
+    },
+    "Drives1": {
+        "step_pin": "PC14",
+        "dir_pin": "PC4",
+        "enable_pin": "PD2",
+        "uart_pin": "PC10",
+        "spi_bus": "spi3",
+        "diag_pin": "PA5"
+    },
+    "Drives2": {
+        "step_pin": "PC15",
+        "dir_pin": "PC5",
+        "enable_pin": "PC12",
+        "uart_pin": "PB7",
+        "spi_bus": "spi3",
+        "diag_pin": "PA6"
+    },
+    "Drives3": {
+        "step_pin": "PC3",
+        "dir_pin": "PC8",
+        "enable_pin": "PC11",
+        "uart_pin": "PB6",
+        "spi_bus": "spi3",
+        "diag_pin": "PB1"
+    },
+    "heat0": "PA0",
+    "bed-heat": "PA2",
+    "temp0": "PC0",
+    "bed-temp": "PC2",
+    "fan0": "PC6",
+    "fan1": "PC7",
+    "stop0": "PA4",
+    "stop1": "PA5",
+    "stop2": "PA6",
+    "stop3": "PB1",
+    "probe": "PA1",
+    "servo": "PB0",
+    "uart-tx": "PA9",
+    "uart-rx": "PA10"
+}

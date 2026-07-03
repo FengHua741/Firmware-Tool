@@ -1,0 +1,134 @@
+{
+    "img": {
+        "Width": 2592,
+        "Height": 1812,
+        "Zoom": 1.0
+    },
+    "drives": [{
+        "left": 65,
+        "top": 15,
+        "Width": 120,
+        "Height": 58,
+        "name": "Drives0"
+    }, {
+        "left": 241,
+        "top": 16,
+        "Width": 120,
+        "Height": 58,
+        "name": "Drives1"
+    }, {
+        "left": 368,
+        "top": 16,
+        "Width": 120,
+        "Height": 58,
+        "name": "Drives2"
+    }, {
+        "left": 506,
+        "top": 15,
+        "Width": 120,
+        "Height": 113,
+        "name": "Drives3"
+    }, {
+        "left": 649,
+        "top": 16,
+        "Width": 120,
+        "Height": 58,
+        "name": "Drives4"
+    }],
+    "heat": [{
+        "left": 324,
+        "top": 584,
+        "Width": 97,
+        "Height": 103,
+        "name": "heat0"
+    }, {
+        "left": 12,
+        "top": 255,
+        "Width": 100,
+        "Height": 100,
+        "name": "heat1"
+    }, {
+        "left": 228,
+        "top": 584,
+        "Width": 97,
+        "Height": 103,
+        "name": "BED_OUT"
+    }],
+    "temp": [{
+        "left": 746,
+        "top": 634,
+        "Width": 73,
+        "Height": 58,
+        "name": "temp_bed"
+    }, {
+        "left": 820,
+        "top": 634,
+        "Width": 73,
+        "Height": 58,
+        "name": "temp0"
+    }, {
+        "left": 20,
+        "top": 197,
+        "Width": 74,
+        "Height": 58,
+        "name": "temp1"
+    }],
+    "fan": [{
+        "left": 440,
+        "top": 565,
+        "Width": 72,
+        "Height": 58,
+        "name": "fan0"
+    }, {
+        "left": 440,
+        "top": 508,
+        "Width": 72,
+        "Height": 58,
+        "name": "fan1"
+    }, {
+        "left": 10,
+        "top": 22,
+        "Width": 55,
+        "Height": 74,
+        "name": "fan2"
+    }, {
+        "left": 20,
+        "top": 140,
+        "Width": 74,
+        "Height": 57,
+        "name": "fan3"
+    }],
+    "endstop": [{
+        "left": 517,
+        "top": 634,
+        "Width": 73,
+        "Height": 58,
+        "name": "stop0"
+    }, {
+        "left": 595,
+        "top": 634,
+        "Width": 73,
+        "Height": 58,
+        "name": "stop1"
+    }, {
+        "left": 672,
+        "top": 634,
+        "Width": 73,
+        "Height": 58,
+        "name": "stop2"
+    }],
+    "bltouch":[{
+        "left":653,
+        "top":433,
+        "Width":60,
+        "Height":55,
+        "name":"probe"      
+        },{
+        "left":713,
+        "top":433,
+        "Width":85,
+        "Height":55,
+        "name":"servo"      
+        }
+    ]
+}

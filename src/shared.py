@@ -61,6 +61,16 @@ BITRATE_VALUES = sorted(CAN_BITRATES.keys(), reverse=True)  # [1000000, 500000, 
 # ==================== Flask 应用初始化 ====================
 app = Flask(__name__, static_folder='../static')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+@app.after_request
+def add_no_cache_headers(response):
+    """为静态文件添加 no-cache 头，确保开发期间始终加载最新文件"""
+    if request.path.startswith('/static/'):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
 CORS(app)
 
 # 配置路径 - 使用动态路径，不硬编码

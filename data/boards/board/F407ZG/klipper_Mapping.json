@@ -1,0 +1,97 @@
+{
+    "Drives0": {
+        "step_pin": "PB9",
+        "dir_pin": "PE0",
+        "enable_pin": "PE1",
+        "uart_pin": "PG13",
+        "spi_bus": "spi1a"
+    },
+    "Drives1": {
+        "step_pin": "PB8",
+        "dir_pin": "PG11",
+        "enable_pin": "PG12",
+        "uart_pin": "PG10",
+        "spi_bus": "spi1a"
+    },
+    "Drives2": {
+        "step_pin": "PA8",
+        "dir_pin": "PD6",
+        "enable_pin": "PD7",
+        "uart_pin": "PD5",
+        "spi_bus": "spi1a"
+    },
+    "Drives3": {
+        "step_pin": "PC7",
+        "dir_pin": "PD3",
+        "enable_pin": "PD4",
+        "uart_pin": "PD1",
+        "spi_bus": "spi1a"
+    },
+    "Drives4": {
+        "step_pin": "PC6",
+        "dir_pin": "PA15",
+        "enable_pin": "PD0",
+        "uart_pin": "PA14",
+        "spi_bus": "spi1a"
+    },
+    "Drives5": {
+        "step_pin": "PD15",
+        "dir_pin": "PG7",
+        "enable_pin": "PG8",
+        "uart_pin": "PG6",
+        "spi_bus": "spi1a"
+    },
+    "Drives6": {
+        "step_pin": "PD14",
+        "dir_pin": "PG4",
+        "enable_pin": "PG5",
+        "uart_pin": "PG3",
+        "spi_bus": "spi1a"
+    },
+    "Drives7": {
+        "step_pin": "PD13",
+        "dir_pin": "PD11",
+        "enable_pin": "PG2",
+        "uart_pin": "PD10",
+        "spi_bus": "spi1a"
+    },
+    "Drives8": {
+        "step_pin": "PD12",
+        "dir_pin": "PD8",
+        "enable_pin": "PD9",
+        "uart_pin": "PB12",
+        "spi_bus": "spi1a"
+    },
+    "BED_OUT":"PE2",
+    "heat0":"PF7",
+    "heat1":"PF6",
+    "heat2":"PE6",
+    "heat3":"PE5",
+    "heat4":"PE4",
+    "heat5":"PE3",
+    "temp_bed":"PF3",
+    "temp0":"PA0",
+    "temp1":"PC1",
+    "temp2":"PC0",
+    "temp3":"PF10",
+    "temp4":"PF5",
+    "temp5":"PF4",
+    "fan0":"PF8",
+    "fan1":"PF9",
+    "fan2":"PA2",
+    "fan3":"PA1",
+    "fan4":"PE13",
+    "fan5":"PB11",
+    "stop0":"PC3",
+    "stop1":"PC2",
+    "stop2":"PF2",
+    "stop3":"PF1",
+    "stop4":"PF0",
+    "stop5":"PC15",
+    "stop6":"PC14",
+    "stop7":"PA3",
+    "servo":"PE11",
+    "uart-tx":"PA9",
+    "uart-rx":"PA10"
+
+}

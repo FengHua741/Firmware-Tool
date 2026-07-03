@@ -1,0 +1,18 @@
+{
+    "Drives0": {
+        "step_pin": "gpio4",
+        "dir_pin": "gpio3",
+        "enable_pin": "gpio5",
+        "uart_pin": "gpio2"
+    },
+    "Drives1": {
+        "step_pin": "gpio7",
+        "dir_pin": "gpio8",
+        "enable_pin": "gpio6",
+        "uart_pin": "gpio9"
+    },
+    "stop0": "gpio20",
+    "stop1": "gpio15",
+    "servo": "gpio21",
+    "extra": "gpio14"
+}

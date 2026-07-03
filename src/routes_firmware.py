@@ -436,7 +436,9 @@ def compile_firmware():
             config_lines.append(f'CONFIG_INITIAL_PINS="{startup_pin}"')
             yield f'data: [LOG] 启动引脚已配置: {startup_pin}\n\n'
         else:
-            yield f'data: [LOG] 未设置启动引脚\n\n'
+            # 始终设置 CONFIG_INITIAL_PINS（空值），否则 STM32H723 等使用 DECL_STARTUP_PIN_STATE 的 MCU 编译会失败
+            config_lines.append('CONFIG_INITIAL_PINS=""')
+            yield f'data: [LOG] 未设置启动引脚（使用空值）\n\n'
         
         config_content = '\n'.join(config_lines) + '\n'
         config_path = os.path.join(klipper_path, '.config')

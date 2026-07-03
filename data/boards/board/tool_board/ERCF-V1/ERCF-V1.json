@@ -1,0 +1,51 @@
+{
+    "img": {
+        "Width": 2984,
+        "Height": 1146,
+        "Zoom": 1.0
+    },
+    "drives": [{
+        "left": 520,
+        "top": 115,
+        "Width": 218,
+        "Height": 165,
+        "name": "Drives0"
+    }, {
+        "left": 770,
+        "top": 115,
+        "Width": 218,
+        "Height": 165,
+        "name": "Drives1"
+    }],
+
+    "endstop": [{
+        "left": 405,
+        "top": 113,
+        "Width": 108,
+        "Height": 60,
+        "name": "stop0"
+    }, {
+        "left": 405,
+        "top": 178,
+        "Width": 108,
+        "Height": 60,
+        "name": "stop1"
+    }],
+    "servo":[{
+        "left": 405,
+        "top": 20,
+        "Width": 108,
+        "Height": 60,
+        "name":"servo"      
+        }
+    ],       
+    "extra":[{
+        "left": 405,
+        "top": 242,
+        "Width": 108,
+        "Height": 60,
+        "name":"extra"      
+        }
+    ]
+
+}

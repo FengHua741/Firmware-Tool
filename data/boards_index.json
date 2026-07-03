@@ -1,0 +1,512 @@
+{
+  "FLY": {
+    "mainboards": {
+      "fly-c5": {
+        "name": "FLY-C5",
+        "board_id": "fly-c5",
+        "mcu": "stm32h723",
+        "platform": "STM32",
+        "drive_count": 5,
+        "has_bed": true,
+        "heat_count": 2,
+        "temp_count": 3,
+        "fan_count": 4,
+        "stop_count": 11,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/C5/C5.png",
+        "mapping_dir": "board/C5"
+      },
+      "fly-c8": {
+        "name": "FLY-C8",
+        "board_id": "fly-c8",
+        "mcu": "stm32f407",
+        "platform": "STM32",
+        "drive_count": 8,
+        "has_bed": true,
+        "heat_count": 3,
+        "temp_count": 4,
+        "fan_count": 6,
+        "stop_count": 6,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/C8/C8.png",
+        "mapping_dir": "board/C8"
+      },
+      "fly-c8p": {
+        "name": "FLY-C8P",
+        "board_id": "fly-c8p",
+        "mcu": "stm32h723",
+        "platform": "STM32",
+        "drive_count": 8,
+        "has_bed": true,
+        "heat_count": 3,
+        "temp_count": 4,
+        "fan_count": 6,
+        "stop_count": 6,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/C8P/C8P.png",
+        "mapping_dir": "board/C8P"
+      },
+      "fly-d5": {
+        "name": "FLY-D5",
+        "board_id": "fly-d5",
+        "mcu": "stm32f072",
+        "platform": "STM32",
+        "drive_count": 5,
+        "has_bed": false,
+        "heat_count": 2,
+        "temp_count": 2,
+        "fan_count": 2,
+        "stop_count": 3,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/D5/D5.png",
+        "mapping_dir": "board/D5"
+      },
+      "fly-d7": {
+        "name": "FLY-D7",
+        "board_id": "fly-d7",
+        "mcu": "stm32f072",
+        "platform": "STM32",
+        "drive_count": 7,
+        "has_bed": false,
+        "heat_count": 3,
+        "temp_count": 3,
+        "fan_count": 2,
+        "stop_count": 4,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/D7/D7.png",
+        "mapping_dir": "board/D7"
+      },
+      "fly-d8-f407": {
+        "name": "FLY-D8 (F407)",
+        "board_id": "fly-d8-f407",
+        "mcu": "stm32f407",
+        "platform": "STM32",
+        "drive_count": 8,
+        "has_bed": true,
+        "heat_count": 3,
+        "temp_count": 4,
+        "fan_count": 6,
+        "stop_count": 6,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/D8/D8.png",
+        "mapping_dir": "board/D8"
+      },
+      "fly-d8-h723": {
+        "name": "FLY-D8 (H723)",
+        "board_id": "fly-d8-h723",
+        "mcu": "stm32h723",
+        "platform": "STM32",
+        "drive_count": 8,
+        "has_bed": true,
+        "heat_count": 3,
+        "temp_count": 4,
+        "fan_count": 6,
+        "stop_count": 6,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/D8-PRO/D8-PRO.png",
+        "mapping_dir": "board/D8-PRO"
+      },
+      "fly-dp5": {
+        "name": "FLY-DP5",
+        "board_id": "fly-dp5",
+        "mcu": "stm32f072",
+        "platform": "STM32",
+        "drive_count": 5,
+        "has_bed": false,
+        "heat_count": 2,
+        "temp_count": 2,
+        "fan_count": 2,
+        "stop_count": 3,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/DP5/DP5.png",
+        "mapping_dir": "board/DP5"
+      },
+      "fly-e3pro": {
+        "name": "FLY-E3-PRO",
+        "board_id": "fly-e3pro",
+        "mcu": "unknown",
+        "platform": "unknown",
+        "drive_count": 5,
+        "has_bed": true,
+        "heat_count": 2,
+        "temp_count": 3,
+        "fan_count": 4,
+        "stop_count": 3,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB"
+        ],
+        "image": "boards/board/E3-PRO/E3-PRO.png",
+        "mapping_dir": "board/E3-PRO"
+      },
+      "fly-e3-ultra": {
+        "name": "FLY-E3 Ultra",
+        "board_id": "fly-e3-ultra",
+        "mcu": "stm32h723",
+        "platform": "STM32",
+        "drive_count": 5,
+        "has_bed": true,
+        "heat_count": 2,
+        "temp_count": 3,
+        "fan_count": 4,
+        "stop_count": 3,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/E3-Ultra/E3-Ultra.png",
+        "mapping_dir": "board/E3-Ultra"
+      },
+      "fly-e3-v2": {
+        "name": "FLY-E3 V2",
+        "board_id": "fly-e3-v2",
+        "mcu": "stm32f407",
+        "platform": "STM32",
+        "drive_count": 5,
+        "has_bed": true,
+        "heat_count": 2,
+        "temp_count": 2,
+        "fan_count": 4,
+        "stop_count": 3,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/E3-V2/E3-V2.png",
+        "mapping_dir": "board/E3-V2"
+      },
+      "fly-f407zg": {
+        "name": "FLY-F407ZG",
+        "board_id": "fly-f407zg",
+        "mcu": "stm32f407",
+        "platform": "STM32",
+        "drive_count": 9,
+        "has_bed": true,
+        "heat_count": 6,
+        "temp_count": 7,
+        "fan_count": 6,
+        "stop_count": 8,
+        "has_probe": false,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/F407ZG/F407ZG.png",
+        "mapping_dir": "board/F407ZG"
+      },
+      "fly-gemini-v3": {
+        "name": "FLY-Gemini V3",
+        "board_id": "fly-gemini-v3",
+        "mcu": "stm32f405",
+        "platform": "STM32",
+        "drive_count": 4,
+        "has_bed": true,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 2,
+        "stop_count": 4,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/Gemini-V3/Gemini-V3.png",
+        "mapping_dir": "board/Gemini-V3"
+      },
+      "fly-micro4": {
+        "name": "FLY-Micro4",
+        "board_id": "fly-micro4",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 4,
+        "has_bed": true,
+        "heat_count": 1,
+        "temp_count": 2,
+        "fan_count": 2,
+        "stop_count": 4,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "gpio",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": null,
+        "mapping_dir": "board/Micro4"
+      },
+      "fly-pro-x10": {
+        "name": "FLY-Pro X10",
+        "board_id": "fly-pro-x10",
+        "mcu": "stm32h723",
+        "platform": "STM32",
+        "drive_count": 10,
+        "has_bed": true,
+        "heat_count": 5,
+        "temp_count": 6,
+        "fan_count": 10,
+        "stop_count": 7,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/Pro-X10/Pro-X10.png",
+        "mapping_dir": "board/Pro-X10"
+      },
+      "fly-super5": {
+        "name": "FLY-Super5",
+        "board_id": "fly-super5",
+        "mcu": "stm32h723",
+        "platform": "STM32",
+        "drive_count": 5,
+        "has_bed": true,
+        "heat_count": 2,
+        "temp_count": 3,
+        "fan_count": 4,
+        "stop_count": 6,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/SUPER5-PRO/SUPER5-PRO.png",
+        "mapping_dir": "board/SUPER5-PRO"
+      },
+      "fly-super8": {
+        "name": "FLY-Super8",
+        "board_id": "fly-super8",
+        "mcu": "stm32f407",
+        "platform": "STM32",
+        "drive_count": 8,
+        "has_bed": true,
+        "heat_count": 5,
+        "temp_count": 6,
+        "fan_count": 10,
+        "stop_count": 7,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/SUPER8/SUPER8.png",
+        "mapping_dir": "board/SUPER8"
+      },
+      "fly-super8-pro": {
+        "name": "FLY-Super8 Pro",
+        "board_id": "fly-super8-pro",
+        "mcu": "stm32h723",
+        "platform": "STM32",
+        "drive_count": 8,
+        "has_bed": true,
+        "heat_count": 5,
+        "temp_count": 6,
+        "fan_count": 10,
+        "stop_count": 7,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "USB转CAN"
+        ],
+        "image": "boards/board/SUPER8-PRO/SUPER8-PRO.png",
+        "mapping_dir": "board/SUPER8-PRO"
+      }
+    },
+    "toolboards": {
+      "ercf": {
+        "name": "FLY-ERCF",
+        "board_id": "ercf",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 2,
+        "has_bed": false,
+        "heat_count": 0,
+        "temp_count": 0,
+        "fan_count": 0,
+        "stop_count": 2,
+        "has_probe": false,
+        "has_servo": true,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/ERCF-V1/ERCF-V1.png",
+        "mapping_dir": "board/tool_board/ERCF-V1"
+      },
+      "ercfv2": {
+        "name": "FLY-ERCF V2",
+        "board_id": "ercfv2",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 2,
+        "has_bed": false,
+        "heat_count": 0,
+        "temp_count": 0,
+        "fan_count": 0,
+        "stop_count": 2,
+        "has_probe": false,
+        "has_servo": true,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/ERCF-V2/ERCF-V2.png",
+        "mapping_dir": "board/tool_board/ERCF-V2"
+      },
+      "mmu": {
+        "name": "FLY-MMU",
+        "board_id": "mmu",
+        "mcu": "stm32h723",
+        "platform": "STM32",
+        "drive_count": 4,
+        "has_bed": false,
+        "heat_count": 0,
+        "temp_count": 0,
+        "fan_count": 0,
+        "stop_count": 11,
+        "has_probe": false,
+        "has_servo": false,
+        "pin_style": "P",
+        "connections": [
+          "CANBUS",
+          "USB",
+          "串口"
+        ],
+        "image": "boards/board/tool_board/MMU/MMU.png",
+        "mapping_dir": "board/tool_board/MMU"
+      },
+      "sb2040-pro-v3": {
+        "name": "FLY-SB2040 Pro V3",
+        "board_id": "sb2040-pro-v3",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 3,
+        "stop_count": 3,
+        "has_probe": false,
+        "has_servo": false,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/SB2040PROV3/SB2040PROV3.png",
+        "mapping_dir": "board/tool_board/SB2040PROV3"
+      },
+      "sb2040-v3": {
+        "name": "FLY-SB2040 V3",
+        "board_id": "sb2040-v3",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 3,
+        "stop_count": 3,
+        "has_probe": false,
+        "has_servo": true,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/SB2040V3/SB2040V3.png",
+        "mapping_dir": "board/tool_board/SB2040V3"
+      },
+      "sht36_v3": {
+        "name": "FLY-SHT36 V3",
+        "board_id": "sht36_v3",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 3,
+        "stop_count": 3,
+        "has_probe": false,
+        "has_servo": true,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/SHT36V3/SHT36V3.png",
+        "mapping_dir": "board/tool_board/SHT36V3"
+      }
+    }
+  }
+}

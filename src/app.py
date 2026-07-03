@@ -19,6 +19,7 @@ from routes_config import board_config_bp
 from routes_settings import settings_bp
 from routes_klipper import klipper_bp
 from routes_update import firmware_update_bp
+from routes_tools import tools_bp
 
 # 注册蓝图
 app.register_blueprint(system_bp)
@@ -27,6 +28,7 @@ app.register_blueprint(board_config_bp)
 app.register_blueprint(settings_bp)
 app.register_blueprint(klipper_bp)
 app.register_blueprint(firmware_update_bp)
+app.register_blueprint(tools_bp)
 
 # 启动
 if __name__ == '__main__':

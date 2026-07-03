@@ -1,0 +1,49 @@
+{
+    "Drives0": {
+        "step_pin": "gpio6",
+        "dir_pin": "gpio3",
+        "enable_pin": "gpio7",
+        "uart_pin": "gpio9",
+        "uart_address": "0",
+        "diag_pin": "gpio13"
+    },
+    "Drives1": {
+        "step_pin": "gpio1",
+        "dir_pin": "gpio0",
+        "enable_pin": "gpio2",
+        "uart_pin": "gpio9",
+        "uart_address": "1",
+        "diag_pin": "gpio14"
+    },
+    "Drives2": {
+        "step_pin": "gpio26",
+        "dir_pin": "gpio25",
+        "enable_pin": "gpio27",
+        "uart_pin": "gpio9",
+        "uart_address": "2",
+        "diag_pin": "gpio15"
+    },
+    "Drives3": {
+        "step_pin": "gpio23",
+        "dir_pin": "gpio22",
+        "enable_pin": "gpio24",
+        "uart_pin": "gpio9",
+        "uart_address": "3",
+        "diag_pin": "gpio12"
+    },
+
+    "heat0": "gpio20",
+    "bed-heat": "gpio21",
+    "temp0": "gpio28",
+    "temp1": "gpio29",
+    "fan0": "gpio16",
+    "fan1": "gpio17",
+    "stop0": "gpio12",
+    "stop1": "gpio13",
+    "stop2": "gpio14",
+    "stop3": "gpio15",
+    "probe": "gpio18",
+    "servo": "gpio19",
+    "pwm1": "gpio10",
+    "pwm2": "gpio11"
+}

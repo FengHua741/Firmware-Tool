@@ -50,6 +50,14 @@ function switchPage(pageId) {
         loadSettings();
         loadVersionInfo();
         loadAvailableServices();
+    } else if (pageId === 'klipper-parser') {
+        if (typeof initKlipperParser === 'function') {
+            initKlipperParser();
+        }
+    } else if (pageId === 'config-generator') {
+        if (typeof initConfigGenerator === 'function') {
+            initConfigGenerator();
+        }
     }
 }
 
