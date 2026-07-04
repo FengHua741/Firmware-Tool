@@ -82,6 +82,21 @@ Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板
 - MCU 型号数据库（自动从 Klipper 源码解析）
 - JSON 配置文件版本管理
 
+### Klipper 配置解析器
+- 上传或远程加载 printer.cfg 及 include 文件
+- 自动识别引脚分配、驱动器配置、传感器型号
+- 配置语法检查与宏比对（vs Mainsail 基准）
+
+### Klipper 配置生成器
+- 6 个选项卡引导式配置：机器设置 / 轴分配与TMC / 限位与调平 / 归位与调平 / 温控与冷却 / 生成配置
+- 主板与打印机型号选择，自动匹配引脚映射与运动学参数
+- 驱动器轴分配与 TMC 驱动配置（TMC2209/5160/2240 等），采样电阻/rref 动态切换
+- Z 限位/调平传感器三种模式：仅物理限位 / 物理限位+探针 / 探针替代 Z 限位(probe:z_virtual_endstop)
+- BL-Touch 与 Voron Tap 探针支持，DIAG 传感器限位（含 DIAG0/DIAG1 通道选择）
+- 原点位置驱动归位方向与限位位置统一设置，手动限位位置独立可调
+- 配置输出自动对齐注释至第 49 列，段落标题可视宽度对齐
+- 一键下载/复制配置，生成后自动跳转至预览选项卡
+
 ### 系统设置
 - Klipper 路径配置
 - SSH 凭据管理（SSH 远程模式）
@@ -166,6 +181,7 @@ Firmware-Tool/
 │   ├── shared.py                 # 共享资源 - 全局常量、配置、工具函数
 │   ├── routes_system.py          # 系统管理蓝图 - 资源监控、设备检测、服务管理
 │   ├── routes_firmware.py        # 固件蓝图 - 编译、烧录、下载
+│   ├── routes_tools.py           # 工具蓝图 - 配置解析器、配置生成器、板卡/机型API
 │   ├── routes_config.py          # 板级配置蓝图 - 配置增删改查
 │   ├── routes_settings.py        # 系统设置蓝图 - SSH配置、CAN配置诊断、时区
 │   ├── routes_klipper.py         # Klipper MCU 数据库蓝图 - Kconfig 解析
@@ -208,6 +224,11 @@ Firmware-Tool/
 | `/api/firmware/detect` | GET | 检测可烧录设备 |
 | `/api/klipper/communication-options` | GET | 全平台通信接口选项 |
 | `/api/klipper/mcu-database` | GET | MCU 数据库 |
+| `/api/tools/boards` | GET | 板卡索引 |
+| `/api/tools/boards/<id>/mapping` | GET | 板卡引脚映射 |
+| `/api/tools/boards/<id>/image` | GET | 板卡图片 |
+| `/api/tools/machines` | GET | 机型预设列表 |
+| `/api/tools/machines/<id>` | GET | 机型预设详情 |
 | `/api/settings/config` | GET/POST | 系统配置 |
 | `/api/system/can-config` | GET/POST | CAN 网络配置 |
 | `/api/system/versions` | GET | 系统版本信息 |

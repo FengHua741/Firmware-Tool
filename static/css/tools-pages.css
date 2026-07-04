@@ -231,3 +231,18 @@
 .cg-corexy-info ul { margin:6px 0 0; padding-left:20px; }
 .cg-corexy-info li { margin-bottom:4px; }
 
+/* 调平传感器模式选择器 */
+.cg-probe-mode-selector { display:flex; flex-direction:column; gap:6px; margin-bottom:4px; }
+.cg-probe-mode-option { display:flex; align-items:flex-start; gap:10px; padding:10px 14px; border:2px solid var(--border-color); border-radius:8px; cursor:pointer; transition:all 0.2s; background:var(--card-bg); }
+.cg-probe-mode-option:hover { border-color:var(--primary-color); background:rgba(33,150,243,.04); }
+.cg-probe-mode-option.active { border-color:var(--primary-color); background:rgba(33,150,243,.06); }
+.cg-probe-mode-option input[type="radio"] { margin-top:2px; accent-color:var(--primary-color); }
+.cg-probe-mode-option span { font-weight:600; font-size:13px; color:var(--text-primary); white-space:nowrap; }
+.cg-probe-mode-option small { display:block; font-size:11px; color:var(--text-secondary); line-height:1.4; flex:1; }
+
+/* DIAG诊断行增强 */
+.cg-diag-row.active { background:rgba(76,175,80,.06); border-radius:4px; padding:4px 8px; }
+
+/* 采样电阻输入框 */
+.cg-drive-table input[type="text"] { font-family:monospace; }
+

@@ -8,10 +8,10 @@
   "katapult_path": "~/katapult",
   "moonraker_host": "192.168.1.150",
   "moonraker_port": 7125,
-  "connection_mode": "fast-ssh",
+  "connection_mode": "local",
   "ssh_host": "192.168.1.150",
   "ssh_port": 22,
-  "ssh_user": "root",
+  "ssh_user": "",
   "sudo_mode": "password",
   "fast_ssh_user": "root",
   "fast_ssh_password": "mellow"

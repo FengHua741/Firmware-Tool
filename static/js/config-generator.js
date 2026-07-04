@@ -14,14 +14,18 @@ const EXT_PRESETS = {
     'hemera':{name:'Hemera',rotation_distance:7.82,microsteps:16,sensor_type:'ATC Semitec 104GT-2',max_temp:285,desc:'E3D Hemera'},
     'custom':{name:'Custom（自定义）',rotation_distance:null,microsteps:null,sensor_type:null,max_temp:null,desc:'手动输入参数'},
 };
+// 调平传感器类型（仅保留 Klipper 官方原生支持的两种）
 const PROBE_PRESETS = {
-    'bltouch':{name:'BL-Touch',z_offset:2.0,needs_servo:true,section:'bltouch',desc:'需要 sensor_pin + control_pin(servo)'},
-    'klicky':{name:'Klicky Probe',z_offset:2.0,needs_servo:false,section:'probe',desc:'机械式探针，需要 klicky 宏'},
-    'euclid':{name:'Euclid Probe',z_offset:2.0,needs_servo:false,section:'probe',desc:'类似 Klicky，需要 euclid 宏'},
-    'voron_tap':{name:'Voron Tap',z_offset:0,needs_servo:false,section:'probe',desc:'使用喷嘴作为探针，需要 tap 宏'},
-    'inductive':{name:'Inductive Probe',z_offset:2.0,needs_servo:false,section:'probe',desc:'电感探针（标准）'},
-    'none':{name:'不使用探针',z_offset:null,needs_servo:false,section:null,desc:''},
+    'bltouch':{name:'BL-Touch',z_offset:2.0,needs_servo:true,section:'bltouch',desc:'需要 sensor_pin (probe引脚) + control_pin (servo引脚)'},
+    'voron_tap':{name:'Voron Tap',z_offset:0,needs_servo:false,section:'probe',desc:'仅需 sensor_pin (probe引脚)，喷嘴即探针'},
 };
+// Z限位/调平传感器三种工作模式
+const PROBE_MODES = {
+    'z_endstop_only':       {label:'仅Z物理限位',        desc:'Z轴用物理限位开关归位，不使用调平传感器', icon:'fa-hand-paper'},
+    'z_endstop_plus_probe': {label:'Z物理限位 + 调平传感器', desc:'Z轴物理限位归位，调平传感器仅用于网床校准与调平', icon:'fa-layer-group'},
+    'probe_as_z':           {label:'调平传感器替代Z限位',  desc:'使用probe:z_virtual_endstop虚拟限位，传感器同时负责归位+调平', icon:'fa-ruler-combined'},
+};
+let _currentProbeMode = 'z_endstop_plus_probe'; // 默认模式B
 const ALL_AXES = ['X','X1','Y','Y1','Z','Z1','Z2','Z3','E','E1'];
 // 常用热敏传感器型号（Klipper 官方支持列表）
 const SENSOR_TYPES = [
@@ -467,6 +471,57 @@ function onExtModelChange() {
     .forEach(([id,k])=>{const el=document.getElementById(id);if(el&&p[k]!=null)el.value=p[k];});
     cgShowToast(`已切换为: ${p.name}`,'success');
 }
+// ========== Probe 工具函数 ==========
+function applyProbePreset() {
+    // 从 _currentPreset.probe 注入完整预设参数到 UI
+    const pp = _currentPreset?.probe;
+    if (!pp) return;
+    const setVal = (id, val, def) => { const el = document.getElementById(id); if (el && val != null) el.value = val; else if (el && def != null) el.value = def; };
+    setVal('cgZOffset', pp.z_offset, 2.0);
+    setVal('cgProbeXOffset', pp.x_offset, 0);
+    setVal('cgProbeYOffset', pp.y_offset, 0);
+    setVal('cgProbeSamples', pp.samples, 1);
+    setVal('cgProbeSpeed', pp.speed, 5.0);
+    setVal('cgProbeSpeed2', pp.second_speed ?? pp.lift_speed, pp.speed ?? 5.0);
+    setVal('cgProbeRetract', pp.sample_retract_dist, 2.0);
+    setVal('cgProbeTolerance', pp.samples_tolerance, 0.100);
+    setVal('cgProbeRetries', pp.samples_tolerance_retries, 0);
+    if (pp.samples_result) { const el = document.getElementById('cgProbeSamplesResult'); if (el) el.value = pp.samples_result; }
+}
+function onProbeModeChange() {
+    // 从radio button读取当前选中的模式值
+    const checkedRadio = document.querySelector('input[name="cgProbeMode"]:checked');
+    const mode = checkedRadio?.value || 'z_endstop_plus_probe';
+    _currentProbeMode = mode;
+    // 更新模式选择器 active 样式
+    document.querySelectorAll('.cg-probe-mode-option').forEach(el => el.classList.remove('active'));
+    const activeOpt = document.getElementById(`cgProbeModeOpt_${mode}`);
+    if (activeOpt) activeOpt.classList.add('active');
+    const probeParams = document.getElementById('cgProbeParams');
+    const probeTypeRow = document.getElementById('cgProbeTypeRow');
+    const modeDesc = document.getElementById('cgProbeModeDesc');
+    const modeHint = document.getElementById('cgProbeModeHint');
+    if (mode === 'z_endstop_only') {
+        if (probeParams) probeParams.style.display = 'none';
+        if (probeTypeRow) probeTypeRow.style.display = 'none';
+        if (modeDesc) modeDesc.textContent = 'Z轴将使用物理限位开关归位，不生成调平传感器配置。';
+        if (modeHint) modeHint.textContent = 'bed_mesh/调平功能将不可用';
+    } else if (mode === 'z_endstop_plus_probe') {
+        if (probeParams) probeParams.style.display = '';
+        if (probeTypeRow) probeTypeRow.style.display = '';
+        if (modeDesc) modeDesc.textContent = 'Z轴使用物理限位归位，调平传感器仅用于网床校准(BED_MESH_CALIBRATE)和螺丝调平(SCREWS_TILT_CALCULATE)。';
+        if (modeHint) modeHint.textContent = 'Z轴endstop_pin指向物理限位引脚';
+    } else if (mode === 'probe_as_z') {
+        if (probeParams) probeParams.style.display = '';
+        if (probeTypeRow) probeTypeRow.style.display = '';
+        if (modeDesc) modeDesc.textContent = 'Z轴使用probe:z_virtual_endstop虚拟限位，调平传感器同时负责Z归位+网床校准+调平。';
+        if (modeHint) modeHint.textContent = 'Z轴endstop_pin=probe:z_virtual_endstop，建议启用safe_z_home';
+    }
+    // 同步Z物理限位可见性
+    syncZEndstopVisibility();
+    // 同步 bed_mesh 启用状态
+    syncBedMeshByMode();
+}
 function onProbeTypeChange() {
     const pt = document.getElementById('cgProbeType')?.value;
     const p = PROBE_PRESETS[pt];
@@ -475,9 +530,23 @@ function onProbeTypeChange() {
     // BL-Touch servo 区域
     const servoRow = document.getElementById('cgProbeServoRow');
     if (servoRow) servoRow.style.display = (pt === 'bltouch') ? '' : 'none';
-    // 探针参数区域
-    const params = document.getElementById('cgProbeParams');
-    if (params) params.style.display = (pt === 'none') ? 'none' : '';
+}
+function syncZEndstopVisibility() {
+    // 模式C(probe_as_z)时隐藏Z轴物理限位引脚行
+    const zRow = document.getElementById('cgEndstopPhysical_Z');
+    if (zRow) zRow.style.display = (_currentProbeMode === 'probe_as_z') ? 'none' : '';
+}
+function syncBedMeshByMode() {
+    const cb = document.getElementById('cgOptBedMesh');
+    if (!cb) return;
+    if (_currentProbeMode === 'z_endstop_only') {
+        cb.checked = false;
+        cb.disabled = true;
+    } else {
+        cb.disabled = false;
+        cb.checked = true;
+    }
+    toggleOptPanel('BedMesh');
 }
 
 // ========== 工具板 ==========
@@ -555,7 +624,7 @@ function renderDriverAssignment() {
     if(!drives.length){c.innerHTML='<p style="color:var(--text-secondary);">此板卡无驱动器引脚</p>';return;}
     const presetDrives=(_currentPreset&&_currentPreset.drives)||[];
     let h='<p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px;">⚠️ 每个轴只能分配给一个驱动器，重复分配将阻止生成。</p>';
-    h+='<div class="cg-drive-table"><table style="table-layout:fixed;width:100%;"><colgroup><col style="width:13%;"><col style="width:49%;"><col style="width:23%;"><col style="width:15%;"></colgroup><thead><tr><th>分配轴</th><th>驱动器引脚</th><th>驱动类型</th><th>电流(A)</th></tr></thead><tbody>';
+    h+='<div class="cg-drive-table"><table style="table-layout:fixed;width:100%;"><colgroup><col style="width:11%;"><col style="width:40%;"><col style="width:17%;"><col style="width:12%;"><col style="width:20%;"></colgroup><thead><tr><th>分配轴</th><th>驱动器引脚</th><th>驱动类型</th><th>电流(A)</th><th><span id="cgTmcSRHeader">采样电阻/Rref</span></th></tr></thead><tbody>';
     drives.forEach((d,i)=>{
         const presetDrive=presetDrives[i];const def=presetDrive?presetDrive.axis:'';
         let o='<option value="">不使用</option>';ALL_AXES.forEach(a=>o+=`<option value="${a}"${a===def?' selected':''}>${a}</option>`);
@@ -563,9 +632,11 @@ function renderDriverAssignment() {
         if(d.uart_pin)pins.push(`UART=${d.uart_pin}`);
         const tmcDef=presetDrive?.stepper_driver||'tmc2209';
         const curDef=presetDrive?.run_current||0.8;
+        // 采样电阻/Rref 默认值：TMC2240用rref，TMC5160=0.075，TMC2209=0.110，其他留空
+        const srDef = presetDrive?.sense_resistor ?? presetDrive?.rref ?? (tmcDef==='tmc2240' ? '12300' : (tmcDef==='tmc5160' ? '0.075' : (tmcDef==='tmc2209' ? '0.110' : '')));
         const tmcOps=[['tmc2209','TMC2209'],['tmc5160','TMC5160'],['tmc2240','TMC2240'],['tmc2130','TMC2130'],['tmc2208','TMC2208'],['tmc2660','TMC2660'],['a4988','A4988'],['external','外置驱动'],['yanggong','杨工驱动']]
             .map(([v,l])=>`<option value="${v}"${tmcDef===v?' selected':''}>${l}</option>`).join('');
-        h+=`<tr><td><select id="cgAxis_${i}" class="cg-axis-sel" onchange="validateAxisAssignment()">${o}</select></td><td><strong>${d.key}</strong><br><span style="font-size:11px;color:var(--text-secondary);">${pins.join(', ')}</span></td><td><select id="cgTmcModel_${i}" onchange="onTmcModelChg(${i})" style="width:100%;font-size:12px;padding:4px;">${tmcOps}</select></td><td><input type="number" step="0.1" id="cgTmcCurrent_${i}" value="${curDef}" style="width:100%;font-size:12px;padding:4px 6px;border:1px solid var(--border-color);border-radius:4px;background:var(--card-bg);"></td></tr>`;
+        h+=`<tr><td><select id="cgAxis_${i}" class="cg-axis-sel" onchange="validateAxisAssignment()">${o}</select></td><td><strong>${d.key}</strong><br><span style="font-size:11px;color:var(--text-secondary);">${pins.join(', ')}</span></td><td><select id="cgTmcModel_${i}" onchange="onTmcModelChg(${i})" style="width:100%;font-size:12px;padding:4px;">${tmcOps}</select></td><td><input type="number" step="0.1" id="cgTmcCurrent_${i}" value="${curDef}" style="width:100%;font-size:12px;padding:4px 6px;border:1px solid var(--border-color);border-radius:4px;background:var(--card-bg);"></td><td><input type="text" id="cgTmcSR_${i}" value="${srDef}" style="width:100%;font-size:12px;padding:4px 6px;border:1px solid var(--border-color);border-radius:4px;background:var(--card-bg);"><small id="cgTmcSRLabel_${i}" style="font-size:10px;color:var(--text-secondary);display:block;text-align:center;">${tmcDef==='tmc2240'?'rref':'sense_resistor'}</small></td></tr>`;
     });
     h+='</tbody></table></div>';
     h+='<div id="cgAxisWarn" class="cg-warn" style="display:none;"></div>';
@@ -581,7 +652,9 @@ function validateAxisAssignment() {
 
 // ========== Tab 3: 运动参数 ==========
 let _motionManualOverride = {};  // 手动覆盖标记: {"X:rd":true,"Y:ms":true,...}
-function resetMotionOverrides() { _motionManualOverride = {}; }
+let _homingManualOverride = {};  // 归位方向手动覆盖标记: {"X":true,"Y":true,...}
+let _homingOriginLocked = false; // 原点全局锁定标记
+function resetMotionOverrides() { _motionManualOverride = {}; _homingManualOverride = {}; _homingOriginLocked = false; }
 function renderMotionParams() {
     const c=document.getElementById('cgMotionContainer'); if(!c||!_currentMapping) return;
     const cp=_currentPreset||{}; const cpDrives=cp.drives||[];
@@ -818,9 +891,11 @@ function renderBedParams() {
 }
 
 // ========== 获取轴→驱动器DIAG映射（含不支持标记）==========
+// 主板DIAG物理引脚固定（JSON中diag_pin），DIAG0/DIAG1是TMC驱动芯片的通道选择
 function getAxisDiagMap() {
     const map = {};
     if (!_currentMapping) return map;
+    const DUAL_DIAG_TMC = { 'tmc5160': true, 'tmc2240': true, 'tmc2130': true };
     const DIAG_TMC = { 'tmc2209': '^', 'tmc5160': '^!', 'tmc2240': '^!', 'tmc2130': '^!' };
     document.querySelectorAll('[id^="cgAxis_"]').forEach(sel => {
         const axis = sel.value;
@@ -828,30 +903,44 @@ function getAxisDiagMap() {
         const idx = parseInt(sel.id.replace('cgAxis_', ''));
         const d = _currentMapping[`Drives${idx}`];
         const tmcModel = document.getElementById(`cgTmcModel_${idx}`)?.value;
-        if (!d || !d.diag_pin) return;
-        const info = { driver: `Drives${idx}`, diag_pin: d.diag_pin, idx, tmcModel: tmcModel||'unknown' };
-        if (DIAG_TMC[tmcModel]) {
-            info.diagPrefix = DIAG_TMC[tmcModel];
-            info.diagSupported = true;
-        } else {
-            info.diagSupported = false;
+        if (!d) return;
+        const boardDiagPin = d.diag_pin || null;
+        const supportsDualDiag = !!(boardDiagPin && DUAL_DIAG_TMC[tmcModel]);
+        const info = {
+            driver: `Drives${idx}`,
+            diag_pin: boardDiagPin,
+            idx,
+            tmcModel: tmcModel||'unknown',
+            hasDiagPin: !!boardDiagPin,
+            diagSupported: false,
+            noDiagPin: !boardDiagPin,
+            supportsDualDiag,
+        };
+        if (boardDiagPin) {
+            if (DIAG_TMC[tmcModel]) {
+                info.diagPrefix = DIAG_TMC[tmcModel];
+                info.diagSupported = true;
+            }
         }
         map[axis] = info;
     });
     return map;
 }
-// DIAG复选框切换：联动禁用物理限位、Z轴仅警告不禁用
+// DIAG复选框切换：联动禁用物理限位、控制DIAG模式选择器显隐
 function onEndstopDiagChange(axis) {
     const cb = document.getElementById(`cgEndstopDiag_${axis}`);
     const info = document.getElementById(`cgEndstopDiagInfo_${axis}`);
+    const modeSel = document.getElementById(`cgEndstopDiagMode_${axis}`);
     const physicalRow = document.getElementById(`cgEndstopPhysical_${axis}`);
-    if (cb && info) {
+    if (cb) {
         if (cb.checked) {
-            info.style.display = '';
+            if (info) info.style.display = '';
+            if (modeSel) modeSel.style.display = '';
             cb.closest('.cg-diag-row')?.classList.add('active');
             if (physicalRow) { physicalRow.style.opacity = '0.35'; physicalRow.style.pointerEvents = 'none'; }
         } else {
-            info.style.display = 'none';
+            if (info) info.style.display = 'none';
+            if (modeSel) modeSel.style.display = 'none';
             cb.closest('.cg-diag-row')?.classList.remove('active');
             if (physicalRow) { physicalRow.style.opacity = ''; physicalRow.style.pointerEvents = ''; }
         }
@@ -878,12 +967,26 @@ function renderEndstopConfig() {
             const dd = diagMap[ax];
             if (dd && dd.diagSupported) {
                 // 驱动支持DIAG → 显示复选框
-                h += `<div class="cg-diag-row"><label class="cg-diag-check"><input type="checkbox" id="cgEndstopDiag_${ax}" onchange="onEndstopDiagChange('${ax}')"> ${ax}轴使用 DIAG 限位</label><span class="cg-diag-pin-info" id="cgEndstopDiagInfo_${ax}" style="display:none;">(${dd.diagPrefix}${dd.diag_pin} on ${dd.driver}/${dd.tmcModel})</span></div>`;
+                h += `<div class="cg-diag-row"><label class="cg-diag-check"><input type="checkbox" id="cgEndstopDiag_${ax}" onchange="onEndstopDiagChange('${ax}')"> ${ax}轴使用 DIAG 限位</label>`;
+                // 支持双DIAG的驱动（TMC5160/2240/2130）显示DIAG0/DIAG1选择器
+                if (dd.supportsDualDiag) {
+                    h += `<select id="cgEndstopDiagMode_${ax}" style="margin-left:8px;font-size:12px;padding:2px 4px;" title="TMC驱动DIAG通道：DIAG0/DIAG1使用同一主板引脚${dd.diag_pin}">`;
+                    h += `<option value="diag0_pin">DIAG0 (${dd.diag_pin})</option>`;
+                    h += `<option value="diag1_pin" selected>DIAG1 (${dd.diag_pin})</option>`;
+                    h += `</select>`;
+                } else {
+                    h += `<span class="cg-diag-pin-info" id="cgEndstopDiagInfo_${ax}" style="display:none;">(${dd.diagPrefix}${dd.diag_pin} on ${dd.driver}/${dd.tmcModel})</span>`;
+                }
+                if (ax === 'Z') h += '<span style="color:#e6a817;font-size:11px;margin-left:8px;">⚠️ Z轴不建议使用DIAG</span>';
+                h += '</div>';
+            } else if (dd && dd.noDiagPin) {
+                // 该驱动未引出DIAG引脚
+                h += `<div class="cg-diag-row" style="opacity:0.5;"><span style="color:#e53935;font-size:12px;">⛔ ${ax}轴(${dd.driver})：该驱动未引出DIAG引脚，不可用于传感器限位</span></div>`;
             } else if (dd && !dd.diagSupported) {
-                // 驱动不支持DIAG → 显示禁用的提示
-                h += `<div class="cg-diag-row" style="opacity:0.5;"><span style="color:#e53935;font-size:12px;">⛔ ${ax}轴：${dd.tmcModel} 不支持DIAG限位</span></div>`;
+                // 有DIAG引脚但TMC型号不支持 → 显示禁用的提示
+                h += `<div class="cg-diag-row" style="opacity:0.5;"><span style="color:#e53935;font-size:12px;">⛔ ${ax}轴：${dd.tmcModel} 不支持DIAG传感器限位（${dd.diagField}: ${dd.diag_pin}）</span></div>`;
             } else if (ax === 'Z') {
-                // Z轴无驱动或有驱动但不支持 → 警告
+                // Z轴无分配 → 警告
                 h += `<div class="cg-diag-row" style="opacity:0.6;"><label class="cg-diag-check"><input type="checkbox" id="cgEndstopDiag_${ax}" onchange="onEndstopDiagChange('${ax}')"> ${ax}轴使用 DIAG 限位</label><span style="color:#e6a817;font-size:11px;"> ⚠️ Z轴不建议使用DIAG，可能影响归位精度</span></div>`;
             }
         });
@@ -915,55 +1018,89 @@ function renderEndstopConfig() {
     });
     h += '</div>';
     c.innerHTML = h;
+    // 根据当前Probe模式同步Z限位可见性
+    syncZEndstopVisibility();
 }
 
 // ========== Tab 3: 调平传感器 ==========
 function renderProbeConfig() {
     const c=document.getElementById('cgProbeContainer'); if(!c||!_currentMapping) return;
     const m=_currentMapping;
-    if(!m.probe&&!m.servo){c.innerHTML='<p style="color:var(--text-secondary);">此板卡无调平传感器引脚</p>';return;}
-    const pp=PROBE_PRESETS[document.getElementById('cgProbeType')?.value]||PROBE_PRESETS['bltouch'];
+    const hasProbePin = !!(m.probe || m.servo);
+    if(!hasProbePin) {
+        // 无probe/servo引脚：仅允许模式A，强制切换
+        _currentProbeMode = 'z_endstop_only';
+        c.innerHTML='<div class="cg-probe-section"><h4 class="cg-section-title"><i class="fas fa-cogs"></i> Z限位/调平传感器模式</h4>'+
+            '<div style="padding:10px 14px;border-radius:6px;border:1px solid var(--border-color);">'+
+            '<span style="color:#e6a817;"><i class="fas fa-info-circle"></i> 此板卡无调平传感器引脚(probe/servo)</span>'+
+            '<p style="font-size:12px;color:var(--text-secondary);margin:4px 0 0;">仅支持"仅Z物理限位"模式，Z轴将使用物理限位开关归位。</p></div></div>';
+        syncBedMeshByMode();
+        return;
+    }
+    const presetProbe = _currentPreset?.probe;
+    const pp = PROBE_PRESETS[presetProbe?.type] || PROBE_PRESETS['bltouch'];
     const isBL = (pp.section === 'bltouch');
-    const isNone = (pp.section === null);
     let h = '';
-    // ---- 探针类型 + 引脚信息 ----
+    // ---- Z限位/调平传感器工作模式选择 ----
+    h += '<div class="cg-probe-section"><h4 class="cg-section-title"><i class="fas fa-cogs"></i> Z限位/调平传感器模式</h4>';
+    h += '<div class="cg-probe-mode-selector">';
+    for(const[modeKey, modeInfo] of Object.entries(PROBE_MODES)) {
+        const checked = (modeKey === _currentProbeMode) ? ' checked' : '';
+        h += `<label class="cg-probe-mode-option${checked?' active':''}" id="cgProbeModeOpt_${modeKey}">`;
+        h += `<input type="radio" name="cgProbeMode" value="${modeKey}"${checked} onchange="onProbeModeChange()">`;
+        h += `<span><i class="fas ${modeInfo.icon}"></i> ${modeInfo.label}</span>`;
+        h += `<small>${modeInfo.desc}</small>`;
+        h += `</label>`;
+    }
+    h += '</div>';
+    h += '<div style="margin-top:6px;font-size:12px;color:var(--primary-color);"><i class="fas fa-info-circle"></i> <span id="cgProbeModeDesc"></span></div>';
+    h += '<div style="font-size:11px;color:var(--text-secondary);"><span id="cgProbeModeHint"></span></div></div>';
+    // ---- 探针类型 + 引脚信息（模式A时隐藏）----
+    h += `<div id="cgProbeTypeRow" style="${_currentProbeMode==='z_endstop_only'?'display:none;':''}">`;
     h += '<div class="cg-probe-section"><h4 class="cg-section-title"><i class="fas fa-ruler-combined"></i> 探针类型</h4>';
     h += '<div class="cg-probe-pin-row">';
     if(m.probe) {
+        const curType = presetProbe?.type || 'bltouch';
         h += `<select id="cgProbeType" onchange="onProbeTypeChange()" style="flex:1;">`;
-        for(const[k,v]of Object.entries(PROBE_PRESETS)) h += `<option value="${k}">${v.name} - ${v.desc}</option>`;
+        for(const[k,v]of Object.entries(PROBE_PRESETS)) {
+            h += `<option value="${k}"${k===curType?' selected':''}>${v.name} - ${v.desc}</option>`;
+        }
         h += `</select>`;
-        h += `<span class="cg-hint" style="margin-left:10px;">sensor_pin: ${m.probe}</span>`;
+        // sensor_pin 从主板probe引脚中选择
+        const probePin = Array.isArray(m.probe) ? m.probe : [m.probe];
+        h += `<select id="cgProbeSensorPin" style="margin-left:10px;min-width:120px;" onchange="document.getElementById('cgProbeSensorPinDisplay').textContent=this.value">`;
+        probePin.forEach(p => h += `<option value="${p}">sensor_pin: ${p}</option>`);
+        h += `</select>`;
     }
     if(m.servo) h += `<span class="cg-hint" id="cgProbeServoRow" style="margin-left:10px;${isBL?'':'display:none;'}">servo: ${m.servo}</span>`;
-    h += '</div></div>';
-    // ---- 参数区域（不使用探针时隐藏）----
-    h += `<div id="cgProbeParams" style="${isNone?'display:none;':''}">`;
-    // 偏移参数
+    h += '</div></div></div>';
+    // ---- 参数区域（模式A时隐藏）----
+    const hideParams = (_currentProbeMode === 'z_endstop_only');
+    h += `<div id="cgProbeParams" style="${hideParams?'display:none;':''}">`;
+    // 偏移参数（从预设注入）
     h += '<div class="cg-probe-section"><h4 class="cg-section-title"><i class="fas fa-arrows-alt"></i> 偏移参数</h4>';
     h += '<div class="cg-probe-compact">';
-    h += `<div class="cg-probe-field"><label>z_offset</label><input type="number" step="0.01" id="cgZOffset" value="${pp.z_offset??0.05}"></div>`;
-    h += `<div class="cg-probe-field"><label>x_offset</label><input type="number" step="0.1" id="cgProbeXOffset" value="0"></div>`;
-    h += `<div class="cg-probe-field"><label>y_offset</label><input type="number" step="0.1" id="cgProbeYOffset" value="0"></div>`;
+    h += `<div class="cg-probe-field"><label>z_offset</label><input type="number" step="0.01" id="cgZOffset" value="${presetProbe?.z_offset ?? pp.z_offset ?? 2.0}"></div>`;
+    h += `<div class="cg-probe-field"><label>x_offset</label><input type="number" step="0.1" id="cgProbeXOffset" value="${presetProbe?.x_offset ?? 0}"></div>`;
+    h += `<div class="cg-probe-field"><label>y_offset</label><input type="number" step="0.1" id="cgProbeYOffset" value="${presetProbe?.y_offset ?? 0}"></div>`;
     h += '</div></div>';
-    // 采样参数
+    // 采样参数（从预设注入）
+    const sp = presetProbe || {};
     h += '<div class="cg-probe-section"><h4 class="cg-section-title"><i class="fas fa-chart-bar"></i> 采样参数</h4>';
     h += '<div class="cg-probe-compact">';
-    h += '<div class="cg-probe-field"><label>采样次数</label><input type="number" id="cgProbeSamples" value="3" min="1" max="10"></div>';
-    h += '<div class="cg-probe-field"><label>采样速度</label><input type="number" step="0.1" id="cgProbeSpeed" value="5.0"></div>';
-    h += '<div class="cg-probe-field"><label>二次速度</label><input type="number" step="0.1" id="cgProbeSpeed2" value="2.0"></div>';
-    h += '<div class="cg-probe-field"><label>回退距离</label><input type="number" step="0.1" id="cgProbeRetract" value="1.0"></div>';
-    h += '<div class="cg-probe-field"><label>取值方式</label><select id="cgProbeSamplesResult"><option value="median" selected>median</option><option value="average">average</option></select></div>';
-    h += '<div class="cg-probe-field"><label>采样公差</label><input type="number" step="0.001" id="cgProbeTolerance" value="0.006"></div>';
-    h += '<div class="cg-probe-field"><label>重试次数</label><input type="number" id="cgProbeRetries" value="3"></div>';
+    h += `<div class="cg-probe-field"><label>采样次数</label><input type="number" id="cgProbeSamples" value="${sp.samples ?? 1}" min="1" max="10"></div>`;
+    h += `<div class="cg-probe-field"><label>采样速度</label><input type="number" step="0.1" id="cgProbeSpeed" value="${sp.speed ?? 5.0}"></div>`;
+    h += `<div class="cg-probe-field"><label>抬升速度</label><input type="number" step="0.1" id="cgProbeSpeed2" value="${sp.second_speed ?? sp.lift_speed ?? sp.speed ?? 5.0}"></div>`;
+    h += `<div class="cg-probe-field"><label>回退距离</label><input type="number" step="0.1" id="cgProbeRetract" value="${sp.sample_retract_dist ?? 2.0}"></div>`;
+    const srSel = sp.samples_result === 'average' ? ['average','median'] : ['median','average'];
+    h += `<div class="cg-probe-field"><label>取值方式</label><select id="cgProbeSamplesResult"><option value="${srSel[0]}" selected>${srSel[0]}</option><option value="${srSel[1]}">${srSel[1]}</option></select></div>`;
+    h += `<div class="cg-probe-field"><label>采样公差</label><input type="number" step="0.001" id="cgProbeTolerance" value="${sp.samples_tolerance ?? 0.100}"></div>`;
+    h += `<div class="cg-probe-field"><label>重试次数</label><input type="number" id="cgProbeRetries" value="${sp.samples_tolerance_retries ?? 0}"></div>`;
     h += '</div></div>';
     h += '</div>';
     c.innerHTML = h;
-    // 初始化默认探针类型
-    if (_currentPreset?.probe?.type) {
-        const probeEl = document.getElementById('cgProbeType');
-        if (probeEl) probeEl.value = _currentPreset.probe.type;
-    }
+    // 触发模式描述更新
+    onProbeModeChange();
 }
 
 // ========== 参数配置 ==========
@@ -988,9 +1125,21 @@ function renderHomingParams() {
         h += '<li>使用探针时建议启用 <b>safe_z_home</b> 归位XY前先抬Z</li></ul></div>';
     }
     // ---- 原点位置选择 ----
-    // 根据当前的 homing_positive_dir 推导默认原点
-    const xPos = cpDrives.find(d=>d.axis==='X')?.homing_positive_dir ?? false;
-    const yPos = cpDrives.find(d=>d.axis==='Y')?.homing_positive_dir ?? false;
+    // 先重填 _cgHomingDirs（原点锁定时保留当前值），再推导 originKey
+    const savedDirs = { ..._cgHomingDirs };
+    _cgHomingDirs={};
+    cpDrives.forEach(drive=>{if(drive.axis==='E')return;const axis=drive.axis;
+        let dp;
+        if (_homingOriginLocked && savedDirs[axis] !== undefined) {
+            // 原点锁定后，所有轴的值从上次UI状态恢复，不重置为预设
+            dp = savedDirs[axis];
+        } else {
+            dp = drive.homing_positive_dir??false;
+        }
+        _cgHomingDirs[axis]=dp;
+    });
+    const xPos = _cgHomingDirs['X'] ?? (cpDrives.find(d=>d.axis==='X')?.homing_positive_dir ?? false);
+    const yPos = _cgHomingDirs['Y'] ?? (cpDrives.find(d=>d.axis==='Y')?.homing_positive_dir ?? false);
     const originKey = (xPos?'R':'L') + (yPos?'B':'F');
     const ORIGIN_MAP = {
         'LF': {label:'前左 (Min)', xPos:false, yPos:false, zPos:false},
@@ -1007,15 +1156,14 @@ function renderHomingParams() {
         h += `<option value="${k}"${originKey===k?' selected':''}>${v.label}</option>`;
     }
     h += '</select></div></div>';
-    // 归位方向表格
-    h+='<div class="cg-motion-table"><table><thead><tr><th>轴</th><th>归位方向</th><th>限位位置</th><th>二次归位速度</th><th>位置</th></tr></thead><tbody>';
-    _cgHomingDirs={};
-    cpDrives.forEach(drive=>{if(drive.axis==='E')return;const axis=drive.axis;const dp=drive.homing_positive_dir??false;
-    _cgHomingDirs[axis]=dp;
+    // 限位与速度表格（归位方向由原点统一控制，不单独显示）
+    h+='<div class="cg-motion-table"><table><thead><tr><th>轴</th><th>限位位置</th><th>二次归位速度</th><th>归位方向</th></tr></thead><tbody>';
+    cpDrives.forEach(drive=>{if(drive.axis==='E')return;const axis=drive.axis;
+    const dp=_cgHomingDirs[axis];
     const es = drive.position_endstop ?? (dp ? 200 : 0);
-    const isEsMax = es > 0;  // 限位在 max 端
+    const isEsMax = es > 0;
     const spd2=drive.second_homing_speed??Math.max(5,Math.round((drive.homing_speed??50)/2));
-    h+=`<tr><td><strong>${axis}</strong></td><td><label class="cg-homing-dir"><input type="checkbox" id="cgHome_${axis}_posd" ${dp?'checked':''} onchange="updateHomePosHint('${axis}')"> 正方向(max)</label></td><td><select id="cgHome_${axis}_estop" onchange="onEndstopPosChange('${axis}')" style="width:100px;"><option value="min"${!isEsMax?' selected':''}>min 端 (0)</option><option value="max"${isEsMax?' selected':''}>max 端 (max)</option></select></td><td><input type="number" step="0.1" id="cgHome_${axis}_spd2" value="${spd2}" class="cg-xs"></td><td><span id="cgHome_${axis}_hint" class="cg-hint">${dp?'正→max':'负→min'}</span></td></tr>`;});
+    h+=`<tr><td><strong>${axis}</strong></td><td><select id="cgHome_${axis}_estop" onchange="onEndstopPosChange('${axis}')" style="width:110px;"><option value="min"${!isEsMax?' selected':''}>min 端 (0)</option><option value="max"${isEsMax?' selected':''}>max 端 (max=${parseFloat(document.getElementById(`cgMotion_${axis}_max`)?.value)||200})</option></select></td><td><input type="number" step="0.1" id="cgHome_${axis}_spd2" value="${spd2}" class="cg-xs"></td><td><span id="cgHome_${axis}_hint" class="cg-hint">${dp?'正→max':'负→min'}</span></td></tr>`;});
     h+='</tbody></table></div><div id="cgHomingVizContainer" style="display:flex;gap:20px;margin:16px 0;flex-wrap:wrap;align-items:flex-start;"></div>';
     // safe_z_home
     h+='<h4 class="cg-section-title"><i class="fas fa-shield-alt"></i> safe_z_home 归位XY前先抬Z</h4>';
@@ -1029,7 +1177,7 @@ function renderHomingParams() {
     c.innerHTML=h;
     renderHomingVisualization();
 }
-// 原点位置变更 → 自动设置各轴归位方向（限位位置由用户手动选择）
+// 原点位置变更 → 主设置：归位方向+限位位置+position_endstop一次性同步
 function onOriginChange() {
     const sel = document.getElementById('cgOriginPos')?.value;
     const ORIGIN_MAP = {
@@ -1039,20 +1187,24 @@ function onOriginChange() {
         'RB': {xPos:true,  yPos:true,  zPos:false}
     };
     const o = ORIGIN_MAP[sel] || ORIGIN_MAP['LF'];
+    _homingOriginLocked = true;
+    _homingManualOverride = {};  // 原点为主设置，主动选择时清除所有手动覆盖
     ['X','Y','Z'].forEach(axis => {
-        const chk = document.getElementById(`cgHome_${axis}_posd`);
         const hint = document.getElementById(`cgHome_${axis}_hint`);
         const estop = document.getElementById(`cgHome_${axis}_estop`);
+        const esEl = document.getElementById(`cgMotion_${axis}_es`);
+        const maxEl = document.getElementById(`cgMotion_${axis}_max`);
         const val = axis === 'X' ? o.xPos : axis === 'Y' ? o.yPos : o.zPos;
-        if (chk) chk.checked = val;
+        _cgHomingDirs[axis] = val;
         if (hint) hint.textContent = val ? '正→max' : '负→min';
-        if (chk) _cgHomingDirs[axis] = val;
-        // 同步限位位置下拉框（正方向→max端，负方向→min端）
+        // 限位位置下拉框
         if (estop) estop.value = val ? 'max' : 'min';
+        // position_endstop数值：max端→最大行程, min端→0
+        if (esEl) esEl.value = val ? (parseFloat(maxEl?.value) || 200) : 0;
     });
     renderHomingVisualization();
 }
-// 限位位置变更 → 联动归位方向 + 同步 position_endstop
+// 限位位置变更 → 仅更新 position_endstop，归位方向由原点统一控制
 function onEndstopPosChange(axis) {
     const sel = document.getElementById(`cgHome_${axis}_estop`)?.value;
     const esEl = document.getElementById(`cgMotion_${axis}_es`);
@@ -1060,13 +1212,8 @@ function onEndstopPosChange(axis) {
     if (esEl) {
         esEl.value = (sel === 'max' && maxEl) ? (parseFloat(maxEl.value) || 200) : 0;
     }
-    // 限位位置决定归位方向：限位在max端 → 正方向归位；限位在min端 → 负方向归位
-    const chk = document.getElementById(`cgHome_${axis}_posd`);
-    const hint = document.getElementById(`cgHome_${axis}_hint`);
-    const newDir = sel === 'max';
-    if (chk) { chk.checked = newDir; _cgHomingDirs[axis] = newDir; }
-    if (hint) hint.textContent = newDir ? '正→max' : '负→min';
-    // 不再反推原点下拉框——原点位置和限位安装位置是独立概念
+    // 限位位置变更 → 仅更新 position_endstop，归位方向保持原点设置不变
+    _homingManualOverride[axis] = true;
     renderHomingVisualization();
 }
 // ========== Tab 6: 调平与可选配置 ==========
@@ -1215,14 +1362,22 @@ function onTmcModelChg(i) {
     else if(model==='tmc2208'&&curEl) curEl.value='0.8';
     else if(model==='tmc2660'&&curEl) curEl.value='1.2';
     else if(model==='a4988'&&curEl) curEl.value='1.0';
+    // 动态更新采样电阻/Rref标签和默认值
+    const srEl=document.getElementById(`cgTmcSR_${i}`);
+    const srLabel=document.getElementById(`cgTmcSRLabel_${i}`);
+    if(srLabel) {
+        if(model==='tmc2240') { srLabel.textContent='rref'; if(srEl&&!srEl.dataset.userEdited) srEl.value='12300'; }
+        else if(model==='tmc5160'||model==='tmc2209'||model==='tmc2130') { srLabel.textContent='sense_resistor'; if(srEl&&!srEl.dataset.userEdited) srEl.value=(model==='tmc5160'?'0.075':'0.110'); }
+        else { srLabel.textContent='(不使用)'; if(srEl&&!srEl.dataset.userEdited) srEl.value=''; }
+    }
+    // 标记采样电阻输入被用户手动编辑
+    if(srEl) { srEl.addEventListener('input', ()=>srEl.dataset.userEdited='1', {once:true}); }
     // TMC型号变更后刷新DIAG限位区域
     renderEndstopConfig();
 }
 function updateHomePosHint(axis) {
-    const chk=document.getElementById(`cgHome_${axis}_posd`), hint=document.getElementById(`cgHome_${axis}_hint`);
-    if(chk&&hint) hint.textContent=chk.checked?'正→max':'负→min';
-    if(chk) _cgHomingDirs[axis]=chk.checked;
-    // 不再反推原点下拉框——原点位置和归位方向是独立概念
+    // 归位方向复选框已移除，方向由原点统一控制
+    _homingManualOverride[axis] = true;
     renderHomingVisualization();
 }
 function renderHomingVisualization() {
@@ -1262,9 +1417,10 @@ function generateConfig() {
     const _DM={rotation_distance:40,microsteps:16,homing_speed:50,position_min:0,position_max:200,position_endstop:0};
     const _DE={rotation_distance:22.67,microsteps:16,filament_diameter:1.75,nozzle_diameter:0.4,max_temp:285,sensor_type:'NTC 100K beta 3950'};
     const _DB={sensor_type:'NTC 100K beta 3950',max_temp:120};
-    const B=(t)=>'#####################################################################\n# '+t.padEnd(66)+'#\n#####################################################################\n';
+    const B=(t)=>{const vw=s=>[...s].reduce((w,c)=>w+(c.charCodeAt(0)>255?2:1),0);const pad=66-vw(t);return '#####################################################################\n# '+t+' '.repeat(Math.max(0,pad))+'#\n#####################################################################\n';};
+    const P=(pre, cmt)=>`${String(pre).padEnd(48)}# ${cmt}\n`;  // 对齐注释到第50列
     let config = B('3D MELLOW / FLY 配置 - Firmware-Tool 配置生成器自动生成');
-    config += '## 如需售后，请联系淘宝客服\n## FLY 售后技术支持群:621032883\n\n';
+    config += '# 如需售后，请联系淘宝客服\n# FLY 售后技术支持群:621032883\n\n';
     // ---- [mcu] ----
     const connType = document.getElementById('cgConnection').value;
     const serial = document.getElementById('cgSerial').value.trim();
@@ -1286,12 +1442,13 @@ function generateConfig() {
     const cornerVel=document.getElementById('cgCornerVel')?.value||5.0;
     config += B('机型和加速度');
     config += '[printer]                       # 打印机设置\n';
-    config += `kinematics: ${(_currentPreset?.geometry?.type==='cartesian'?'cartesian':'corexy')}              # 运动学结构\n`;
-    config += `max_velocity: ${maxVel}               # 最大速度\n`;
-    config += `max_accel: ${maxAccel}                 # 最大加速度\n`;
-    config += `max_z_velocity: ${maxZVel}                # Z轴最大速度\n`;
-    config += `max_z_accel: ${maxZAccel}                # Z轴最大加速度\n`;
-    config += `square_corner_velocity: ${cornerVel}     # 拐角速度\n\n`;
+    config += P(`kinematics: ${(_currentPreset?.geometry?.type==='cartesian'?'cartesian':'corexy')}`,'运动学结构');
+    config += P(`max_velocity: ${maxVel}`,'最大速度');
+    config += P(`max_accel: ${maxAccel}`,'最大加速度');
+    config += P(`max_z_velocity: ${maxZVel}`,'Z轴最大速度');
+    config += P(`max_z_accel: ${maxZAccel}`,'Z轴最大加速度');
+    config += P(`square_corner_velocity: ${cornerVel}`,'拐角速度');
+    config += '\n';
     // ---- 温度监控 ----
     if(document.getElementById('cgOptTempMonitor')?.checked) {
         const mcuN=document.getElementById('cgTempMCUName')?.value||'MCU温度';
@@ -1367,11 +1524,11 @@ function generateConfig() {
         const al=axisLabels[a.axis]||a.axis+'轴';
         config += B(`${al}步进电机 on ${a.drive}`);
         config += `[stepper_${a.axis.toLowerCase()}]\n`;
-        config += `step_pin: ${d.step_pin}                       # ${al}电机脉冲引脚设置\n`;
-        config += `dir_pin: ${d.dir_pin}                        # ${al}电机方向引脚设置\n`;
+        config += P(`step_pin: ${d.step_pin}`,`${al}电机脉冲引脚设置`);
+        config += P(`dir_pin: ${d.dir_pin}`,`${al}电机方向引脚设置`);
         const tmcM=document.getElementById(`cgTmcModel_${di}`)?.value||'tmc2209';
         const invPin=['tmc2208','tmc2209','tmc5160','tmc2240','tmc2130','tmc2660','a4988','yanggong'].includes(tmcM)?'!':'';
-        config += `enable_pin: ${invPin}${d.enable_pin}                   # ${al}电机使能引脚设置\n`;
+        config += P(`enable_pin: ${invPin}${d.enable_pin}`,`${al}电机使能引脚设置`);
         const rd=document.getElementById(`cgMotion_${a.axis}_rd`)?.value||_DM.rotation_distance;
         const ms=parseInt(document.getElementById(`cgMotion_${a.axis}_ms`)?.value||_DM.microsteps);
         const fspr=document.getElementById(`cgMotion_${a.axis}_fspr`)?.value||'200';
@@ -1381,76 +1538,78 @@ function generateConfig() {
         const pmin=document.getElementById(`cgMotion_${a.axis}_min`)?.value||_DM.position_min;
         const pmax=document.getElementById(`cgMotion_${a.axis}_max`)?.value||200;
         const pes=document.getElementById(`cgMotion_${a.axis}_es`)?.value||_DM.position_endstop;
-        const posDir=document.getElementById(`cgHome_${a.axis}_posd`)?.checked??false;
+        const posDir = _cgHomingDirs[a.axis] ?? false;
         const spd2=document.getElementById(`cgHome_${a.axis}_spd2`)?.value||Math.max(5,Math.round(parseFloat(hs)/2));
-        config += `rotation_distance: ${rd}               # 主动带轮周长mm\n`;
-        config += `microsteps: ${ms}                      # 电机细分\n`;
-        config += `full_steps_per_rotation: ${fspr}        # 电机单圈脉冲数(1.8度:200,0.9度:400)\n`;
+        config += P(`rotation_distance: ${rd}`,'主动带轮周长mm');
+        config += P(`microsteps: ${ms}`,'电机细分');
+        config += P(`full_steps_per_rotation: ${fspr}`,'单圈脉冲数(1.8度=200,0.9度=400)');
         // 限位引脚
         const isSecondary = /^[XYZ]1$/i.test(a.axis) || /^[XYZ][2-9]$/i.test(a.axis);
         if (!isSecondary) {
             const baseAxis = a.axis.toLowerCase().replace(/\d+/,'');
-            // 检查是否使用 DIAG 引脚
             const diagChecked = document.getElementById(`cgEndstopDiag_${baseAxis.toUpperCase()}`)?.checked ?? false;
             const tmcM=document.getElementById(`cgTmcModel_${di}`)?.value||'tmc2209';
-            if (diagChecked && d.diag_pin) {
-                config += `endstop_pin: ${tmcM}_stepper_${baseAxis.toLowerCase()}:virtual_endstop                 # DIAG虚拟限位\n`;
+            if (baseAxis === 'z' && _currentProbeMode === 'probe_as_z') {
+                config += P('endstop_pin: probe:z_virtual_endstop','使用调平传感器替代Z限位');
+            } else if (diagChecked && d.diag_pin) {
+                config += P(`endstop_pin: ${tmcM}_stepper_${baseAxis.toLowerCase()}:virtual_endstop`,'DIAG虚拟限位');
             } else {
                 const endstopKey = document.getElementById(`cgEndstopPin_${baseAxis.toUpperCase()}`)?.value;
                 if (endstopKey && m[endstopKey] !== undefined) {
                     const isNO = document.getElementById(`cgEndstopNCNO_${baseAxis.toUpperCase()}`)?.value === 'NO';
                     const pin = Array.isArray(m[endstopKey]) ? m[endstopKey][0] : m[endstopKey];
-                    config += `endstop_pin: ^${isNO?'!':''}${pin}                   # 限位开关PIN脚${isNO?' (NO常开)':' (NC常闭)'}\n`;
+                    config += P(`endstop_pin: ^${isNO?'!':''}${pin}`,`限位开关PIN脚${isNO?' (NO常开)':' (NC常闭)'}`);
                 }
             }
         }
-        config += `position_min: ${pmin}                     # 软限位最小行程\n`;
-        config += `position_endstop: ${pes}               # 限位位置\n`;
-        config += `position_max: ${pmax}                   # 机械限位最大行程\n`;
-        config += `homing_speed: ${hs}                    # 复位速度\n`;
-        config += `homing_retract_dist: ${hrd}              # 归位后退距离\n`;
-        config += `homing_positive_dir: ${posDir?'True':'False'}              # 归位方向\n`;
-        config += `second_homing_speed: ${spd2}              # 二次归位速度\n`;
-        config += `step_pulse_duration: ${spd}\n`;
+        config += P(`position_min: ${pmin}`,'软限位最小行程');
+        config += P(`position_endstop: ${pes}`,'限位位置');
+        config += P(`position_max: ${pmax}`,'机械限位最大行程');
+        config += P(`homing_speed: ${hs}`,'复位速度');
+        config += P(`homing_retract_dist: ${hrd}`,'归位后退距离');
+        config += P(`homing_positive_dir: ${posDir?'true':'false'}`,'归位方向');
+        config += P(`second_homing_speed: ${spd2}`,'二次归位速度');
         config += '#--------------------------------------------------------------------\n';
         // TMC驱动段
         const tmcModel=document.getElementById(`cgTmcModel_${di}`)?.value||'tmc2209';
         const tmcCur=document.getElementById(`cgTmcCurrent_${di}`)?.value||'0.8';
         if(tmcModel!=='none'&&d.uart_pin) {
             const diagEnabled = document.getElementById(`cgEndstopDiag_${a.axis.toUpperCase().replace(/\d+/,'')}`)?.checked ?? false;
-            config += `[${tmcModel} stepper_${a.axis.toLowerCase()}]                 # ${al}驱动配置\n`;
+            config += P(`[${tmcModel} stepper_${a.axis.toLowerCase()}]`,`${al}驱动配置`);
             const diagPrefixMap={'tmc2209':'^','tmc5160':'^!','tmc2240':'^!','tmc2130':'^!'};
             if(tmcModel==='tmc5160'||tmcModel==='tmc2130') {
-                config += `cs_pin: ${d.uart_pin}                      # SPI片选Pin脚\n`;
-                if(d.spi_bus) config += `# spi_bus: ${d.spi_bus}                     # SPI总线\n`;
+                config += P(`cs_pin: ${d.uart_pin}`,'SPI片选Pin脚');
+                if(d.spi_bus) config += `# spi_bus: ${d.spi_bus}\n`;
                 if(diagEnabled && d.diag_pin) {
                     const dp=diagPrefixMap[tmcModel]||'';
-                    config += `diag1_pin: ${dp}${d.diag_pin}                  # DIAG引脚(需^!前缀)\n`;
-                    config += 'driver_SGT: 1                     # 灵敏度(-64最敏感 ~ 63最不敏感)\n';
+                    const diagMode = document.getElementById(`cgEndstopDiagMode_${a.axis.toUpperCase().replace(/\d+/,'')}`)?.value || 'diag1_pin';
+                    config += P(`${diagMode}: ${dp}${d.diag_pin}`,`TMC ${tmcModel.toUpperCase()} DIAG引脚`);
+                    config += P('driver_SGT: 1','灵敏度(-64最敏感~63最不敏感)');
                 }
-                config += `run_current: ${tmcCur}                    # 运行电流\n`;
-                config += `stealthchop_threshold: 0            # 静音阈值(0=禁用静音, 999999=全静音)\n`;
-                config += `#sense_resistor: 0.075               # 驱动采样电阻(默认自动检测)\n`;
+                config += P(`run_current: ${tmcCur}`,'运行电流');
+                const srVal = document.getElementById(`cgTmcSR_${di}`)?.value;
+                if(srVal) config += P(`sense_resistor: ${srVal}`,'驱动采样电阻');
             } else if(tmcModel==='tmc2240') {
-                if(d.uart_pin) config += `uart_pin: ${d.uart_pin}                      # 通讯端口Pin脚定义\n`;
+                if(d.uart_pin) config += P(`uart_pin: ${d.uart_pin}`,'通讯端口Pin脚定义');
                 if(diagEnabled && d.diag_pin) {
                     const dp=diagPrefixMap[tmcModel]||'';
-                    config += `diag1_pin: ${dp}${d.diag_pin}                  # DIAG引脚(需^!前缀)\n`;
-                    config += 'driver_SGT: 1                     # 灵敏度(-64最敏感 ~ 63最不敏感)\n';
+                    const diagMode = document.getElementById(`cgEndstopDiagMode_${a.axis.toUpperCase().replace(/\d+/,'')}`)?.value || 'diag1_pin';
+                    config += P(`${diagMode}: ${dp}${d.diag_pin}`,`TMC ${tmcModel.toUpperCase()} DIAG引脚`);
+                    config += P('driver_SGT: 1','灵敏度(-64最敏感~63最不敏感)');
                 }
-                config += `run_current: ${tmcCur}                    # 运行电流\n`;
-                config += `stealthchop_threshold: 999999        # 静音阈值(全静音)\n`;
-                config += `#sense_resistor: 0.110               # 驱动采样电阻(默认自动检测)\n`;
+                config += P(`run_current: ${tmcCur}`,'运行电流');
+                const rrefVal = document.getElementById(`cgTmcSR_${di}`)?.value || '12300';
+                config += P(`rref: ${rrefVal}`,'外部参考电阻(Ohm)');
             } else {
-                config += `uart_pin: ${d.uart_pin}                      # 通讯端口Pin脚定义\n`;
+                config += P(`uart_pin: ${d.uart_pin}`,'通讯端口Pin脚定义');
                 if(diagEnabled && d.diag_pin) {
                     const dp=diagPrefixMap[tmcModel]||'^';
-                    config += `diag_pin: ${dp}${d.diag_pin}                  # DIAG引脚(需前缀)\n`;
-                    config += 'driver_SGTHRS: 100                # 灵敏度(0最不敏感 ~ 255最敏感)\n';
+                    config += P(`diag_pin: ${dp}${d.diag_pin}`,'DIAG引脚(需前缀)');
+                    config += P('driver_SGTHRS: 100','灵敏度(0最不敏感~255最不敏感)');
                 }
-                config += `run_current: ${tmcCur}                    # 运行电流\n`;
-                config += `stealthchop_threshold: 999999        # 静音阈值(全静音)\n`;
-                config += `#sense_resistor: 0.110               # 驱动采样电阻(默认自动检测)\n`;
+                config += P(`run_current: ${tmcCur}`,'运行电流');
+                const srVal3 = document.getElementById(`cgTmcSR_${di}`)?.value;
+                if(srVal3) config += P(`sense_resistor: ${srVal3}`,'驱动采样电阻');
             }
         }
         config += '#--------------------------------------------------------------------\n\n';
@@ -1481,44 +1640,48 @@ function generateConfig() {
         const mep=document.getElementById('cgExtMaxPower')?.value||'1.0';
         const ec=document.getElementById('cgExtControl')?.value||'watermark';
         const emt=document.getElementById('cgExtMinTemp')?.value||'-235';
-        config += `rotation_distance: ${rd}            # 步进值\n`;
-        if(gr) config += `gear_ratio: ${gr}                   # 减速比\n`;
-        config += `microsteps: ${ms}                      # 电机细分\n`;
-        config += `full_steps_per_rotation: 200        # 单圈脉冲数\n`;
-        config += `nozzle_diameter: ${nd}               # 喷嘴直径\n`;
-        config += `filament_diameter: ${fd}              # 耗材直径\n`;
+        config += P(`rotation_distance: ${rd}`,'步进值');
+        if(gr) config += P(`gear_ratio: ${gr}`,'减速比');
+        config += P(`microsteps: ${ms}`,'电机细分');
+        config += P('full_steps_per_rotation: 200','单圈脉冲数');
+        config += P(`nozzle_diameter: ${nd}`,'喷嘴直径');
+        config += P(`filament_diameter: ${fd}`,'耗材直径');
         const hk=document.getElementById('cgHeatPin_extruder')?.value;
-        if(hk&&m[hk]!==undefined) { const pin=Array.isArray(m[hk])?m[hk][0]:m[hk]; config += `heater_pin: ${pin}                     # 加热棒引脚\n`; }
-        config += `sensor_type: ${st}    # 传感器型号\n`;
+        if(hk&&m[hk]!==undefined) { const pin=Array.isArray(m[hk])?m[hk][0]:m[hk]; config += P(`heater_pin: ${pin}`,'加热棒引脚'); }
+        config += P(`sensor_type: ${st}`,'传感器型号');
         if(st==='PT100') config += '# ⚠️ PT100 需要 MAX31865 放大器模块，不可直连 MCU ADC 引脚\n';
         else if(st==='PT1000') config += '# ⚠️ PT1000 建议搭配放大器使用以确保精度\n';
         const tk=document.getElementById('cgTempPin_extruder')?.value;
-        if(tk&&m[tk]!==undefined) { const pin=Array.isArray(m[tk])?m[tk][0]:m[tk]; config += `sensor_pin: ${pin}                     # 传感器引脚\n`; }
-        config += `min_temp: ${emt}                        # 最小温度\n`;
-        config += `max_temp: ${maxT}                       # 最大温度\n`;
-        config += `max_power: ${mep}                      # 最大功率\n`;
-        config += `min_extrude_temp: ${minT}               # 最小挤出温度\n`;
-        config += `pressure_advance: ${pa}              # 推进压力\n`;
-        config += `pressure_advance_smooth_time: ${pas} # 平稳推进时间\n`;
+        if(tk&&m[tk]!==undefined) { const pin=Array.isArray(m[tk])?m[tk][0]:m[tk]; config += P(`sensor_pin: ${pin}`,'传感器引脚'); }
+        config += P(`min_temp: ${emt}`,'最小温度');
+        config += P(`max_temp: ${maxT}`,'最大温度');
+        config += P(`max_power: ${mep}`,'最大功率');
+        config += P(`min_extrude_temp: ${minT}`,'最小挤出温度');
+        config += P(`pressure_advance: ${pa}`,'推进压力');
+        config += P(`pressure_advance_smooth_time: ${pas}`,'平稳推进时间');
         config += `max_extrude_only_distance: ${med}\n`;
         config += `max_extrude_cross_section:${mec}\n`;
         config += `control:${ec}\n`;
-        config += 'step_pulse_duration: 0.000004\n';
         config += '#--------------------------------------------------------------------\n';
         // TMC驱动段
         const tmcModel=document.getElementById(`cgTmcModel_${edi}`)?.value||'tmc2209';
         const tmcCur=document.getElementById(`cgTmcCurrent_${edi}`)?.value||'0.5';
         if(tmcModel!=='none'&&d.uart_pin) {
-            config += `[${tmcModel} extruder]                  # 挤出机驱动配置\n`;
+            config += P(`[${tmcModel} extruder]`,'挤出机驱动配置');
             if(tmcModel==='tmc5160') {
-                config += `cs_pin: ${d.uart_pin}                      # SPI片选Pin脚\n`;
-                if(d.spi_bus) config += `# spi_bus: ${d.spi_bus}                     # SPI总线\n`;
+                config += P(`cs_pin: ${d.uart_pin}`,'SPI片选Pin脚');
+                if(d.spi_bus) config += `# spi_bus: ${d.spi_bus}\n`;
             } else {
-                config += `uart_pin: ${d.uart_pin}                      # 通讯端口Pin脚定义\n`;
+                config += P(`uart_pin: ${d.uart_pin}`,'通讯端口Pin脚定义');
             }
-            config += `run_current: ${tmcCur}                    # 运行电流\n`;
-            if(extTmc==='tmc2209'||extTmc==='tmc2208') config += 'stealthchop_threshold: 999999        # 静音阈值(全静音)\n';
-            config += `#sense_resistor: ${extTmc==='tmc5160'?'0.075':'0.110'}               # 驱动采样电阻\n`;
+            config += P(`run_current: ${tmcCur}`,'运行电流');
+            if(tmcModel==='tmc2240') {
+                const rrefVal = document.getElementById(`cgTmcSR_${edi}`)?.value || '12300';
+                config += P(`rref: ${rrefVal}`,'外部参考电阻(Ohm)');
+            } else {
+                const extSR = document.getElementById(`cgTmcSR_${edi}`)?.value;
+                if(extSR) config += P(`sense_resistor: ${extSR}`,'驱动采样电阻');
+            }
         }
         config += '#--------------------------------------------------------------------\n\n';
     }
@@ -1640,40 +1803,44 @@ function generateConfig() {
         if(autoCal==='True') config += 'auto_calibrate: True           # 自动共振校准\n';
         config += '\n';
     }
-    // ---- [probe] / [bltouch] ----
+    // ---- [probe] / [bltouch] ---- 根据 _currentProbeMode 决定是否生成
     const probeType=document.getElementById('cgProbeType')?.value||'bltouch';
     const probePreset=PROBE_PRESETS[probeType];
-    const zOffset=document.getElementById('cgZOffset')?.value??(probePreset?.z_offset??0.05);
-    const samples=document.getElementById('cgProbeSamples')?.value||3;
-    const retractDist=document.getElementById('cgProbeRetract')?.value||1.0;
+    const zOffset=document.getElementById('cgZOffset')?.value??(probePreset?.z_offset??2.0);
+    const samples=document.getElementById('cgProbeSamples')?.value||1;
+    const retractDist=document.getElementById('cgProbeRetract')?.value||2.0;
     const probeSpeed=document.getElementById('cgProbeSpeed')?.value||5.0;
-    const probeSpeed2=document.getElementById('cgProbeSpeed2')?.value||2.0;
+    const probeSpeed2=document.getElementById('cgProbeSpeed2')?.value||5.0;
     const pxOff=document.getElementById('cgProbeXOffset')?.value||0;
     const pyOff=document.getElementById('cgProbeYOffset')?.value||0;
-    const pSR=document.getElementById('cgProbeSamplesResult')?.value||'median';
-    const pTol=document.getElementById('cgProbeTolerance')?.value||0.006;
-    const pRet=document.getElementById('cgProbeRetries')?.value||3;
-    if(probeType!=='none'&&probePreset&&m.probe) {
+    const pSR=document.getElementById('cgProbeSamplesResult')?.value||'average';
+    const pTol=document.getElementById('cgProbeTolerance')?.value||0.100;
+    const pRet=document.getElementById('cgProbeRetries')?.value||0;
+    // 模式B/C需要生成probe配置（模式A不生成）
+    // 从用户选择的sensor_pin下拉框读取引脚值
+    const sensorPin = document.getElementById('cgProbeSensorPin')?.value || m.probe;
+    if(_currentProbeMode!=='z_endstop_only'&&probePreset&&sensorPin) {
         config += B('调平传感器');
         if(probePreset.section==='bltouch') {
             config+='[bltouch]\n';
-            config+=`sensor_pin: ${m.probe}                   # 限位开关PIN脚\n`;
-            if(m.servo) config+=`control_pin: ${m.servo}                   # 舵机控制引脚\n`;
+            // 大多数BLTouch传感器引脚需要上拉(^)，为兼容性默认加上
+            config+=`sensor_pin: ^${sensorPin}                  # 传感器信号引脚(带上拉)\n`;
+            if(m.servo) config+=`control_pin: ${m.servo}                  # 舵机控制引脚\n`;
         } else {
-            config+=`[probe]\npin: ${m.probe}                   # 限位开关PIN脚\n`;
+            // Voron Tap: 使用[probe]段，仅需pin
+            config+=`[probe]\npin: ^${sensorPin}                  # 传感器信号引脚\n`;
         }
-        config+=`x_offset: ${pxOff}                  # X轴偏移量\n`;
-        config+=`y_offset: ${pyOff}                  # Y轴偏移量\n`;
+        config+=`x_offset: ${pxOff}                   # X轴偏移量\n`;
+        config+=`y_offset: ${pyOff}                   # Y轴偏移量\n`;
         config+=`z_offset: ${zOffset}                  # Z轴偏移量\n`;
-        config+=`speed: ${probeSpeed}                   # 调平速度\n`;
-        config+=`samples: ${samples}                   # 采样次数\n`;
-        config+=`samples_result: ${pSR}       # 取值方式\n`;
-        config+=`sample_retract_dist: ${retractDist}     # 调平回缩距离\n`;
-        config+=`samples_tolerance: ${pTol}     # 采样公差\n`;
-        config+=`samples_tolerance_retries: ${pRet} # 超公差重试次数\n`;
-        if(probeType==='voron_tap') config+='# Voron Tap: z_offset 应为 0\n';
-        else if(probeType==='klicky') config+='# Klicky Probe: 请确保已加载 klicky 宏\n';
-        else if(probeType==='euclid') config+='# Euclid Probe: 请确保已加载 euclid 宏\n';
+        config+=`speed: ${probeSpeed}                   # 探测速度\n`;
+        config+=`lift_speed: ${probeSpeed2}               # 抬升速度\n`;
+        config+=`samples: ${samples}                    # 采样次数\n`;
+        config+=`samples_result: ${pSR}        # 取值方式\n`;
+        config+=`sample_retract_dist: ${retractDist}     # 采样回退距离\n`;
+        config+=`samples_tolerance: ${pTol}      # 采样公差\n`;
+        config+=`samples_tolerance_retries: ${pRet}  # 超公差重试次数\n`;
+        if(probeType==='voron_tap') config+='# Voron Tap: z_offset 应为 0，使用喷嘴作为探针\n';
         config+='\n';
     }
     // ---- 归位 ----
@@ -1793,7 +1960,7 @@ function generateConfig() {
             const pmin=document.getElementById(`cgMotion_${axis}_min`)?.value||_DM.position_min;
             const pmax=document.getElementById(`cgMotion_${axis}_max`)?.value||200;
             const pes=document.getElementById(`cgMotion_${axis}_es`)?.value||_DM.position_endstop;
-            const posDir=document.getElementById(`cgHome_${axis}_posd`)?.checked??false;
+            const posDir = _cgHomingDirs[axis] ?? false;
             const spd2=document.getElementById(`cgHome_${axis}_spd2`)?.value||Math.max(5,Math.round(parseFloat(hs)/2));
             config+=`[stepper_${axis.toLowerCase()}]\n`;
             config+=`mcu: ${tbName}\n`;
@@ -1841,14 +2008,26 @@ function generateConfig() {
     document.getElementById('configStatus').classList.add('active');
     _cgCurrentConfig = config;
     cgShowToast('配置生成成功！');
-    // 滚动到预览区域
-    const previewCard = document.querySelector('.cg-tab-panel[data-tab="5"]');
-    if (previewCard) {
-        setTimeout(() => previewCard.scrollIntoView({behavior:'smooth',block:'start'}), 100);
-    }
+    // 自动跳转到生成配置选项卡
+    switchCgTab(6);
 }
 function downloadConfig() { const b=new Blob([_cgCurrentConfig],{type:'text/plain'}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download='printer.cfg';a.click();URL.revokeObjectURL(u);cgShowToast('配置已下载！'); }
-function copyConfig() { navigator.clipboard.writeText(_cgCurrentConfig).then(()=>cgShowToast('已复制到剪贴板！')).catch(()=>cgShowToast('复制失败','error')); }
+function copyConfig() {
+    try {
+        // 优先使用 Clipboard API
+        navigator.clipboard.writeText(_cgCurrentConfig).then(
+            ()=>cgShowToast('已复制到剪贴板！'),
+            ()=>fallbackCopy()
+        );
+    } catch(e) { fallbackCopy(); }
+    function fallbackCopy() {
+        const ta = document.createElement('textarea');
+        ta.value = _cgCurrentConfig; ta.style.position='fixed'; ta.style.left='-9999px';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); cgShowToast('已复制到剪贴板！'); } catch(e) { cgShowToast('复制失败，请手动复制','error'); }
+        document.body.removeChild(ta);
+    }
+}
 function resetForm() {
     switchCgTab(1);
     document.getElementById('cgBrand').innerHTML='<option value="">加载中...</option>';
