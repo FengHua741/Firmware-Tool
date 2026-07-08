@@ -51,6 +51,8 @@
     "probe": "PB5",
     "servo": "PA8",
     "pwm1": "PB7",
+    "BED_OUT": "PC7",
+    "temp_bed": "PC1",
     "uart-tx": "PA9",
     "uart-rx": "PA10"
 }

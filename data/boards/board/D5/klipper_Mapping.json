@@ -50,6 +50,8 @@
     "stop2": "PD2",
     "probe": "PB5",
     "servo": "PA8",
+    "BED_OUT": "PC7",
+    "temp_bed": "PC1",
     "uart-tx": "PA9",
     "uart-rx": "PA10"
 }

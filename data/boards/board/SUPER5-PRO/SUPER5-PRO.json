@@ -1,160 +1,171 @@
 {
-    "img":{
-        "Width":2793,
-        "Height":1824,
-        "Zoom":1.0
+    "img": {
+        "Width": 2793,
+        "Height": 1824,
+        "Zoom": 1.0
     },
-    "drives":[{
-        "left":59,
-        "top":72,
-        "Width":105,
-        "Height":142,
-        "name":"Drives0",
-        "DIAG":"stop0"
-        },{
-        "left":164,
-        "top":72,
-        "Width":105,
-        "Height":142,
-        "name":"Drives1",
-        "DIAG":"stop1"     
-        },{
-        "left":269,
-        "top":72,
-        "Width":105,
-        "Height":142,
-        "name":"Drives2",
-        "DIAG":"stop2"      
-        },{
-        "left":374,
-        "top":72,
-        "Width":105,
-        "Height":142,
-        "name":"Drives3",
-        "DIAG":"stop3"      
-        },{
-        "left":479,
-        "top":72,
-        "Width":105,
-        "Height":142,
-        "name":"Drives4",
-        "DIAG":"stop4"      
+    "drives": [
+        {
+            "left": 59,
+            "top": 72,
+            "Width": 105,
+            "Height": 142,
+            "name": "Drives0",
+            "DIAG": "stop0"
+        },
+        {
+            "left": 164,
+            "top": 72,
+            "Width": 105,
+            "Height": 142,
+            "name": "Drives1",
+            "DIAG": "stop1"
+        },
+        {
+            "left": 269,
+            "top": 72,
+            "Width": 105,
+            "Height": 142,
+            "name": "Drives2",
+            "DIAG": "stop2"
+        },
+        {
+            "left": 374,
+            "top": 72,
+            "Width": 105,
+            "Height": 142,
+            "name": "Drives3",
+            "DIAG": "stop3"
+        },
+        {
+            "left": 479,
+            "top": 72,
+            "Width": 105,
+            "Height": 142,
+            "name": "Drives4",
+            "DIAG": "stop4"
         }
     ],
-    "heat":[{
-        "left":587,
-        "top":37,
-        "Width":73,
-        "Height":79,
-        "name":"heat0"      
-        },{
-        "left":660,
-        "top":37,
-        "Width":73,
-        "Height":79,
-        "name":"heat1"      
-        },{
-        "left":879,
-        "top":490,
-        "Width":87,
-        "Height":110,
-        "name":"BED_OUT"      
+    "heat": [
+        {
+            "left": 587,
+            "top": 37,
+            "Width": 73,
+            "Height": 79,
+            "name": "heat0"
+        },
+        {
+            "left": 660,
+            "top": 37,
+            "Width": 73,
+            "Height": 79,
+            "name": "heat1"
+        },
+        {
+            "left": 879,
+            "top": 490,
+            "Width": 87,
+            "Height": 110,
+            "name": "BED_OUT"
         }
     ],
-    "temp":[{
-        "left":710,
-        "top":600,
-        "Width":70,
-        "Height":43,
-        "name":"temp0"      
-        },{
-        "left":585,
-        "top":208,
-        "Width":70,
-        "Height":40,
-        "name":"temp1"      
-        },{
-        "left":658,
-        "top":208,
-        "Width":70,
-        "Height":40,
-        "name":"temp2"      
-        }
-    ],      
-    "fan":[{
-        "left":733,
-        "top":137,
-        "Width":52,
-        "Height":40,
-        "name":"fan0"      
-        },{
-        "left":808,
-        "top":59,
-        "Width":52,
-        "Height":40,
-        "name":"fan3"      
-        },{
-        "left":733,
-        "top":59,
-        "Width":52,
-        "Height":40,
-        "name":"fan2"      
-        },{
-        "left":808,
-        "top":137,
-        "Width":52,
-        "Height":40,
-        "name":"fan1"      
-        }
-    ],    
-    "endstop":[{
-        "left":430,
-        "top":600,
-        "Width":70,
-        "Height":43,
-        "name":"stop0"      
-        },{
-        "left":540,
-        "top":532,
-        "Width":70,
-        "Height":43,
-        "name":"stop1"      
-        },{
-        "left":500,
-        "top":600,
-        "Width":70,
-        "Height":43,
-        "name":"stop2"      
-        },{
-        "left":612,
-        "top":532,
-        "Width":70,
-        "Height":43,
-        "name":"stop3"      
-        },{
-        "left":570,
-        "top":600,
-        "Width":70,
-        "Height":43,
-        "name":"stop4"      
-        },{
-        "left":683,
-        "top":532,
-        "Width":70,
-        "Height":43,
-        "name":"stop5"      
+    "temp": [
+        {
+            "left": 710,
+            "top": 600,
+            "Width": 70,
+            "Height": 43,
+            "name": "temp0"
+        },
+        {
+            "left": 585,
+            "top": 208,
+            "Width": 70,
+            "Height": 40,
+            "name": "temp1"
         }
     ],
-    "rgb":[{
-        "left":640,
-        "top":600,
-        "Width":70,
-        "Height":43,
-        "name":"NEOPIEL"      
+    "fan": [
+        {
+            "left": 733,
+            "top": 137,
+            "Width": 52,
+            "Height": 40,
+            "name": "fan0"
+        },
+        {
+            "left": 808,
+            "top": 59,
+            "Width": 52,
+            "Height": 40,
+            "name": "fan3"
+        },
+        {
+            "left": 733,
+            "top": 59,
+            "Width": 52,
+            "Height": 40,
+            "name": "fan2"
+        },
+        {
+            "left": 808,
+            "top": 137,
+            "Width": 52,
+            "Height": 40,
+            "name": "fan1"
+        }
+    ],
+    "endstop": [
+        {
+            "left": 430,
+            "top": 600,
+            "Width": 70,
+            "Height": 43,
+            "name": "stop0"
+        },
+        {
+            "left": 540,
+            "top": 532,
+            "Width": 70,
+            "Height": 43,
+            "name": "stop1"
+        },
+        {
+            "left": 500,
+            "top": 600,
+            "Width": 70,
+            "Height": 43,
+            "name": "stop2"
+        },
+        {
+            "left": 612,
+            "top": 532,
+            "Width": 70,
+            "Height": 43,
+            "name": "stop3"
+        },
+        {
+            "left": 570,
+            "top": 600,
+            "Width": 70,
+            "Height": 43,
+            "name": "stop4"
+        },
+        {
+            "left": 683,
+            "top": 532,
+            "Width": 70,
+            "Height": 43,
+            "name": "stop5"
+        }
+    ],
+    "rgb": [
+        {
+            "left": 640,
+            "top": 600,
+            "Width": 70,
+            "Height": 43,
+            "name": "NEOPIEL"
         }
     ]
-
 }
-
-
-

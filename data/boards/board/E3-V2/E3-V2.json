@@ -1,147 +1,150 @@
 {
-    "img":{
-        "Width":1920,
-        "Height":1080,
-        "Zoom":1.0
+    "img": {
+        "Width": 1920,
+        "Height": 1080,
+        "Zoom": 1.0
     },
-    "drives":[{
-        "left":145,
-        "top":90,
-        "Width":95,
-        "Height":130,
-        "name":"Drives0",
-        "DIAG":"stop0"
-        },{
-        "left":240,
-        "top":90,
-        "Width":95,
-        "Height":130,
-        "name":"Drives1",
-        "DIAG":"stop1"     
-        },{
-        "left":335,
-        "top":90,
-        "Width":93,
-        "Height":130,
-        "name":"Drives2",
-        "DIAG":"stop2"      
-        },{
-        "left":428,
-        "top":90,
-        "Width":95,
-        "Height":130,
-        "name":"Drives3",
-        "DIAG":"stop3"      
-        },{
-        "left":522,
-        "top":90,
-        "Width":93,
-        "Height":130,
-        "name":"Drives4",
-        "DIAG":"stop4"      
+    "drives": [
+        {
+            "left": 145,
+            "top": 90,
+            "Width": 95,
+            "Height": 130,
+            "name": "Drives0",
+            "DIAG": "stop0"
+        },
+        {
+            "left": 240,
+            "top": 90,
+            "Width": 95,
+            "Height": 130,
+            "name": "Drives1",
+            "DIAG": "stop1"
+        },
+        {
+            "left": 335,
+            "top": 90,
+            "Width": 93,
+            "Height": 130,
+            "name": "Drives2",
+            "DIAG": "stop2"
+        },
+        {
+            "left": 428,
+            "top": 90,
+            "Width": 95,
+            "Height": 130,
+            "name": "Drives3",
+            "DIAG": "stop3"
+        },
+        {
+            "left": 522,
+            "top": 90,
+            "Width": 93,
+            "Height": 130,
+            "name": "Drives4",
+            "DIAG": "stop4"
         }
     ],
-    "heat":[{
-        "left":190,
-        "top":410,
-        "Width":66,
-        "Height":70,
-        "name":"heat0"      
-        },{
-        "left":255,
-        "top":410,
-        "Width":66,
-        "Height":70,
-        "name":"heat1"      
-        },{
-        "left":321,
-        "top":410,
-        "Width":66,
-        "Height":70,
-        "name":"Power"      
+    "heat": [
+        {
+            "left": 190,
+            "top": 410,
+            "Width": 66,
+            "Height": 70,
+            "name": "heat0"
+        },
+        {
+            "left": 255,
+            "top": 410,
+            "Width": 66,
+            "Height": 70,
+            "name": "heat1"
         }
     ],
-    "temp":[{
-        "left":628,
-        "top":446,
-        "Width":45,
-        "Height":35,
-        "name":"temp0"      
-        },{
-        "left":675,
-        "top":446,
-        "Width":45,
-        "Height":35,
-        "name":"temp1"      
-        },{
-        "left":570,
-        "top":406,
-        "Width":45,
-        "Height":35,
-        "name":"temp2"      
-        }
-    ],      
-    "fan":[{
-        "left":389,
-        "top":373,
-        "Width":45,
-        "Height":40,
-        "name":"fan0"      
-        },{
-        "left":389,
-        "top":443,
-        "Width":45,
-        "Height":40,
-        "name":"fan1"      
-        },{
-        "left":438,
-        "top":443,
-        "Width":45,
-        "Height":40,
-        "name":"fan2"      
-        },{
-        "left":438,
-        "top":373,
-        "Width":45,
-        "Height":40,
-        "name":"fan3"      
-        }
-    ],    
-    "endstop":[{
-        "left":485,
-        "top":443,
-        "Width":45,
-        "Height":40,
-        "name":"stop0"      
-        },{
-        "left":533,
-        "top":443,
-        "Width":45,
-        "Height":40,
-        "name":"stop1"      
-        },{
-        "left":580,
-        "top":443,
-        "Width":45,
-        "Height":40,
-        "name":"stop2"      
+    "temp": [
+        {
+            "left": 628,
+            "top": 446,
+            "Width": 45,
+            "Height": 35,
+            "name": "temp0"
+        },
+        {
+            "left": 675,
+            "top": 446,
+            "Width": 45,
+            "Height": 35,
+            "name": "temp1"
         }
     ],
-    "bltouch":[{
-        "left":617,
-        "top":395,
-        "Width":20,
-        "Height":35,
-        "name":"probe"      
-        },{
-        "left":617,
-        "top":350,
-        "Width":20,
-        "Height":45,
-        "name":"servo"      
+    "fan": [
+        {
+            "left": 389,
+            "top": 373,
+            "Width": 45,
+            "Height": 40,
+            "name": "fan0"
+        },
+        {
+            "left": 389,
+            "top": 443,
+            "Width": 45,
+            "Height": 40,
+            "name": "fan1"
+        },
+        {
+            "left": 438,
+            "top": 443,
+            "Width": 45,
+            "Height": 40,
+            "name": "fan2"
+        },
+        {
+            "left": 438,
+            "top": 373,
+            "Width": 45,
+            "Height": 40,
+            "name": "fan3"
+        }
+    ],
+    "endstop": [
+        {
+            "left": 485,
+            "top": 443,
+            "Width": 45,
+            "Height": 40,
+            "name": "stop0"
+        },
+        {
+            "left": 533,
+            "top": 443,
+            "Width": 45,
+            "Height": 40,
+            "name": "stop1"
+        },
+        {
+            "left": 580,
+            "top": 443,
+            "Width": 45,
+            "Height": 40,
+            "name": "stop2"
+        }
+    ],
+    "bltouch": [
+        {
+            "left": 617,
+            "top": 395,
+            "Width": 20,
+            "Height": 35,
+            "name": "probe"
+        },
+        {
+            "left": 617,
+            "top": 350,
+            "Width": 20,
+            "Height": 45,
+            "name": "servo"
         }
     ]
 }
-
-
-

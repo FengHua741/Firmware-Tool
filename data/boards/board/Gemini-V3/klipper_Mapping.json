@@ -43,6 +43,7 @@
     "stop3": "PB1",
     "probe": "PA1",
     "servo": "PB0",
+    "BED-OUT": "PA2",
     "uart-tx": "PA9",
     "uart-rx": "PA10"
 }

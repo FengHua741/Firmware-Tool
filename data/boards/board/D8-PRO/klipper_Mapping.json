@@ -87,6 +87,8 @@
     "servo":"PE6",
     "pwm1":"PD15",
     "pwm2":"PA4",
+    "rgb0":"PD15",
+    "rgb1":"PA4",
     "uart-tx":"PA9",
     "uart-rx":"PA10"
 
