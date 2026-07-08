@@ -2,7 +2,9 @@
     "img":{
         "Width":3017,
         "Height":1701,
-        "Zoom":1.0
+        "Zoom":1.0,
+        "OffsetX":3,
+        "OffsetY":3
     },
     "drives":[{
         "left":835,

@@ -34,6 +34,21 @@ resource_history = {
 
 # 服务列表
 SERVICES = ['klipper', 'moonraker', 'nginx', 'crowsnest', 'KlipperScreen']
+SERVICE_CONTROL_ALIASES = {
+    'klipper': 'klipper',
+    'moonraker': 'moonraker',
+    'nginx': 'nginx',
+    'crowsnest': 'crowsnest',
+    'klipperscreen': 'KlipperScreen',
+    'firmware-tool': 'firmware-tool',
+    'mainsail': 'nginx',
+    'fluidd': 'nginx',
+}
+
+
+def _normalize_service_name(service_name):
+    key = str(service_name or '').strip().lower()
+    return SERVICE_CONTROL_ALIASES.get(key, '')
 
 # 远程资源采集缓存
 _remote_cpu_prev = None
@@ -1258,17 +1273,16 @@ def get_available_services():
 def control_service():
     """控制服务（启动/停止/重启）"""
     data = request.json
-    service_name = data.get('service')
+    requested_service = data.get('service')
+    service_name = _normalize_service_name(requested_service)
     action = data.get('action')
 
-    if not service_name or not action:
+    if not requested_service or not action:
         return jsonify({'success': False, 'error': '缺少服务名或操作'}), 400
+    if not service_name:
+        return jsonify({'success': False, 'error': '不允许控制该服务'}), 400
     if action not in ['start', 'stop', 'restart']:
         return jsonify({'success': False, 'error': '无效的操作'}), 400
-
-    nginx_frontends = ['mainsail', 'fluidd']
-    if service_name in nginx_frontends:
-        service_name = 'nginx'
 
     # firmware-tool 重启自身时，需要用后台方式执行，否则当前进程会被杀掉无法返回响应
     if service_name == 'firmware-tool' and action == 'restart':

@@ -71,8 +71,6 @@ def add_no_cache_headers(response):
         response.headers['Expires'] = '0'
     return response
 
-CORS(app)
-
 # 配置路径 - 使用动态路径，不硬编码
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(BASE_DIR, 'data', 'config.json')
@@ -85,6 +83,7 @@ CONFIGS_DIR = BOARD_CONFIGS_DIR
 # 默认配置
 DEFAULT_CONFIG = {
     'port': 9999,
+    'bind_host': '0.0.0.0',
     'klipper_path': '~/klipper',
     'json_repo_url': '',  # JSON配置仓库地址
     'last_json_update': None,
@@ -94,6 +93,9 @@ DEFAULT_CONFIG = {
     'ssh_port': 22,
     'ssh_user': '',
     'sudo_mode': 'password',  # 'nopasswd' 或 'password'
+    # 安全开关默认保持兼容；需要收紧时可在 config.json 或环境变量中启用
+    'allowed_origins': [],
+    'api_token': '',
 }
 
 def load_config():
@@ -123,6 +125,32 @@ def save_config(config):
 
 config = load_config()
 PORT = config.get('port', 9999)
+
+
+def _configured_cors_origins():
+    raw_origins = os.environ.get('FIRMWARE_TOOL_ALLOWED_ORIGINS', '')
+    if raw_origins:
+        origins = [item.strip() for item in raw_origins.split(',') if item.strip()]
+        return origins or '*'
+    origins = config.get('allowed_origins') or []
+    return origins or '*'
+
+
+CORS(app, origins=_configured_cors_origins())
+
+
+@app.before_request
+def require_api_token():
+    """可选 API Token 校验；默认关闭以兼容现有前端。"""
+    token = os.environ.get('FIRMWARE_TOOL_API_TOKEN') or config.get('api_token') or ''
+    if not token:
+        return None
+    if request.method == 'OPTIONS' or request.path == '/' or request.path.startswith('/static/'):
+        return None
+    supplied = request.headers.get('X-API-Token') or request.args.get('token') or ''
+    if supplied != token:
+        return jsonify({'success': False, 'error': '未授权'}), 401
+    return None
 
 # FAST-SSH 模式保障：启动时自动设置凭据
 if config.get('connection_mode') == 'fast-ssh':

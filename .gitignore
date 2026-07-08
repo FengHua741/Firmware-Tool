@@ -37,6 +37,10 @@ Thumbs.db
 # Logs
 *.log
 
+# Runtime configuration and local secrets
+data/config.json
+.env
+
 # Backup files
 *.bak
 *.bak.*

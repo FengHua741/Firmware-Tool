@@ -109,6 +109,8 @@
     "pwm1": "PF9",
     "uart-tx": "PA9",
     "uart-rx": "PA10",
+    "fan6": "PB11",
+    "fan7": "PD12",
     "fan7_servo": "PD12",
     "fan7_tachometer": "PD15",
     "fan6_servo": "PB11",

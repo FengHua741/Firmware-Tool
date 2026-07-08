@@ -244,18 +244,6 @@
         "Width":50,
         "Height":30,
         "name":"stop6"      
-        },{
-        "left":142,
-        "top":52,
-        "Width":50,
-        "Height":30,
-        "name":"stop7"      
-        },{
-        "left":290,
-        "top":90,
-        "Width":50,
-        "Height":30,
-        "name":"HV-IN"      
         }
     ],       
     "bltouch":[{

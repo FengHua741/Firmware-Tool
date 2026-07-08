@@ -12,6 +12,23 @@ let compileParams = {
     boardModel: ''
 };
 
+// 可选 API Token：访问 /?token=xxx 后写入本地存储，后续 fetch 自动带上请求头。
+(function setupApiTokenFetch() {
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromUrl = params.get('token');
+    if (tokenFromUrl) {
+        localStorage.setItem('firmwareToolApiToken', tokenFromUrl);
+    }
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = function(resource, options = {}) {
+        const apiToken = localStorage.getItem('firmwareToolApiToken') || '';
+        if (!apiToken) return originalFetch(resource, options);
+        const headers = new Headers(options.headers || (resource instanceof Request ? resource.headers : undefined));
+        headers.set('X-API-Token', apiToken);
+        return originalFetch(resource, { ...options, headers });
+    };
+})();
+
 // ==================== 页面切换 ====================
 function switchPage(pageId) {
     currentPage = pageId;

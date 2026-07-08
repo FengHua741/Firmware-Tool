@@ -121,6 +121,23 @@
 .cg-tb-toggle { color:var(--text-secondary); transition:transform .2s; }
 .cg-tb-panel { padding:12px 16px; border-top:1px solid var(--border-color); }
 .cg-warn { background:rgba(255,152,0,.08); color:var(--warning-color); padding:8px 12px; border-radius:6px; margin-top:8px; font-size:13px; border:1px solid rgba(255,152,0,.2); }
+.cg-toolboard-check,.cg-config-side-panel { padding:10px 12px; border-radius:6px; font-size:13px; border:1px solid var(--border-color); background:var(--bg-color); color:var(--text-primary); }
+.cg-toolboard-check ul,.cg-config-side-panel ul { margin:6px 0 0; padding-left:18px; }
+.cg-toolboard-check.ok { border-color:rgba(76,175,80,.3); background:rgba(76,175,80,.07); color:var(--success-color); }
+.cg-toolboard-check.warn { border-color:rgba(255,152,0,.35); background:rgba(255,152,0,.08); color:var(--warning-color); }
+.cg-toolboard-check.error { border-color:rgba(244,67,54,.35); background:rgba(244,67,54,.06); color:var(--danger-color); }
+.cg-toolboard-check li.error,.cg-config-side-panel li.error { color:var(--danger-color); }
+.cg-toolboard-check li.warn,.cg-config-side-panel li.warn { color:var(--warning-color); }
+.cg-toolboard-mini { padding:8px 10px; border-radius:6px; border:1px solid rgba(33,150,243,.18); background:rgba(33,150,243,.05); color:var(--text-secondary); font-size:12px; }
+.cg-pin-sub { display:block; margin-top:2px; color:var(--text-secondary); font-weight:400; font-family:'Courier New',monospace; font-size:11px; }
+.cg-inline-check { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--text-primary); cursor:pointer; }
+.cg-config-side-panel { margin-bottom:10px; }
+.cg-config-side-panel code { background:rgba(0,0,0,.06); padding:1px 5px; border-radius:3px; font-size:12px; }
+.cg-diff-group { padding:8px 10px; border-left:3px solid var(--border-color); margin:8px 0; background:rgba(0,0,0,.02); }
+.cg-diff-group.add { border-left-color:var(--success-color); }
+.cg-diff-group.mod { border-left-color:var(--warning-color); }
+.cg-diff-group.del { border-left-color:var(--danger-color); }
+.cg-diff-group.same { border-left-color:var(--text-secondary); }
 .output-pre { background:#263238; color:#aed581; padding:20px; border-radius:6px; white-space:pre-wrap; font-family:'Consolas','Monaco',monospace; font-size:14px; line-height:1.5; max-height:500px; overflow:auto; margin-top:12px; }
 .error-message { background:rgba(244,67,54,.06); color:var(--danger-color); font-weight:500; padding:12px 16px; border:1px solid rgba(244,67,54,.3); border-radius:6px; margin:10px 0; display:none; font-size:14px; white-space:pre-wrap; }
 .required { border-color:var(--danger-color) !important; background-color:#fff5f5 !important; }
@@ -155,8 +172,27 @@
 .cg-param-section-body.collapsed { display:none; }
 
 /* 板卡图片 */
-.cg-board-image { max-width:100%; max-height:200px; border-radius:8px; border:1px solid var(--border-color); margin-top:10px; object-fit:contain; }
-.cg-board-image-container { display:none; margin-top:8px; }
+.cg-board-image-container { display:none; margin-top:10px; }
+.cg-board-map.empty .cg-board-image-stage { display:none; }
+.cg-board-map.empty .cg-board-pin-info { margin-top:0; }
+.cg-board-image-stage { position:relative; display:inline-block; max-width:100%; line-height:0; border-radius:8px; border:1px solid var(--border-color); overflow:hidden; background:var(--bg-color); }
+.cg-board-image { display:block; max-width:100%; max-height:360px; object-fit:contain; }
+.cg-board-overlay { position:absolute; inset:0; pointer-events:none; }
+.cg-board-hotspot { position:absolute; box-sizing:border-box; pointer-events:auto; border:1px solid rgba(33,150,243,.65); background:rgba(33,150,243,.14); color:#fff; border-radius:3px; cursor:pointer; min-width:10px; min-height:10px; padding:0 2px; overflow:hidden; white-space:nowrap; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; line-height:1; text-shadow:0 1px 2px rgba(0,0,0,.55); transition:background .12s,border-color .12s,box-shadow .12s,transform .12s; }
+.cg-board-hotspot:hover,.cg-board-hotspot.active { background:rgba(33,150,243,.34); border-color:#fff; box-shadow:0 0 0 2px rgba(33,150,243,.45),0 0 14px rgba(33,150,243,.55); z-index:5; }
+.cg-board-hotspot.used { background:rgba(76,175,80,.24); border-color:rgba(76,175,80,.85); }
+.cg-board-hotspot.type-drive { background:rgba(103,58,183,.20); border-color:rgba(103,58,183,.85); }
+.cg-board-hotspot.type-heat { background:rgba(244,67,54,.22); border-color:rgba(244,67,54,.85); }
+.cg-board-hotspot.type-temp { background:rgba(0,150,136,.22); border-color:rgba(0,150,136,.85); }
+.cg-board-hotspot.type-fan { background:rgba(3,169,244,.20); border-color:rgba(3,169,244,.85); }
+.cg-board-hotspot.type-stop,.cg-board-hotspot.type-probe,.cg-board-hotspot.type-servo { background:rgba(255,152,0,.22); border-color:rgba(255,152,0,.9); }
+.cg-board-pin-info { margin-top:8px; padding:10px 12px; border:1px solid var(--border-color); border-radius:6px; background:var(--bg-color); color:var(--text-secondary); font-size:12px; line-height:1.6; }
+.cg-board-pin-info strong { color:var(--text-primary); font-size:13px; }
+.cg-board-pin-info code { background:rgba(0,0,0,.06); padding:1px 5px; border-radius:3px; font-size:11px; }
+.cg-board-pin-meta { display:flex; gap:8px; flex-wrap:wrap; margin-top:4px; }
+.cg-board-pin-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+.cg-board-pin-actions button { border:1px solid var(--border-color); background:var(--card-bg); color:var(--text-primary); border-radius:4px; padding:4px 8px; font-size:12px; cursor:pointer; }
+.cg-board-pin-actions button:hover { border-color:var(--primary-color); color:var(--primary-color); }
 
 /* MCU 自动检测按钮 */
 .cg-detect-btn { padding:6px 12px; font-size:12px; white-space:nowrap; }
@@ -224,6 +260,15 @@
 .cg-probe-field { display:flex; align-items:center; gap:6px; min-width:140px; }
 .cg-probe-field label { font-size:12px; color:var(--text-secondary); white-space:nowrap; }
 .cg-probe-field input, .cg-probe-field select { width:80px; padding:5px 6px; border:1px solid var(--border-color); border-radius:4px; font-size:12px; background:var(--card-bg); }
+.cg-probe-mods { display:flex; align-items:center; gap:10px; font-size:12px; color:var(--text-secondary); }
+.cg-probe-mods label { display:flex; align-items:center; gap:4px; }
+.cg-probe-check { margin-top:10px; padding:10px 12px; border-radius:6px; border:1px solid var(--border-color); font-size:13px; line-height:1.5; }
+.cg-probe-check.ok { background:rgba(76,175,80,.08); color:var(--success-color); border-color:rgba(76,175,80,.25); }
+.cg-probe-check.warn { background:rgba(255,152,0,.08); color:var(--warning-color); border-color:rgba(255,152,0,.25); }
+.cg-probe-check.error { background:rgba(244,67,54,.06); color:var(--danger-color); border-color:rgba(244,67,54,.25); }
+.cg-probe-check ul { margin:6px 0 0; padding-left:20px; }
+.cg-probe-check li.warn { color:var(--warning-color); }
+.cg-probe-check li.error { color:var(--danger-color); }
 
 /* CoreXY归位提示 */
 .cg-corexy-info { background:rgba(33,150,243,.04); border-left:3px solid var(--primary-color); padding:10px 14px; border-radius:0 6px 6px 0; margin-bottom:12px; font-size:13px; line-height:1.6; color:var(--text-primary); }
@@ -245,4 +290,3 @@
 
 /* 采样电阻输入框 */
 .cg-drive-table input[type="text"] { font-family:monospace; }
-

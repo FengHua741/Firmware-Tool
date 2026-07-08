@@ -3,6 +3,9 @@
 let compileMcuDatabase = {};  // MCU 数据库
 let currentCompileMcu = null; // 当前选中的 MCU
 let compiledFirmwarePath = null; // 编译成功的固件路径
+let compiledFirmwareManifest = null; // 编译成功的固件元数据
+let _lastBlFiles = [];
+let _lastBlAddressOptions = [];
 let _commGroupedOptions = {}; // 按类型分组的通信选项
 let _commAllOptions = [];     // 所有通信选项（带compatible_processors）
 let _bridgeCanOptions = [];   // STM32 桥接CAN引脚选项
@@ -170,6 +173,10 @@ async function onCompileMcuModelChange() {
         if (data.success) {
             currentCompileMcu = data;
             await displayCompileMcuDetails(data);
+            const blSection = document.getElementById('blFlashSection');
+            if (blSection && blSection.style.display !== 'none') {
+                await loadBlAddressOptions();
+            }
         }
     } catch (error) {
         console.error('加载 MCU 详情失败:', error);
@@ -204,7 +211,7 @@ async function displayCompileMcuDetails(data) {
     });
     
     // 连接方式 - 两级选择（从Kconfig动态获取）
-    await loadCommunicationOptions(mcu);
+    await loadCommunicationOptions(mcu, data.platform_key);
     
     // 根据 MCU 预设自动设置烧录模式（自定义模式）
     // 如果从预设产品切换过来，保留预设配置的烧录模式，不覆盖
@@ -267,7 +274,7 @@ const MCU_PLATFORM_MAP = {
 };
 
 // 加载通信选项（两级选择）
-async function loadCommunicationOptions(mcu) {
+async function loadCommunicationOptions(mcu, platformKeyFromApi) {
     const connSelect = document.getElementById('compileConnection');
     connSelect.innerHTML = '<option value="">加载中...</option>';
     
@@ -288,7 +295,7 @@ async function loadCommunicationOptions(mcu) {
         
         const mcuId = mcu.id.toUpperCase();
         // 通过映射找到平台键名，再获取该平台的通信选项
-        const platformKey = MCU_PLATFORM_MAP[mcuId] || mcuId.toLowerCase();
+        const platformKey = platformKeyFromApi || MCU_PLATFORM_MAP[mcuId] || mcuId.toLowerCase();
         const platformData = data[platformKey];
         let commOptions = [];
         _bridgeCanOptions = [];
@@ -302,6 +309,9 @@ async function loadCommunicationOptions(mcu) {
                     if (!opt.compatible_processors || opt.compatible_processors.length === 0) return true;
                     return opt.compatible_processors.includes(mcuId);
                 });
+                if (_bridgeCanOptions.length === 0) {
+                    _bridgeCanOptions = platformData.bridge_can;
+                }
             }
             // RP2040 CAN GPIO配置
             if (platformKey === 'rp2040' && (platformData.has_canbus || platformData.has_usbcanbus)) {
@@ -314,10 +324,13 @@ async function loadCommunicationOptions(mcu) {
         }
         
         // 过滤兼容当前MCU的选项
-        const filtered = commOptions.filter(opt => {
+        let filtered = commOptions.filter(opt => {
             if (!opt.compatible_processors || opt.compatible_processors.length === 0) return true;
             return opt.compatible_processors.includes(mcuId);
         });
+        if (filtered.length === 0 && commOptions.length > 0) {
+            filtered = commOptions;
+        }
         
         _commAllOptions = filtered;
         _commGroupedOptions = {};
@@ -541,6 +554,7 @@ async function onCompilePresetModelChange() {
     }
 
     const config = JSON.parse(option.dataset.config);
+    window._selectedCompileBoardConfig = config;
     const presetName = config.name || option.textContent;
 
     // 设置烧录模式：默认选中 default_flash，但保留所有选项可编辑
@@ -650,6 +664,11 @@ async function onCompilePresetModelChange() {
     // 自动选择通信方式
     if (config.default_connection) {
         _autoSelectPresetConnection(config);
+    }
+
+    const blSection = document.getElementById('blFlashSection');
+    if (blSection && blSection.style.display !== 'none') {
+        await loadBlFiles();
     }
 
     showSuccess(`已从预设「${presetName}」加载完整配置，所有参数已自动填充，可修改后编译`);
@@ -868,22 +887,24 @@ async function compileFirmware() {
         
         if (lastResult && lastResult.success) {
             compiledFirmwarePath = lastResult.firmware_path;
-            statusMsg.innerHTML = '✅ 编译成功！';
+            compiledFirmwareManifest = lastResult.manifest || null;
+            statusMsg.textContent = '✅ 编译成功！';
             statusMsg.style.color = '#4caf50';
-            if (logEl) logEl.innerHTML += `<br><b>固件路径:</b> ${lastResult.firmware_path}<br><b>固件大小:</b> ${lastResult.firmware_size || '未知'}`;
+            if (logEl) logEl.textContent += `\n固件路径: ${lastResult.firmware_path}\n固件大小: ${lastResult.firmware_size || '未知'}\n`;
             showSuccess('固件编译成功！');
+            await refreshFlashPlan(true);
         } else if (lastResult && lastResult.error) {
-            statusMsg.innerHTML = '❌ ' + lastResult.error;
+            statusMsg.textContent = '❌ ' + lastResult.error;
             statusMsg.style.color = '#f44336';
             showError('编译失败: ' + lastResult.error);
         } else {
-            statusMsg.innerHTML = '❌ 编译异常结束';
+            statusMsg.textContent = '❌ 编译异常结束';
             statusMsg.style.color = '#f44336';
             showError('编译异常结束');
         }
     } catch (error) {
         console.error('编译失败:', error);
-        if (statusMsg) { statusMsg.innerHTML = '❌ 编译请求失败'; statusMsg.style.color = '#f44336'; }
+        if (statusMsg) { statusMsg.textContent = '❌ 编译请求失败'; statusMsg.style.color = '#f44336'; }
         if (logEl) logEl.textContent = error.message;
         showError('编译请求失败: ' + error.message);
     }
@@ -1105,6 +1126,68 @@ function onFlashModeChange(skipRefresh = false) {
     // 切换模式后刷新设备列表（过滤 CAN/USB 设备显示）
     if (!skipRefresh) {
         refreshDeviceIds();
+        refreshFlashPlan(false);
+    }
+}
+
+async function fetchFlashPlan() {
+    const flashMode = document.getElementById('flashMode')?.value || '';
+    const deviceId = document.getElementById('flashDeviceId')?.value || '';
+    const canIface = document.getElementById('flashCanIface')?.value || 'can0';
+    let firmwarePath = compiledFirmwarePath;
+    if (flashMode === 'HOST') {
+        const source = document.getElementById('hostFirmwareSource')?.value || 'compiled';
+        if (source === 'prebuilt') {
+            firmwarePath = document.getElementById('hostPrebuiltPath')?.value?.trim() || '';
+        }
+    }
+    const response = await fetch('/api/firmware/flash/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            firmware_path: firmwarePath || '',
+            flash_mode: flashMode,
+            device_id: deviceId,
+            can_iface: canIface
+        })
+    });
+    const data = await response.json();
+    if (data.manifest) compiledFirmwareManifest = data.manifest;
+    return data.plan || null;
+}
+
+function renderFlashPlan(plan) {
+    const hint = document.getElementById('flashPlanHint');
+    if (!hint || !plan) return;
+    if (!plan.firmware_path && !compiledFirmwareManifest && !compiledFirmwarePath) {
+        hint.style.display = 'none';
+        return;
+    }
+    const warnings = plan.warnings && plan.warnings.length ? `；提示：${plan.warnings.join('；')}` : '';
+    const errors = plan.errors && plan.errors.length ? `；需处理：${plan.errors.join('；')}` : '';
+    hint.style.display = 'block';
+    hint.style.background = plan.ok ? '#eef7ff' : '#fff3cd';
+    hint.style.borderLeftColor = plan.ok ? '#2196f3' : '#ff9800';
+    hint.textContent = `推荐烧录方式：${plan.recommended_mode || '-'}${warnings}${errors}`;
+}
+
+async function refreshFlashPlan(applyRecommendation = false) {
+    try {
+        let plan = await fetchFlashPlan();
+        if (!plan) return;
+        const flashModeEl = document.getElementById('flashMode');
+        if (applyRecommendation && flashModeEl && plan.recommended_mode) {
+            const hasMode = [...flashModeEl.options].some(opt => opt.value === plan.recommended_mode);
+            if (hasMode && flashModeEl.value !== plan.recommended_mode) {
+                flashModeEl.value = plan.recommended_mode;
+                onFlashModeChange(true);
+                await refreshDeviceIds();
+                plan = await fetchFlashPlan();
+            }
+        }
+        renderFlashPlan(plan);
+    } catch (err) {
+        console.warn('刷新烧录推荐失败:', err);
     }
 }
 
@@ -1181,6 +1264,15 @@ async function flashFirmware() {
         // 如果没有编译过，尝试使用默认路径
         firmwarePath = '~/klipper/out/klipper.bin';
     }
+
+    const precheck = await fetchFlashPlan();
+    if (precheck) {
+        renderFlashPlan(precheck);
+        if (precheck.errors && precheck.errors.length > 0) {
+            showError('烧录前预检失败: ' + precheck.errors.join('；'));
+            return;
+        }
+    }
     
     const resultDiv = document.getElementById('flashResult');
     resultDiv.style.display = 'block';
@@ -1231,23 +1323,23 @@ async function flashFirmware() {
         }
         
         if (lastResult && lastResult.success) {
-            statusMsg.innerHTML = '✅ 烧录成功！';
+            statusMsg.textContent = '✅ 烧录成功！';
             statusMsg.style.color = '#4caf50';
             if (lastResult.output && logEl) logEl.textContent += '\n' + lastResult.output;
             showSuccess('固件烧录成功！');
         } else if (lastResult && lastResult.error) {
-            statusMsg.innerHTML = '❌ ' + lastResult.error;
+            statusMsg.textContent = '❌ ' + lastResult.error;
             statusMsg.style.color = '#f44336';
             if (lastResult.output && logEl) logEl.textContent += '\n' + lastResult.output;
             showError('烧录失败: ' + lastResult.error);
         } else {
-            statusMsg.innerHTML = '❌ 烧录异常结束';
+            statusMsg.textContent = '❌ 烧录异常结束';
             statusMsg.style.color = '#f44336';
             showError('烧录异常结束');
         }
     } catch (error) {
         console.error('烧录失败:', error);
-        if (statusMsg) { statusMsg.innerHTML = '❌ 烧录请求失败'; statusMsg.style.color = '#f44336'; }
+        if (statusMsg) { statusMsg.textContent = '❌ 烧录请求失败'; statusMsg.style.color = '#f44336'; }
         if (logEl) logEl.textContent = error.message;
         showError('烧录请求失败: ' + error.message);
     }
@@ -1297,22 +1389,22 @@ async function flashHostFirmware(firmwarePath) {
         }
         
         if (lastResult && lastResult.success) {
-            statusMsg.innerHTML = '✅ ' + (lastResult.message || '固件烧录成功');
+            statusMsg.textContent = '✅ ' + (lastResult.message || '固件烧录成功');
             statusMsg.style.color = '#4caf50';
             if (lastResult.flash_output && logEl) logEl.textContent += '\n' + lastResult.flash_output;
             showSuccess('固件烧录成功');
         } else if (lastResult && lastResult.error) {
-            statusMsg.innerHTML = '❌ ' + lastResult.error;
+            statusMsg.textContent = '❌ ' + lastResult.error;
             statusMsg.style.color = '#f44336';
             showError('烧录失败: ' + lastResult.error);
         } else {
-            statusMsg.innerHTML = '❌ 烧录异常结束';
+            statusMsg.textContent = '❌ 烧录异常结束';
             statusMsg.style.color = '#f44336';
             showError('烧录异常结束');
         }
     } catch (error) {
         console.error('烧录失败:', error);
-        if (statusMsg) { statusMsg.innerHTML = '❌ 烧录请求失败'; statusMsg.style.color = '#f44336'; }
+        if (statusMsg) { statusMsg.textContent = '❌ 烧录请求失败'; statusMsg.style.color = '#f44336'; }
         if (logEl) logEl.textContent = error.message;
         showError('烧录请求失败: ' + error.message);
     }
@@ -1477,31 +1569,151 @@ function toggleBlFlashSection() {
 // 加载 BL 文件列表
 async function loadBlFiles() {
     try {
-        const response = await fetch('/api/firmware/bl-firmwares');
+        const board = window._selectedCompileBoardConfig || {};
+        const params = new URLSearchParams();
+        if (board.manufacturer) params.set('manufacturer', board.manufacturer);
+        if (board.board_type || board.type) params.set('board_type', board.board_type || board.type);
+        if (board.id) params.set('board_id', board.id);
+        if (board.name) params.set('board_name', board.name);
+        const response = await fetch('/api/firmware/bl-firmwares' + (params.toString() ? '?' + params.toString() : ''));
         const data = await response.json();
         
         const select = document.getElementById('blFileSelect');
         select.innerHTML = '<option value="">-- 选择 BL 文件 --</option>';
+        _lastBlFiles = data.files || [];
         
-        if (data.files) {
-            data.files.forEach(file => {
-                select.innerHTML += `<option value="${file.path}">${file.name}</option>`;
+        if (_lastBlFiles.length > 0) {
+            _lastBlFiles.forEach(file => {
+                const label = file.relative_path || file.name;
+                select.appendChild(new Option(label, file.path));
             });
+            select.selectedIndex = 1;
+            await onBlFileChange();
+        } else {
+            loadBlAddressFallback();
         }
     } catch (error) {
         console.error('加载 BL 文件列表失败:', error);
+        loadBlAddressFallback();
     }
+}
+
+function loadBlAddressFallback() {
+    const select = document.getElementById('blFlashAddress');
+    if (!select) return;
+    select.innerHTML = '';
+    const option = new Option('NO BL - 0x08000000', '0x08000000');
+    option.dataset.offset = '0';
+    option.dataset.platformKey = 'stm32';
+    select.appendChild(option);
+    _lastBlAddressOptions = [{
+        offset: '0',
+        address: '0x08000000',
+        label: 'NO BL',
+        platform_key: 'stm32'
+    }];
+}
+
+function fillBlAddressOptions(data) {
+    const select = document.getElementById('blFlashAddress');
+    if (!select) return;
+    const options = data.options || [];
+    select.innerHTML = '';
+    _lastBlAddressOptions = options;
+    if (options.length === 0) {
+        loadBlAddressFallback();
+        return;
+    }
+    options.forEach(item => {
+        const label = `${item.label || item.offset} - ${item.address}`;
+        const option = new Option(label, item.address);
+        option.dataset.offset = item.offset || '';
+        option.dataset.platformKey = data.platform_key || '';
+        option.dataset.configSymbol = item.config_symbol || '';
+        select.appendChild(option);
+    });
+    const defaultOption = options.find(item => item.offset === data.default_offset)
+        || options.find(item => item.recommended_for_bl)
+        || options[0];
+    if (defaultOption) {
+        select.value = defaultOption.address;
+    }
+}
+
+async function loadBlAddressOptions() {
+    const board = window._selectedCompileBoardConfig || {};
+    const params = new URLSearchParams();
+    if (currentCompileMcu?.mcu?.id) {
+        params.set('mcu', currentCompileMcu.mcu.id);
+    } else if (board.mcu) {
+        params.set('mcu', board.mcu);
+    }
+    if (currentCompileMcu?.platform_key) {
+        params.set('platform', currentCompileMcu.platform_key);
+    } else if (currentCompileMcu?.platform) {
+        params.set('platform', currentCompileMcu.platform);
+    } else if (board.platform) {
+        params.set('platform', board.platform);
+    }
+    if (board.manufacturer) params.set('manufacturer', board.manufacturer);
+    if (board.board_type || board.type) params.set('board_type', board.board_type || board.type);
+    if (board.id) params.set('board_id', board.id);
+
+    if (!params.has('mcu')) {
+        loadBlAddressFallback();
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/firmware/bl/address-options?' + params.toString());
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || '无法加载 BL 烧录地址');
+        }
+        fillBlAddressOptions(data);
+    } catch (error) {
+        console.warn('加载 BL 烧录地址失败:', error);
+        loadBlAddressFallback();
+    }
+}
+
+async function onBlFileChange() {
+    const select = document.getElementById('blFileSelect');
+    const selected = _lastBlFiles.find(file => file.path === select.value);
+    if (!selected) {
+        await loadBlAddressOptions();
+        return;
+    }
+    const toolEl = document.getElementById('blFlashTool');
+    if (toolEl && selected.recommended_tool) {
+        toolEl.value = selected.recommended_tool;
+    }
+    await loadBlAddressOptions();
 }
 
 // 烧录 Bootloader
 async function flashBootloader() {
     const blFile = document.getElementById('blFileSelect').value;
-    const address = document.getElementById('blFlashAddress').value;
+    const addressSelect = document.getElementById('blFlashAddress');
+    const selectedAddress = addressSelect.options[addressSelect.selectedIndex];
+    const address = addressSelect.value;
+    const dfuOffset = selectedAddress?.dataset.offset || '';
+    const platformKey = selectedAddress?.dataset.platformKey || '';
     const tool = document.getElementById('blFlashTool').value;
     const eraseFlash = document.getElementById('blEraseFlash').checked;
     
     if (!blFile) {
         showError('请选择 BL 文件');
+        return;
+    }
+    if (!address && tool !== 'rp2040_flash') {
+        showError('请选择 BL 烧录地址');
+        return;
+    }
+    if (eraseFlash && !confirm('擦除整个 Flash 会清除当前固件，确认继续烧录 BL？')) {
+        return;
+    }
+    if (!eraseFlash && !confirm('不擦除整个 Flash 可能保留旧固件并与 BL 偏移规则冲突，确认继续？')) {
         return;
     }
     
@@ -1518,6 +1730,8 @@ async function flashBootloader() {
             body: JSON.stringify({
                 bl_firmware_path: blFile,
                 dfu_address: address,
+                dfu_offset: dfuOffset,
+                platform_key: platformKey,
                 flash_mode: tool === 'dfu-util' ? 'DFU' : tool === 'rp2040_flash' ? 'UF2' : tool === 'st-flash' ? 'st-flash' : 'openocd',
                 device_id: document.getElementById('flashDeviceId').value || '',
                 erase_flash: eraseFlash
@@ -1589,12 +1803,19 @@ function resetCompileForm() {
     if (startupPin) startupPin.value = '';
     
     compiledFirmwarePath = null;
+    compiledFirmwareManifest = null;
     currentCompileMcu = null;
+    window._selectedCompileBoardConfig = null;
     window._fromPreset = false;
+    _lastBlAddressOptions = [];
+    loadBlAddressFallback();
 }
 
 // 格式化频率
 function formatCompileFrequency(freq) {
+    if (String(freq).toLowerCase() === 'internal') {
+        return 'Internal clock';
+    }
     const freqNum = parseInt(freq);
     if (freqNum >= 1000000) {
         return (freqNum / 1000000) + ' MHz';

@@ -9,6 +9,7 @@ import re
 import json
 import time
 import shlex
+import hashlib
 
 from shared import (
     app, config, logger, BASE_DIR, BOARD_CONFIGS_DIR,
@@ -18,12 +19,15 @@ from shared import (
     expand_klipper_path, get_klipper_owner, get_klipper_python_bin,
     download_firmware_from_remote, upload_bl_firmware_for_remote,
     sudo_write_file,
-    load_all_boards, get_manufacturers, get_bl_firmwares,
+    load_all_boards, load_board_config, get_manufacturers, get_bl_firmwares,
     SSHManager,
 )
 from routes_system import _scan_can_uuids
+from klipper_kconfig_parser import KlipperKconfigParser
+from kconfig_can_parser import parse_can_options
 
 firmware_bp = Blueprint('firmware', __name__)
+MANIFEST_FILENAME = 'firmware-tool-manifest.json'
 
 
 def load_klipper_rules():
@@ -49,12 +53,616 @@ def _umount_rp2040_boot():
                     mount_point = parts[1]
                     if mount_point and mount_point != '':
                         run_cmd(
-                            f'sudo umount {mount_point} 2>/dev/null || true',
+                            f'sudo umount {shlex.quote(mount_point)} 2>/dev/null || true',
                             shell=True, capture_output=True, timeout=10
                         )
     except:
         pass
     time.sleep(0.5)
+
+
+def _normalize_config_symbol(symbol):
+    """返回不带 CONFIG_ 前缀的 Kconfig symbol。"""
+    symbol = str(symbol or '').strip()
+    if symbol.startswith('CONFIG_'):
+        symbol = symbol[7:]
+    if re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', symbol):
+        return symbol
+    return ''
+
+
+def _config_line(symbol):
+    symbol = _normalize_config_symbol(symbol)
+    if not symbol:
+        return ''
+    return f'CONFIG_{symbol}=y'
+
+
+def _truthy(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _device_state(device):
+    dtype = (device.get('type') or '').lower()
+    did = (device.get('id') or '').lower()
+    name = (device.get('name') or '').lower()
+    if dtype == 'dfu' or did.startswith('dfu:'):
+        return 'dfu'
+    if did == 'rp2040_boot' or 'rp2' in name or 'uf2' in name:
+        return 'uf2'
+    if 'katapult' in name or 'canboot' in name:
+        return 'katapult'
+    if 'klipper' in name:
+        return 'klipper'
+    if dtype in ('usb_serial', 'usb_acm', 'usb_ftdi'):
+        return 'serial'
+    return 'unknown'
+
+
+def _annotate_devices(devices):
+    for device in devices:
+        device.setdefault('state', _device_state(device))
+    return devices
+
+
+def _manifest_path(klipper_path):
+    return os.path.join(klipper_path, 'out', MANIFEST_FILENAME)
+
+
+def _read_text_file(path):
+    if is_ssh_mode():
+        result = run_cmd(f'cat {shlex.quote(path)} 2>/dev/null', shell=True, capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            return ''
+        return result.stdout or ''
+    if not os.path.exists(path):
+        return ''
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
+def _file_sha256(path):
+    if is_ssh_mode():
+        result = run_cmd(f'sha256sum {shlex.quote(path)} 2>/dev/null', shell=True, capture_output=True, text=True, timeout=20)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().split()[0]
+        return ''
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _klipper_commit(klipper_path):
+    result = run_cmd(f'cd {shlex.quote(klipper_path)} && git rev-parse --short HEAD 2>/dev/null',
+                     shell=True, capture_output=True, text=True, timeout=5)
+    if result.returncode == 0:
+        return (result.stdout or '').strip()
+    return ''
+
+
+def _application_address(platform_key, bl_offset):
+    offset = _offset_int(bl_offset)
+    if offset is None:
+        offset = 0
+    if platform_key == 'stm32':
+        return f'0x{0x08000000 + offset:08x}'
+    if platform_key == 'rp2040':
+        return f'0x{0x10000000 + offset:08x}'
+    if offset:
+        return f'0x{offset:x}'
+    return ''
+
+
+def _offset_int(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    raw_lower = raw.lower()
+    if raw_lower in ('nobl', 'no_bl', 'no bootloader', 'no_bootloader', 'none'):
+        return 0
+    if 'no bootloader' in raw_lower or 'nobl' in raw_lower:
+        return 0
+    try:
+        return int(raw, 0)
+    except ValueError:
+        pass
+    kib_match = re.search(r'(\d+)\s*kib', raw_lower)
+    if kib_match:
+        return int(kib_match.group(1)) * 1024
+    symbol_match = re.search(r'FLASH_START_([0-9A-Fa-f]+)$', raw)
+    if symbol_match:
+        try:
+            return int(symbol_match.group(1), 16)
+        except ValueError:
+            return None
+    return None
+
+
+def _manifest_bl_offset(manifest):
+    return ((manifest or {}).get('build') or {}).get('bl_offset', '')
+
+
+def _manifest_has_known_bl_offset(manifest):
+    return _offset_int(_manifest_bl_offset(manifest)) is not None
+
+
+def _is_nobl_build(manifest):
+    offset = _offset_int(_manifest_bl_offset(manifest))
+    return offset == 0
+
+
+def _write_manifest(klipper_path, manifest):
+    manifest_path = _manifest_path(klipper_path)
+    content = json.dumps(manifest, ensure_ascii=False, indent=2) + '\n'
+    if is_ssh_mode():
+        run_cmd(f'mkdir -p {shlex.quote(os.path.dirname(manifest_path))}', shell=True, capture_output=True)
+        sudo_write_file(manifest_path, content)
+    else:
+        os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+    return manifest_path
+
+
+def _load_manifest(klipper_path):
+    manifest_path = _manifest_path(klipper_path)
+    content = _read_text_file(manifest_path)
+    if not content.strip():
+        return None
+    try:
+        manifest = json.loads(content)
+        manifest['_manifest_path'] = manifest_path
+        return manifest
+    except json.JSONDecodeError:
+        return None
+
+
+def _create_manifest(klipper_path, firmware_path, firmware_size, mcu_info, request_data,
+                     config_data, compile_values):
+    platform_key = mcu_info.get('platform_key') or ''
+    board = {}
+    if config_data:
+        board = {
+            'manufacturer': config_data.get('manufacturer', ''),
+            'board_type': config_data.get('board_type') or config_data.get('type', ''),
+            'id': config_data.get('id', ''),
+            'name': config_data.get('name', ''),
+            'default_flash': config_data.get('default_flash', ''),
+            'flash_modes': config_data.get('flash_modes', []),
+        }
+    bl_offset = compile_values.get('bl_offset', '')
+    manifest = {
+        'schema': 1,
+        'created_at': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+        'board': board,
+        'mcu': {
+            'platform': mcu_info.get('platform', ''),
+            'platform_key': platform_key,
+            'id': (mcu_info.get('mcu') or {}).get('id', ''),
+            'config_symbol': (mcu_info.get('mcu') or {}).get('config_symbol', ''),
+        },
+        'build': {
+            'klipper_path': klipper_path,
+            'klipper_commit': _klipper_commit(klipper_path),
+            'crystal': compile_values.get('crystal', ''),
+            'bl_offset': bl_offset,
+            'flash_application_address': _application_address(platform_key, bl_offset),
+            'communication': compile_values.get('communication', ''),
+            'comm_type': compile_values.get('comm_type', ''),
+            'comm_config_symbol': compile_values.get('comm_config_symbol', ''),
+            'bridge_can_config': compile_values.get('bridge_can_config', ''),
+        },
+        'firmware': {
+            'path': firmware_path,
+            'name': os.path.basename(firmware_path),
+            'size': firmware_size,
+            'sha256': _file_sha256(firmware_path),
+            'ext': os.path.splitext(firmware_path)[1].lower(),
+        },
+        'request': {
+            'mode': 'preset' if config_data else 'custom',
+            'klipper_path': request_data.get('klipper_path', ''),
+        }
+    }
+    return manifest
+
+
+def _recommended_flash_mode(manifest, firmware_path='', device_id=''):
+    board = (manifest or {}).get('board', {})
+    build = (manifest or {}).get('build', {})
+    fw = (manifest or {}).get('firmware', {})
+    ext = (fw.get('ext') or os.path.splitext(firmware_path or fw.get('path', ''))[1]).lower()
+    device = str(device_id or '').lower()
+    is_nobl = _is_nobl_build(manifest)
+    has_known_offset = _manifest_has_known_bl_offset(manifest)
+
+    if ext == '.uf2' or device == 'rp2040_boot':
+        return 'UF2'
+    if is_nobl:
+        return 'DFU'
+    if re.match(r'^(can\d+:)?[a-f0-9]{8,32}$', device):
+        return 'CAN'
+    default_flash = board.get('default_flash') or ''
+    if default_flash and default_flash != 'DFU':
+        return default_flash
+    comm_type = build.get('comm_type') or ''
+    if comm_type == 'can':
+        return 'CAN'
+    if comm_type == 'usbcanbridge':
+        return 'KAT'
+    if device.startswith('dfu:') and has_known_offset:
+        return 'KAT'
+    if default_flash == 'DFU' and not has_known_offset:
+        return 'DFU'
+    if has_known_offset:
+        return 'KAT'
+    return 'DFU'
+
+
+def _flash_plan(manifest, firmware_path, flash_mode='', device_id='', can_iface='can0'):
+    if not firmware_path and manifest:
+        firmware_path = (manifest.get('firmware') or {}).get('path', '')
+    recommended = _recommended_flash_mode(manifest or {}, firmware_path, device_id)
+    selected = flash_mode or recommended
+    effective_selected = {'CAN_BRIDGE_DFU': 'DFU', 'CAN_BRIDGE_KAT': 'KAT'}.get(selected, selected)
+    errors = []
+    warnings = []
+    ext = os.path.splitext(firmware_path or '')[1].lower()
+    is_nobl = _is_nobl_build(manifest)
+    has_known_offset = _manifest_has_known_bl_offset(manifest)
+    bl_offset = _manifest_bl_offset(manifest)
+
+    if not firmware_path:
+        errors.append('未找到固件路径，请先编译或选择固件文件')
+    elif not path_exists(expand_klipper_path(firmware_path)):
+        errors.append(f'固件文件不存在: {firmware_path}')
+
+    if effective_selected == 'UF2' and ext and ext != '.uf2':
+        warnings.append('UF2 烧录通常需要 .uf2 固件文件')
+    if effective_selected == 'DFU' and has_known_offset and not is_nobl:
+        errors.append(f'DFU 仅用于 NOBL（无 Bootloader 偏移）固件，当前 BL 偏移为 {bl_offset}')
+    elif effective_selected == 'DFU' and not has_known_offset:
+        warnings.append('无法确认当前固件是否为 NOBL，DFU 仅建议用于无 Bootloader 偏移固件')
+    if effective_selected == 'DFU' and device_id and not str(device_id).startswith('dfu:'):
+        warnings.append('当前设备不是 DFU 设备，请确认主板已进入 DFU 模式')
+    if effective_selected in ('KAT', 'CAN') and not device_id:
+        errors.append('Katapult/CAN 烧录需要先选择设备 ID 或 CAN UUID')
+    if effective_selected == 'CAN' and device_id and not re.match(r'^(can\d+:)?[a-fA-F0-9]{8,32}$', str(device_id)):
+        warnings.append('CAN 烧录建议选择 CAN UUID 设备')
+
+    dfu_address = ''
+    if manifest:
+        dfu_address = (manifest.get('build') or {}).get('flash_application_address', '')
+
+    return {
+        'recommended_mode': recommended,
+        'selected_mode': selected,
+        'effective_selected_mode': effective_selected,
+        'firmware_path': firmware_path,
+        'dfu_address': dfu_address,
+        'bl_offset': bl_offset,
+        'is_nobl': is_nobl,
+        'can_iface': can_iface,
+        'errors': errors,
+        'warnings': warnings,
+        'ok': not errors,
+    }
+
+
+def _norm_match_text(value):
+    return re.sub(r'[^a-z0-9]+', '', str(value or '').lower())
+
+
+def _bl_category_for_board_type(board_type):
+    board_type = str(board_type or '').lower()
+    if board_type == 'mainboard':
+        return 'MainBoard'
+    if board_type == 'toolboard':
+        return 'ToolBoard'
+    if board_type in ('extensionboard', 'extension'):
+        return 'ExtensionBoard'
+    return ''
+
+
+def _decorate_bl_firmware(fw, manufacturer, board_type='', board_id='', board_name=''):
+    path = fw.get('path', '')
+    rel_path = os.path.relpath(path, os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'BL'))
+    ext = os.path.splitext(path)[1].lower()
+    recommended_tool = 'rp2040_flash' if ext == '.uf2' else 'dfu-util'
+    category = rel_path.split(os.sep, 1)[0] if os.sep in rel_path else ''
+    match_text = _norm_match_text(rel_path + ' ' + fw.get('name', ''))
+    tokens = [_norm_match_text(board_id), _norm_match_text(board_name)]
+    for raw in (board_id, board_name):
+        for part in re.split(r'[^A-Za-z0-9]+', str(raw or '')):
+            part_norm = _norm_match_text(part)
+            if len(part_norm) >= 2 and part_norm not in ('fly', 'board', 'main', 'tool'):
+                tokens.append(part_norm)
+    score = 0
+    for token in set(tokens):
+        if token and token in match_text:
+            score += 10 if token == _norm_match_text(board_id) else 5
+    expected_category = _bl_category_for_board_type(board_type)
+    if expected_category and category.lower() == expected_category.lower():
+        score += 3
+    decorated = dict(fw)
+    decorated.update({
+        'manufacturer': manufacturer,
+        'relative_path': rel_path,
+        'category': category,
+        'ext': ext,
+        'recommended_tool': recommended_tool,
+        'default_address': '0x8000000',
+        'match_score': score,
+    })
+    try:
+        decorated['size'] = os.path.getsize(path)
+    except OSError:
+        decorated['size'] = 0
+    return decorated
+
+
+def _format_bl_offset_label(offset, display='', mcu_id=''):
+    offset_value = _offset_int(offset)
+    display_text = str(display or '')
+    if offset_value is None:
+        return display_text or str(offset or '')
+    if offset_value == 0 or (str(mcu_id).lower() == 'rp2040' and offset_value == 256):
+        return 'NO BL'
+    if offset_value < 1024:
+        return f'{offset_value} bytes'
+    kib = offset_value / 1024
+    if kib.is_integer():
+        return f'{int(kib)} KB'
+    return f'{kib:.1f} KB'
+
+
+def _bl_address_options_from_mcu_info(mcu_info):
+    mcu = (mcu_info or {}).get('mcu') or {}
+    mcu_id = str(mcu.get('id') or '').lower()
+    platform_key = (mcu_info or {}).get('platform_key') or ''
+    raw_options = mcu.get('bl_offset_options') or [
+        {'offset': offset, 'display': ''} for offset in mcu.get('bl_offsets', [])
+    ]
+    seen = set()
+    options = []
+    for option in raw_options:
+        offset = str(option.get('offset', '')).strip()
+        offset_value = _offset_int(offset)
+        if offset_value is None or offset_value in seen:
+            continue
+        seen.add(offset_value)
+        options.append({
+            'offset': offset,
+            'offset_bytes': offset_value,
+            'label': _format_bl_offset_label(offset, option.get('display', ''), mcu_id),
+            'kconfig_display': option.get('display', ''),
+            'config_symbol': option.get('config_symbol', ''),
+            'address': _application_address(platform_key, offset),
+            'recommended_for_bl': offset_value == 0 or (mcu_id == 'rp2040' and offset_value == 256),
+        })
+
+    options.sort(key=lambda x: x['offset_bytes'])
+    if not options:
+        options.append({
+            'offset': '0',
+            'offset_bytes': 0,
+            'label': 'NO BL',
+            'kconfig_display': '',
+            'config_symbol': '',
+            'address': _application_address(platform_key or 'stm32', '0'),
+            'recommended_for_bl': True,
+        })
+    return options
+
+
+def _valid_flash_address(address):
+    return bool(re.match(r'^0x[0-9A-Fa-f]+$', str(address or '').strip()))
+
+
+def _offset_candidates(value):
+    raw = str(value or '').strip()
+    candidates = {raw}
+    if not raw:
+        return candidates
+
+    if raw.lower().startswith('0x'):
+        try:
+            candidates.add(str(int(raw, 16)))
+        except ValueError:
+            pass
+    if raw.isdigit():
+        candidates.add(str(int(raw)))
+
+    kib_match = re.search(r'(\d+)\s*KiB', raw, re.IGNORECASE)
+    if kib_match:
+        candidates.add(str(int(kib_match.group(1)) * 1024))
+
+    return candidates
+
+
+def _resolve_option_by_value(options, value, value_key):
+    symbol = _normalize_config_symbol(value)
+    if symbol:
+        for option in options:
+            if _normalize_config_symbol(option.get('config_symbol')) == symbol:
+                return option
+
+    value_text = str(value or '').strip()
+    candidates = _offset_candidates(value_text) if value_key == 'offset' else {value_text}
+    for option in options:
+        option_value = str(option.get(value_key, '')).strip()
+        display = str(option.get('display', '')).strip()
+        if option_value in candidates or display == value_text:
+            return option
+    return None
+
+
+def _infer_comm_type(communication):
+    text = str(communication or '').upper()
+    if 'BRIDGE' in text or 'USB转CAN' in text or ('USB' in text and 'CAN' in text and '(ON' not in text):
+        return 'usbcanbridge'
+    if 'CAN' in text:
+        return 'can'
+    if 'USB' in text or 'USBSERIAL' in text:
+        return 'usb'
+    if 'SERIAL' in text or 'UART' in text:
+        return 'serial'
+    return ''
+
+
+def _compatible_options(options, processor):
+    processor = str(processor or '').upper()
+    return [
+        option for option in options
+        if not option.get('compatible_processors') or processor in option.get('compatible_processors', [])
+    ]
+
+
+def _match_communication_option(options, communication, comm_type):
+    communication = str(communication or '').strip()
+    comm_type = comm_type or _infer_comm_type(communication)
+    typed_options = [opt for opt in options if not comm_type or opt.get('comm_type') == comm_type]
+
+    symbol = _normalize_config_symbol(communication)
+    if symbol:
+        for option in typed_options or options:
+            if _normalize_config_symbol(option.get('config_symbol')) == symbol:
+                return option
+
+    for option in typed_options:
+        if option.get('display') == communication:
+            return option
+
+    if communication:
+        pin_match = re.search(r'P[A-K]\d+\/P[A-K]\d+', communication, re.IGNORECASE)
+        for option in typed_options:
+            display = option.get('display', '')
+            if pin_match and pin_match.group(0).upper() in display.upper():
+                return option
+            if communication in display or display in communication:
+                return option
+
+    if comm_type == 'usb':
+        for option in typed_options:
+            if 'USB' in option.get('display', '').upper():
+                return option
+    if comm_type and len(typed_options) == 1:
+        return typed_options[0]
+
+    return None
+
+
+def _resolve_bridge_can_option(platform_data, processor, bridge_can_config):
+    bridge_options = _compatible_options(platform_data.get('bridge_can', []), processor)
+    if not bridge_options:
+        bridge_options = platform_data.get('bridge_can', [])
+    if not bridge_options:
+        return None
+
+    symbol = _normalize_config_symbol(bridge_can_config)
+    if symbol:
+        for option in bridge_options:
+            if _normalize_config_symbol(option.get('config')) == symbol:
+                return option
+
+    text = str(bridge_can_config or '').strip()
+    if text:
+        for option in bridge_options:
+            if option.get('display') == text or option.get('pins') == text:
+                return option
+
+    for option in bridge_options:
+        if 'PB8/PB9' in option.get('display', ''):
+            return option
+    return bridge_options[0]
+
+
+def _build_klipper_config_lines(
+        kconfig_klipper_path, mcu_arch, processor, crystal, bootloader_offset,
+        communication, comm_type, comm_config_symbol, bridge_can_config,
+        rp2040_can_rx_gpio, rp2040_can_tx_gpio):
+    """从当前 Klipper Kconfig 解析结果生成 .config 行。"""
+    parser = KlipperKconfigParser(kconfig_klipper_path)
+    parser.parse_all_platforms()
+    mcu_info = parser.resolve_mcu_info(processor, mcu_arch)
+    if not mcu_info:
+        raise ValueError(f'当前 Klipper Kconfig 未找到 MCU: {processor}')
+
+    mcu = mcu_info['mcu']
+    platform_key = mcu_info.get('platform_key') or ''
+    config_lines = ['CONFIG_LOW_LEVEL_OPTIONS=y']
+    logs = []
+
+    arch_line = _config_line(mcu_info.get('arch_config'))
+    mcu_line = _config_line(mcu.get('config_symbol') or mcu.get('config_name'))
+    if not arch_line or not mcu_line:
+        raise ValueError(f'当前 Klipper Kconfig 中 MCU 符号不完整: {processor}')
+    config_lines.extend([arch_line, mcu_line])
+
+    crystal_options = mcu.get('crystal_options') or []
+    if crystal_options and crystal:
+        crystal_option = _resolve_option_by_value(crystal_options, crystal, 'value')
+        if not crystal_option:
+            raise ValueError(f'当前 Klipper Kconfig 中 {processor} 不支持晶振: {crystal}')
+        crystal_line = _config_line(crystal_option.get('config_symbol'))
+        if crystal_line:
+            config_lines.append(crystal_line)
+
+    bl_options = mcu.get('bl_offset_options') or []
+    if bl_options and bootloader_offset is not None:
+        bl_option = _resolve_option_by_value(bl_options, bootloader_offset, 'offset')
+        if not bl_option:
+            raise ValueError(f'当前 Klipper Kconfig 中 {processor} 不支持 BL 偏移: {bootloader_offset}')
+        config_lines.append(_config_line(bl_option.get('config_symbol')))
+
+    comm_data = parse_can_options(kconfig_klipper_path)
+    platform_data = comm_data.get(platform_key, {})
+    processor_upper = str(processor or '').upper()
+    comm_options = _compatible_options(platform_data.get('communication_options', []), processor_upper)
+    if not comm_options:
+        comm_options = platform_data.get('communication_options', [])
+
+    comm_symbol = _normalize_config_symbol(comm_config_symbol)
+    comm_option = None
+    if comm_symbol:
+        for option in comm_options:
+            if _normalize_config_symbol(option.get('config_symbol')) == comm_symbol:
+                comm_option = option
+                break
+        if not comm_option:
+            raise ValueError(f'当前 Klipper Kconfig 中 {processor} 不支持通信选项: {comm_config_symbol}')
+    else:
+        comm_option = _match_communication_option(comm_options, communication, comm_type)
+        if comm_option:
+            comm_symbol = _normalize_config_symbol(comm_option.get('config_symbol'))
+
+    if not comm_symbol:
+        raise ValueError(f'当前 Klipper Kconfig 中无法匹配通信方式: {communication or comm_type}')
+
+    config_lines.append(_config_line(comm_symbol))
+    resolved_comm_type = comm_type or (comm_option or {}).get('comm_type') or _infer_comm_type(communication)
+
+    if resolved_comm_type in ('can', 'usbcanbridge'):
+        config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
+
+    if resolved_comm_type == 'usbcanbridge':
+        bridge_option = _resolve_bridge_can_option(platform_data, processor_upper, bridge_can_config)
+        if bridge_option:
+            config_lines.append(_config_line(bridge_option.get('config')))
+            logs.append(f"USB-CAN桥接CAN引脚: {bridge_option.get('display')}")
+
+    if platform_key == 'rp2040' and resolved_comm_type in ('can', 'usbcanbridge'):
+        config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_RX={rp2040_can_rx_gpio}')
+        config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_TX={rp2040_can_tx_gpio}')
+
+    logs.append(f"平台符号: {arch_line}")
+    logs.append(f"MCU符号: {mcu_line}")
+    logs.append(f"通信符号: CONFIG_{comm_symbol}=y")
+    return config_lines, logs, mcu_info
 
 
 # ==================== 主板配置 API ====================
@@ -83,19 +691,42 @@ def get_manufacturers_list():
 def get_all_bl_firmwares():
     """获取所有厂家的BL固件列表"""
     try:
+        manufacturer_filter = request.args.get('manufacturer', '')
+        board_type = request.args.get('board_type', '')
+        board_id = request.args.get('board_id', '')
+        board_name = request.args.get('board_name', '')
         all_firmwares = []
         if os.path.exists(BOARD_CONFIGS_DIR):
             for manufacturer in os.listdir(BOARD_CONFIGS_DIR):
+                if manufacturer_filter and manufacturer != manufacturer_filter:
+                    continue
                 mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
                 if os.path.isdir(mfr_dir):
                     try:
                         firmwares = get_bl_firmwares(manufacturer)
                         for fw in firmwares:
-                            fw['manufacturer'] = manufacturer
-                        all_firmwares.extend(firmwares)
+                            decorated = _decorate_bl_firmware(
+                                fw, manufacturer, board_type, board_id, board_name
+                            )
+                            expected_category = _bl_category_for_board_type(board_type)
+                            if expected_category and decorated['category'].lower() != expected_category.lower():
+                                continue
+                            all_firmwares.append(decorated)
                     except Exception:
                         pass
-        return jsonify({'files': all_firmwares})
+        matched = [fw for fw in all_firmwares if fw.get('match_score', 0) > 0]
+        files = matched if (board_id or board_name) and matched else all_firmwares
+        files.sort(key=lambda x: (-x.get('match_score', 0), x.get('relative_path', x.get('name', '')).lower()))
+        return jsonify({
+            'files': files,
+            'filtered': bool(matched),
+            'query': {
+                'manufacturer': manufacturer_filter,
+                'board_type': board_type,
+                'board_id': board_id,
+                'board_name': board_name,
+            }
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -199,9 +830,11 @@ def compile_firmware():
     def _compile_stream():
      try:
         data = req_data
+        verbose_config_logs = _truthy(data.get('verbose_config_logs'))
         
-        klipper_path = data.get('klipper_path', config.get('klipper_path', '~/klipper'))
-        klipper_path = expand_klipper_path(klipper_path)
+        raw_klipper_path = data.get('klipper_path', config.get('klipper_path', '~/klipper'))
+        klipper_path = expand_klipper_path(raw_klipper_path)
+        kconfig_klipper_path = expand_klipper_path(raw_klipper_path, force_local=True)
         
         config_data = data.get('config')
         if config_data:
@@ -209,7 +842,6 @@ def compile_firmware():
             processor = config_data.get('mcu', config_data.get('处理器', 'STM32F072')).upper()
             bootloader_offset = config_data.get('bl_offset', config_data.get('BL 偏移', '0'))
             communication = config_data.get('default_connection', config_data.get('默认连接', 'USB'))
-            can_bus_interface = 'CAN bus (on PB8/PB9)'
             startup_pin = config_data.get('boot_pins', config_data.get('启动引脚', ''))
             crystal = config_data.get('crystal', config_data.get('晶振', '8000000'))
             rp2040_can_rx_gpio = str(config_data.get('can_gpio', {}).get('rx', '4'))
@@ -225,203 +857,27 @@ def compile_firmware():
             comm_type = data.get('comm_type', '')
             comm_config_symbol = data.get('comm_config_symbol', '')
             bridge_can_config = data.get('bridge_can_config', '')
-            can_bus_interface = data.get('can_bus_interface', 'CAN bus (on PB8/PB9)')
             startup_pin = data.get('startup_pin', '')
             crystal = data.get('crystal', '8000000')
             rp2040_can_rx_gpio = data.get('rp2040_can_rx_gpio', '4')
             rp2040_can_tx_gpio = data.get('rp2040_can_tx_gpio', '5')
-        
-        bl_offset_map = {
-            '0': 'No bootloader', '256': 'No bootloader',
-            '2048': '2KiB bootloader', '4096': '4KiB bootloader',
-            '8192': '8KiB bootloader', '16384': '16KiB bootloader',
-            '32768': '32KiB bootloader', '49152': '48KiB bootloader',
-            '65536': '64KiB bootloader', '131072': '128KiB bootloader',
-            '20480': '20KiB bootloader', '28672': '28KiB bootloader',
-            '34816': '34KiB bootloader', '36864': '36KiB bootloader',
-            '0x8000': '32KiB bootloader', '0xC000': '48KiB bootloader',
-            '0x10000': '64KiB bootloader'
-        }
-        if bootloader_offset in bl_offset_map:
-            bootloader_offset = bl_offset_map[bootloader_offset]
-        
-        mcu_arch_upper = mcu_arch.upper()
-        processor_upper = processor.upper()
-        
+
         if not path_exists(klipper_path):
             yield f'data: {json.dumps({"error": f"Klipper目录不存在: {klipper_path}"})}\n\n'
             return
         
-        run_cmd(f'cd {klipper_path} && rm -rf .config out', shell=True, capture_output=True)
-        
-        config_lines = ['CONFIG_LOW_LEVEL_OPTIONS=y']
-        
-        if 'STM32' in mcu_arch_upper:
-            config_lines.append('CONFIG_MACH_STM32=y')
-        elif 'RP2040' in mcu_arch_upper or 'RP235' in mcu_arch_upper:
-            config_lines.append('CONFIG_MACH_RPXXXX=y')
-        elif 'ATSAMD' in mcu_arch_upper or processor_upper.startswith('SAMC21') or processor_upper.startswith('SAMD21') or processor_upper.startswith('SAMD51') or processor_upper.startswith('SAME51') or processor_upper.startswith('SAME54'):
-            config_lines.append('CONFIG_MACH_ATSAMD=y')
-        elif 'ATSAM' in mcu_arch_upper or processor_upper.startswith('SAM3X') or processor_upper.startswith('SAM4') or processor_upper.startswith('SAME70'):
-            config_lines.append('CONFIG_MACH_ATSAM=y')
-        elif 'LPC176' in mcu_arch_upper or processor_upper.startswith('LPC176'):
-            config_lines.append('CONFIG_MACH_LPC176X=y')
-        elif 'HC32F460' in mcu_arch_upper or 'HC32F460' in processor_upper:
-            config_lines.append('CONFIG_MACH_HC32F460=y')
-        elif 'AVR' in mcu_arch_upper or processor_upper.startswith('ATMEGA') or processor_upper.startswith('AT90USB') or processor_upper.startswith('ATMega'):
-            config_lines.append('CONFIG_MACH_AVR=y')
-        
-        processor_map = {
-            'STM32F031': 'CONFIG_MACH_STM32F031=y', 'STM32F042': 'CONFIG_MACH_STM32F042=y',
-            'STM32F070': 'CONFIG_MACH_STM32F070=y', 'STM32F072': 'CONFIG_MACH_STM32F072=y',
-            'STM32F103': 'CONFIG_MACH_STM32F103=y', 'STM32F207': 'CONFIG_MACH_STM32F207=y',
-            'STM32F401': 'CONFIG_MACH_STM32F401=y', 'STM32F405': 'CONFIG_MACH_STM32F405=y',
-            'STM32F407': 'CONFIG_MACH_STM32F407=y', 'STM32F429': 'CONFIG_MACH_STM32F429=y',
-            'STM32F446': 'CONFIG_MACH_STM32F446=y', 'STM32F765': 'CONFIG_MACH_STM32F765=y',
-            'STM32G070': 'CONFIG_MACH_STM32G070=y', 'STM32G071': 'CONFIG_MACH_STM32G071=y',
-            'STM32G0B0': 'CONFIG_MACH_STM32G0B0=y', 'STM32G0B1': 'CONFIG_MACH_STM32G0B1=y',
-            'STM32G431': 'CONFIG_MACH_STM32G431=y', 'STM32G474': 'CONFIG_MACH_STM32G474=y',
-            'STM32H723': 'CONFIG_MACH_STM32H723=y', 'STM32H743': 'CONFIG_MACH_STM32H743=y',
-            'STM32H750': 'CONFIG_MACH_STM32H750=y', 'STM32L412': 'CONFIG_MACH_STM32L412=y',
-            'RP2040': 'CONFIG_MACH_RP2040=y', 'RP2350': 'CONFIG_MACH_RP2350=y',
-            'SAMC21G18': 'CONFIG_MACH_SAMC21G18=y', 'SAMD21E15': 'CONFIG_MACH_SAMD21E15=y',
-            'SAMD21E18': 'CONFIG_MACH_SAMD21E18=y', 'SAMD21G18': 'CONFIG_MACH_SAMD21G18=y',
-            'SAMD21J18': 'CONFIG_MACH_SAMD21J18=y', 'SAMD51G19': 'CONFIG_MACH_SAMD51G19=y',
-            'SAMD51J19': 'CONFIG_MACH_SAMD51J19=y', 'SAMD51N19': 'CONFIG_MACH_SAMD51N19=y',
-            'SAMD51N20': 'CONFIG_MACH_SAMD51N20=y', 'SAMD51P20': 'CONFIG_MACH_SAMD51P20=y',
-            'SAME51J19': 'CONFIG_MACH_SAME51J19=y', 'SAME51N19': 'CONFIG_MACH_SAME51N19=y',
-            'SAME51N20': 'CONFIG_MACH_SAME51N20=y', 'SAME54P20': 'CONFIG_MACH_SAME54P20=y',
-            'SAM3X8C': 'CONFIG_MACH_SAM3X8C=y', 'SAM3X8E': 'CONFIG_MACH_SAM3X8E=y',
-            'SAM4E8E': 'CONFIG_MACH_SAM4E8E=y', 'SAM4E16E': 'CONFIG_MACH_SAM4E16E=y',
-            'SAM4S8C': 'CONFIG_MACH_SAM4S8C=y', 'SAM4S8B': 'CONFIG_MACH_SAM4S8B=y',
-            'SAME70N20': 'CONFIG_MACH_SAME70N20=y', 'SAME70J19': 'CONFIG_MACH_SAME70J19=y',
-            'SAME70J20': 'CONFIG_MACH_SAME70J20=y', 'SAME70Q20': 'CONFIG_MACH_SAME70Q20=y',
-            'LPC1768': 'CONFIG_MACH_LPC1768=y', 'LPC1769': 'CONFIG_MACH_LPC1769=y',
-            'HC32F460': 'CONFIG_MACH_HC32F460=y',
-            'AT90USB1286': 'CONFIG_MACH_at90usb1286=y', 'AT90USB646': 'CONFIG_MACH_at90usb646=y',
-            'ATMEGA1280': 'CONFIG_MACH_atmega1280=y', 'ATMEGA2560': 'CONFIG_MACH_atmega2560=y',
-            'ATMEGA328P': 'CONFIG_MACH_atmega328p=y', 'ATMEGA328': 'CONFIG_MACH_atmega328=y',
-            'ATMEGA32U4': 'CONFIG_MACH_atmega32u4=y', 'ATMEGA168': 'CONFIG_MACH_atmega168=y',
-            'ATMEGA328PB': 'CONFIG_MACH_atmega328pb=y', 'LGT8F328P': 'CONFIG_MACH_lgt8f328p=y',
-            'at90usb1286': 'CONFIG_MACH_at90usb1286=y', 'at90usb646': 'CONFIG_MACH_at90usb646=y',
-            'atmega1280': 'CONFIG_MACH_atmega1280=y', 'atmega2560': 'CONFIG_MACH_atmega2560=y',
-            'atmega328p': 'CONFIG_MACH_atmega328p=y', 'atmega328': 'CONFIG_MACH_atmega328=y',
-            'atmega32u4': 'CONFIG_MACH_atmega32u4=y', 'atmega168': 'CONFIG_MACH_atmega168=y',
-            'atmega328pb': 'CONFIG_MACH_atmega328pb=y', 'lgt8f328p': 'CONFIG_MACH_lgt8f328p=y'
-        }
-        
-        if processor_upper in processor_map:
-            config_lines.append(processor_map[processor_upper])
-        elif processor_upper.startswith('STM32'):
-            match = re.match(r'(STM32\w+)', processor_upper)
-            if match and match.group(1) in processor_map:
-                config_lines.append(processor_map[match.group(1)])
-            else:
-                config_lines.append('CONFIG_MACH_STM32F072=y')
-        elif 'RP2040' in processor_upper:
-            config_lines.append('CONFIG_MACH_RP2040=y')
-        else:
-            config_lines.append('CONFIG_MACH_STM32F072=y')
-        
-        crystal_str = str(crystal) if crystal else ''
-        if 'STM32' in mcu_arch_upper:
-            crystal_map = {'8000000': 'CONFIG_STM32_CLOCK_REF_8M=y', '12000000': 'CONFIG_STM32_CLOCK_REF_12M=y', '16000000': 'CONFIG_STM32_CLOCK_REF_16M=y', '20000000': 'CONFIG_STM32_CLOCK_REF_20M=y', '24000000': 'CONFIG_STM32_CLOCK_REF_24M=y', '25000000': 'CONFIG_STM32_CLOCK_REF_25M=y'}
-        elif 'ATSAMD' in mcu_arch_upper:
-            crystal_map = {'32768': 'CONFIG_CLOCK_REF_X32K=y', '12000000': 'CONFIG_CLOCK_REF_X12M=y', '25000000': 'CONFIG_CLOCK_REF_X25M=y'}
-        elif 'ATSAM' in mcu_arch_upper:
-            crystal_map = {'8000000': 'CONFIG_CLOCK_REF_8M=y', '12000000': 'CONFIG_CLOCK_REF_12M=y', '16000000': 'CONFIG_CLOCK_REF_16M=y', '20000000': 'CONFIG_CLOCK_REF_20M=y', '24000000': 'CONFIG_CLOCK_REF_24M=y', '25000000': 'CONFIG_CLOCK_REF_25M=y'}
-        else:
-            crystal_map = {'8000000': 'CONFIG_CLOCK_REF_8M=y', '12000000': 'CONFIG_CLOCK_REF_12M=y', '16000000': 'CONFIG_CLOCK_REF_16M=y', '20000000': 'CONFIG_CLOCK_REF_20M=y', '24000000': 'CONFIG_CLOCK_REF_24M=y', '25000000': 'CONFIG_CLOCK_REF_25M=y'}
-        if crystal_str in crystal_map:
-            config_lines.append(crystal_map[crystal_str])
-        
-        if 'RP2040' in processor:
-            offset_map = {'No bootloader': 'CONFIG_RPXXXX_FLASH_START_0100=y', '16KiB bootloader': 'CONFIG_RPXXXX_FLASH_START_4000=y'}
-        elif 'RP2350' in processor:
-            offset_map = {'No bootloader': 'CONFIG_RPXXXX_FLASH_START_0000=y', '16KiB bootloader': 'CONFIG_RPXXXX_FLASH_START_4000=y'}
-        else:
-            offset_map = {'No bootloader': 'CONFIG_STM32_FLASH_START_0000=y', '2KiB bootloader': 'CONFIG_STM32_FLASH_START_800=y', '4KiB bootloader': 'CONFIG_STM32_FLASH_START_1000=y', '8KiB bootloader': 'CONFIG_STM32_FLASH_START_2000=y', '16KiB bootloader': 'CONFIG_STM32_FLASH_START_4000=y', '20KiB bootloader': 'CONFIG_STM32_FLASH_START_5000=y', '28KiB bootloader': 'CONFIG_STM32_FLASH_START_7000=y', '32KiB bootloader': 'CONFIG_STM32_FLASH_START_8000=y', '34KiB bootloader': 'CONFIG_STM32_FLASH_START_8800=y', '36KiB bootloader': 'CONFIG_STM32_FLASH_START_9000=y', '48KiB bootloader': 'CONFIG_STM32_FLASH_START_C000=y', '64KiB bootloader': 'CONFIG_STM32_FLASH_START_10000=y', '128KiB bootloader': 'CONFIG_STM32_FLASH_START_20000=y'}
-        if bootloader_offset in offset_map:
-            config_lines.append(offset_map[bootloader_offset])
-        
-        _is_dynamic = comm_config_symbol and ' ' not in comm_config_symbol and comm_config_symbol.replace('_', '').isalnum()
-        
-        if _is_dynamic:
-            config_lines.append(f'CONFIG_{comm_config_symbol}=y')
-            if comm_type == 'can':
-                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
-            elif comm_type == 'usbcanbridge':
-                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
-                if bridge_can_config:
-                    if bridge_can_config.startswith('STM32_') or bridge_can_config.startswith('RPXXXX_'):
-                        config_lines.append(f'CONFIG_{bridge_can_config}=y')
-                    else:
-                        pin_suffix = bridge_can_config.replace('/', '_')
-                        config_lines.append(f'CONFIG_STM32_CMENU_CANBUS_{pin_suffix}=y')
-            if ('RP2040' in processor or 'RP2350' in processor) and comm_type in ('can', 'usbcanbridge'):
-                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_RX={rp2040_can_rx_gpio}')
-                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_TX={rp2040_can_tx_gpio}')
-        elif 'RP2040' in processor or 'RP2350' in processor:
-            if 'USB to CAN bus bridge' in communication:
-                config_lines.append('CONFIG_RPXXXX_USBCANBUS=y')
-                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_RX={rp2040_can_rx_gpio}')
-                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_TX={rp2040_can_tx_gpio}')
-            elif 'USBSERIAL' in communication:
-                config_lines.append('CONFIG_RPXXXX_USB=y')
-            elif 'CAN' in communication:
-                config_lines.append('CONFIG_RPXXXX_CANBUS=y')
-                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_RX={rp2040_can_rx_gpio}')
-                config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_TX={rp2040_can_tx_gpio}')
-            elif 'UART' in communication:
-                config_lines.append('CONFIG_RPXXXX_SERIAL_UART0_PINS_0_1=y')
-        elif processor_upper.startswith('STM32'):
-            if 'USB to CAN bus bridge' in communication:
-                config_lines.append('CONFIG_USBCANBUS=y')
-                config_lines.append('CONFIG_USB=y')
-                config_lines.append('CONFIG_CANBUS=y')
-                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
-                config_lines.append('CONFIG_STM32_USBCANBUS_PA11_PA12=y')
-                if 'PB8/PB9' in can_bus_interface:
-                    config_lines.append('CONFIG_STM32_CMENU_CANBUS_PB8_PB9=y')
-                    config_lines.append('CONFIG_STM32_CANBUS_PB8_PB9=y')
-                elif 'PD0/PD1' in can_bus_interface:
-                    config_lines.append('CONFIG_STM32_CMENU_CANBUS_PD0_PD1=y')
-                    config_lines.append('CONFIG_STM32_CANBUS_PD0_PD1=y')
-            elif 'USB' in communication:
-                config_lines.append('CONFIG_USB=y')
-                config_lines.append('CONFIG_USB_BUS=y')
-                config_lines.append('CONFIG_STM32_USB_PA11_PA12=y')
-            elif 'CAN' in communication:
-                config_lines.append('CONFIG_CANBUS=y')
-                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
-                if 'PB8/PB9' in communication:
-                    config_lines.append('CONFIG_STM32_CANBUS_PB8_PB9=y')
-                elif 'PA11/PA12' in communication:
-                    config_lines.append('CONFIG_STM32_CANBUS_PA11_PA12=y')
-            elif 'Serial' in communication:
-                config_lines.append('CONFIG_SERIAL=y')
-                config_lines.append('CONFIG_STM32_SERIAL_USART1=y')
-        elif processor_upper.startswith('SAM') or 'ATSAMD' in mcu_arch_upper:
-            if 'USB' in communication:
-                config_lines.append('CONFIG_USB=y')
-            elif 'CAN' in communication:
-                config_lines.append('CONFIG_SAMD_CANBUS=y')
-                config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
-            elif 'Serial' in communication or 'UART' in communication:
-                config_lines.append('CONFIG_SERIAL=y')
-        elif processor_upper.startswith('LPC176'):
-            if 'USB' in communication:
-                config_lines.append('CONFIG_USB=y')
-            elif 'Serial' in communication or 'UART' in communication:
-                config_lines.append('CONFIG_SERIAL=y')
-        elif 'HC32F460' in processor_upper:
-            if 'Serial' in communication or 'UART' in communication:
-                config_lines.append('CONFIG_HC32F460_SERIAL_PA7_PA8=y')
-        elif processor_upper.startswith('ATMEGA') or processor_upper.startswith('AT90USB') or processor_upper.startswith('ATMega'):
-            if 'USB' in communication:
-                config_lines.append('CONFIG_USB=y')
-            elif 'Serial' in communication or 'UART' in communication:
-                config_lines.append('CONFIG_SERIAL=y')
+        try:
+            config_lines, config_logs, mcu_info = _build_klipper_config_lines(
+                kconfig_klipper_path, mcu_arch, processor, crystal, bootloader_offset,
+                communication, comm_type, comm_config_symbol, bridge_can_config,
+                rp2040_can_rx_gpio, rp2040_can_tx_gpio
+            )
+        except ValueError as e:
+            yield f'data: {json.dumps({"error": str(e)})}\n\n'
+            return
+        if verbose_config_logs:
+            for log_line in config_logs:
+                yield f'data: [LOG] {log_line}\n\n'
         
         if startup_pin:
             is_rp2040 = 'RP2040' in processor or 'RP2350' in processor
@@ -434,11 +890,15 @@ def compile_firmware():
                 yield f'data: {json.dumps({"error": "STM32启动引脚格式错误，应使用大写格式（如PA2, PB9）"})}\n\n'
                 return
             config_lines.append(f'CONFIG_INITIAL_PINS="{startup_pin}"')
-            yield f'data: [LOG] 启动引脚已配置: {startup_pin}\n\n'
+            if verbose_config_logs:
+                yield f'data: [LOG] 启动引脚已配置: {startup_pin}\n\n'
         else:
             # 始终设置 CONFIG_INITIAL_PINS（空值），否则 STM32H723 等使用 DECL_STARTUP_PIN_STATE 的 MCU 编译会失败
             config_lines.append('CONFIG_INITIAL_PINS=""')
-            yield f'data: [LOG] 未设置启动引脚（使用空值）\n\n'
+            if verbose_config_logs:
+                yield f'data: [LOG] 未设置启动引脚（使用空值）\n\n'
+
+        run_cmd(f'cd {shlex.quote(klipper_path)} && rm -rf .config out', shell=True, capture_output=True)
         
         config_content = '\n'.join(config_lines) + '\n'
         config_path = os.path.join(klipper_path, '.config')
@@ -448,9 +908,10 @@ def compile_firmware():
             with open(config_path, 'w') as f:
                 f.write(config_content)
         
-        for line in config_lines:
-            if 'INITIAL_PINS' in line or 'CONFIG_USB' in line or 'CONFIG_SERIAL' in line or 'CONFIG_CAN' in line:
-                yield f'data: [LOG] .config: {line}\n\n'
+        if verbose_config_logs:
+            for line in config_lines:
+                if 'INITIAL_PINS' in line or 'CONFIG_USB' in line or 'CONFIG_SERIAL' in line or 'CONFIG_CAN' in line:
+                    yield f'data: [LOG] .config: {line}\n\n'
         
         out_dir = os.path.join(klipper_path, 'out')
         if is_ssh_mode():
@@ -462,9 +923,10 @@ def compile_firmware():
             except:
                 pass
         
-        yield 'data: [LOG] 生成配置中...\n\n'
+        if verbose_config_logs:
+            yield 'data: [LOG] 生成配置中...\n\n'
         olddefconfig_failed = False
-        for line in run_cmd_stream(f'cd {klipper_path} && make olddefconfig', shell=True, timeout=60):
+        for line in run_cmd_stream(f'cd {shlex.quote(klipper_path)} && make olddefconfig', shell=True, timeout=60):
             if line.startswith('[DONE]'):
                 pass
             elif line.startswith('[ERROR]'):
@@ -476,7 +938,7 @@ def compile_firmware():
         
         yield 'data: [LOG] 开始编译...\n\n'
         compile_ok = False
-        for line in run_cmd_stream(f'cd {klipper_path} && make -j4', shell=True, timeout=300):
+        for line in run_cmd_stream(f'cd {shlex.quote(klipper_path)} && make -j4', shell=True, timeout=300):
             if line.startswith('[DONE]'):
                 compile_ok = True
             elif line.startswith('[ERROR]'):
@@ -542,8 +1004,22 @@ def compile_firmware():
                 size_str = f'{firmware_size / 1024:.1f} KB'
             else:
                 size_str = f'{firmware_size / (1024 * 1024):.2f} MB'
+
+            compile_values = {
+                'crystal': crystal,
+                'bl_offset': bootloader_offset,
+                'communication': communication,
+                'comm_type': comm_type or _infer_comm_type(communication),
+                'comm_config_symbol': comm_config_symbol,
+                'bridge_can_config': bridge_can_config,
+            }
+            manifest = _create_manifest(
+                klipper_path, firmware_path, firmware_size, mcu_info,
+                data, config_data, compile_values
+            )
+            manifest_path = _write_manifest(klipper_path, manifest)
             
-            yield f'data: {json.dumps({"success": True, "message": "编译成功", "firmware_path": firmware_path, "firmware_size": size_str, "firmware_size_bytes": firmware_size})}\n\n'
+            yield f'data: {json.dumps({"success": True, "message": "编译成功", "firmware_path": firmware_path, "firmware_size": size_str, "firmware_size_bytes": firmware_size, "manifest_path": manifest_path, "manifest": manifest})}\n\n'
             return
         else:
             yield f'data: {json.dumps({"success": False, "error": "编译失败：未找到固件文件"})}\n\n'
@@ -557,6 +1033,36 @@ def compile_firmware():
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 # ==================== 固件下载 API ====================
+@firmware_bp.route('/api/firmware/manifest')
+def get_firmware_manifest():
+    """读取最近一次编译生成的固件 manifest"""
+    try:
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
+        manifest = _load_manifest(klipper_path)
+        if not manifest:
+            return jsonify({'success': False, 'error': '未找到固件 manifest'}), 404
+        return jsonify({'success': True, 'manifest': manifest})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@firmware_bp.route('/api/firmware/flash/plan', methods=['POST'])
+def get_firmware_flash_plan():
+    """根据 manifest、设备和用户选择生成烧录推荐与预检结果"""
+    try:
+        data = request.json or {}
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
+        manifest = _load_manifest(klipper_path)
+        firmware_path = data.get('firmware_path') or ((manifest or {}).get('firmware') or {}).get('path', '')
+        flash_mode = data.get('flash_mode', '')
+        device_id = data.get('device_id', '')
+        can_iface = data.get('can_iface', 'can0')
+        plan = _flash_plan(manifest, firmware_path, flash_mode, device_id, can_iface)
+        return jsonify({'success': True, 'plan': plan, 'manifest': manifest})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @firmware_bp.route('/api/firmware/download')
 def download_firmware():
     """下载固件文件"""
@@ -765,7 +1271,7 @@ def detect_devices():
             except:
                 pass
         
-        return jsonify({'devices': devices})
+        return jsonify({'devices': _annotate_devices(devices)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -813,6 +1319,16 @@ def flash_firmware():
                 firmware_path = firmware_uf2
             else:
                 firmware_path = firmware_bin
+
+        manifest = _load_manifest(klipper_path)
+        plan = _flash_plan(manifest, firmware_path, flash_mode, device, can_iface)
+        if plan.get('dfu_address') and not data.get('dfu_address'):
+            dfu_address = plan['dfu_address']
+        if plan.get('errors') and not _truthy(data.get('skip_precheck')):
+            yield f'data: {json.dumps({"error": "烧录前预检失败", "precheck": plan})}\n\n'
+            return
+        for warning in plan.get('warnings', []):
+            yield f'data: [LOG] 预检提示: {warning}\n\n'
         
         if not path_exists(firmware_path):
             yield f'data: {json.dumps({"error": f"固件文件不存在: {firmware_path}"})}\n\n'
@@ -969,7 +1485,7 @@ def flash_firmware():
                 yield f'data: {json.dumps({"error": "rp2040_flash工具不存在，请检查Klipper安装"})}\n\n'
                 return
             _umount_rp2040_boot()
-            cmd = f'sudo {rp2040_flash_tool} {firmware_path}'
+            cmd = f'sudo {shlex.quote(rp2040_flash_tool)} {shlex.quote(firmware_path)}'
             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
             output = result.stdout + result.stderr
             returncode = result.returncode
@@ -1178,20 +1694,77 @@ def remote_browse():
         return jsonify({'error': str(e)}), 500
 
 # ==================== BL固件烧录 API ====================
+@firmware_bp.route('/api/firmware/bl/address-options')
+def get_bl_address_options():
+    """根据当前 Klipper Kconfig 和 MCU 返回 BL 烧录地址选项"""
+    try:
+        mcu_id = (request.args.get('mcu') or '').strip()
+        platform = (request.args.get('platform') or '').strip()
+        manufacturer = (request.args.get('manufacturer') or '').strip()
+        board_type = (request.args.get('board_type') or '').strip().lower()
+        board_id = (request.args.get('board_id') or '').strip()
+        board_config = None
+
+        if manufacturer and board_type and board_id:
+            board_config = load_board_config(manufacturer, board_type, board_id)
+            if board_config:
+                mcu_id = mcu_id or str(board_config.get('mcu') or '')
+                platform = platform or str(board_config.get('platform') or '')
+
+        if not mcu_id:
+            return jsonify({'success': False, 'error': '缺少 MCU 型号，无法生成 BL 烧录地址选项'}), 400
+
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'), force_local=True)
+        parser = KlipperKconfigParser(klipper_path)
+        parser.parse_all_platforms()
+        mcu_info = parser.resolve_mcu_info(mcu_id, platform)
+        if not mcu_info:
+            return jsonify({'success': False, 'error': f'当前 Klipper Kconfig 未找到 MCU: {mcu_id}'}), 404
+
+        options = _bl_address_options_from_mcu_info(mcu_info)
+        default_option = next((opt for opt in options if opt.get('recommended_for_bl')), options[0])
+        board_default_offset = str((board_config or {}).get('bl_offset') or '').strip()
+        board_default_address = ''
+        if board_default_offset:
+            board_default_address = _application_address(mcu_info.get('platform_key') or '', board_default_offset)
+
+        return jsonify({
+            'success': True,
+            'mcu': mcu_id,
+            'platform': mcu_info.get('platform', ''),
+            'platform_key': mcu_info.get('platform_key', ''),
+            'options': options,
+            'default_offset': default_option.get('offset', ''),
+            'default_address': default_option.get('address', ''),
+            'board_default_offset': board_default_offset,
+            'board_default_address': board_default_address,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @firmware_bp.route('/api/firmware/bl/flash', methods=['POST'])
 def flash_bl_firmware():
     """烧录BL固件 (Katapult/Bootloader)"""
     try:
-        data = request.json
+        data = request.json or {}
         bl_firmware_path = data.get('bl_firmware_path', '')
         device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
+        dfu_offset = str(data.get('dfu_offset', '')).strip()
+        platform_key = str(data.get('platform_key') or 'stm32').strip().lower()
         dfu_address = data.get('dfu_address', '0x08000000')
         katapult_serial = data.get('katapult_serial', '')
-        erase_flash = data.get('erase_flash', True)
+        erase_flash = _truthy(data.get('erase_flash', True))
+
+        if dfu_offset:
+            dfu_address = _application_address(platform_key, dfu_offset)
         
         if not bl_firmware_path or not os.path.exists(bl_firmware_path):
             return jsonify({'error': f'BL固件文件不存在: {bl_firmware_path}'}), 400
+
+        if flash_mode in ('DFU', 'st-flash', 'openocd') and not _valid_flash_address(dfu_address):
+            return jsonify({'error': f'烧录地址无效: {dfu_address}'}), 400
         
         if is_ssh_mode():
             bl_firmware_path = upload_bl_firmware_for_remote(bl_firmware_path)
@@ -1199,17 +1772,27 @@ def flash_bl_firmware():
         if flash_mode == 'DFU':
             if device and device != 'dfu':
                 dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
-                device_filter = f'-d {dfu_vid_pid}'
+                device_filter = f'-d {shlex.quote(dfu_vid_pid)}'
             else:
                 device_filter = ''
             safe_address = shlex.quote(dfu_address)
 
             if erase_flash:
                 logger.info('BL 烧录前执行 Flash 全片擦除...')
-                erase_cmd = f'sudo dfu-util -a 0 {device_filter} -s {safe_address}:mass-erase:force'
-                erase_result = run_cmd(erase_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                erase_address = _application_address(platform_key or 'stm32', '0') or '0x08000000'
+                erase_result = None
+                for alt in (0, 1):
+                    erase_cmd = f'sudo dfu-util -a {alt} {device_filter} -s {shlex.quote(erase_address)}:mass-erase:force'
+                    erase_result = run_cmd(erase_cmd, shell=True, capture_output=True, text=True, timeout=60)
+                    if erase_result.returncode == 0:
+                        break
                 if erase_result.returncode != 0:
-                    logger.warning(f'Flash 擦除失败 (rc={erase_result.returncode})，继续尝试烧录')
+                    logger.warning(f'Flash 擦除失败 (rc={erase_result.returncode})，已停止 BL 烧录')
+                    return jsonify({
+                        'success': False,
+                        'error': 'Flash 擦除失败，已停止 BL 烧录以避免旧固件与 BL 偏移规则冲突',
+                        'output': (erase_result.stdout or '') + (erase_result.stderr or '')
+                    }), 500
                 else:
                     logger.info('Flash 擦除完成')
 
@@ -1258,7 +1841,7 @@ def flash_bl_firmware():
                 return jsonify({'error': 'rp2040_flash工具不存在，请检查Klipper安装'}), 500
             _umount_rp2040_boot()
             time.sleep(0.5)
-            cmd = f'sudo {rp2040_flash_tool} {bl_firmware_path}'
+            cmd = f'sudo {shlex.quote(rp2040_flash_tool)} {shlex.quote(bl_firmware_path)}'
             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
             if result.returncode == 0 and 'No rp2040 in BOOTSEL mode was found' in (result.stdout + result.stderr):
                 return jsonify({'success': False, 'error': '未找到处于 BOOTSEL 模式的 RP2040 设备', 'output': result.stdout + result.stderr}), 500
@@ -1268,15 +1851,20 @@ def flash_bl_firmware():
             python_bin = get_klipper_python_bin(home_dir)
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
             usb_device = katapult_serial if katapult_serial else device
-            cmd = f'{python_bin} {flashtool_script} -d {usb_device} -f {bl_firmware_path}' if usb_device else f'{python_bin} {flashtool_script} -f {bl_firmware_path}'
+            cmd = (
+                f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -d {shlex.quote(usb_device)} -f {shlex.quote(bl_firmware_path)}'
+                if usb_device else
+                f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -f {shlex.quote(bl_firmware_path)}'
+            )
             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
             
         elif flash_mode == 'st-flash':
-            stflash_cmd = f'sudo st-flash --reset write {bl_firmware_path} {dfu_address}'
+            stflash_cmd = f'sudo st-flash --reset write {shlex.quote(bl_firmware_path)} {shlex.quote(dfu_address)}'
             result = run_cmd(stflash_cmd, shell=True, capture_output=True, text=True, timeout=60)
             
         elif flash_mode == 'openocd':
-            openocd_cmd = f'sudo openocd -f interface/stlink.cfg -f target/stm32f1x.cfg -c "program {bl_firmware_path} {dfu_address} verify reset exit"'
+            openocd_program = f'program {bl_firmware_path} {dfu_address} verify reset exit'
+            openocd_cmd = f'sudo openocd -f interface/stlink.cfg -f target/stm32f1x.cfg -c {shlex.quote(openocd_program)}'
             result = run_cmd(openocd_cmd, shell=True, capture_output=True, text=True, timeout=120)
             
         else:

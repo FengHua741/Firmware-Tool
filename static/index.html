@@ -38,10 +38,6 @@
                     <span>系统设置</span>
                 </a>
                 <div style="border-top:1px solid var(--border-color); margin:8px 0;"></div>
-                <a href="#" class="nav-item" data-page="klipper-parser">
-                    <span class="nav-icon">🔍</span>
-                    <span>配置解析器</span>
-                </a>
                 <a href="#" class="nav-item" data-page="config-generator">
                     <span class="nav-icon">📝</span>
                     <span>配置生成器</span>
@@ -103,7 +99,7 @@
                         </div>
                     </div>
 
-                    <div class="card">
+                    <div class="card" style="margin-top:12px;">
                         <div class="card-header"><h3>网络状态</h3></div>
                         <div class="card-body">
                             <div id="networkInterfaces"><p class="empty">加载中...</p></div>
@@ -111,7 +107,7 @@
                     </div>
 
                     <!-- Row 2: USB + 串口 + 摄像头 -->
-                    <div class="card">
+                    <div class="card" style="margin-top:12px;">
                         <div class="card-header">
                             <h3>USB 设备</h3>
                         </div>
@@ -124,7 +120,7 @@
                         </div>
                     </div>
 
-                    <div class="card">
+                    <div class="card" style="margin-top:12px;">
                         <div class="card-header">
                             <h3>串口设备</h3>
                             <button class="btn btn-sm btn-primary" onclick="searchSerial()">搜索</button>
@@ -134,7 +130,7 @@
                         </div>
                     </div>
 
-                    <div class="card">
+                    <div class="card" style="margin-top:12px;">
                         <div class="card-header">
                             <h3>摄像头</h3>
                             <button class="btn btn-sm btn-primary" onclick="searchCamera()">搜索</button>
@@ -318,7 +314,7 @@
                             <div class="form-group">
                                 <label class="form-label">🔍 设备 ID</label>
                                 <div class="input-with-button">
-                                    <select class="form-control form-select" id="flashDeviceId">
+                                    <select class="form-control form-select" id="flashDeviceId" onchange="refreshFlashPlan(false)">
                                         <option value="">-- 点击刷新扫描 --</option>
                                     </select>
                                     <select id="flashCanIface" class="form-control" style="width:auto;min-width:100px;" title="CAN接口选择">
@@ -383,6 +379,10 @@
                         </div>
                         
                         <div class="form-row" style="margin-top: 15px;">
+                            <div id="flashPlanHint" style="display:none; width:100%; padding:10px 12px; border-radius:6px; background:#eef7ff; border-left:4px solid #2196f3; color:#263238; font-size:13px;"></div>
+                        </div>
+
+                        <div class="form-row" style="margin-top: 15px;">
                             <button class="btn btn-primary btn-lg" onclick="flashFirmware()" id="flashFirmwareBtn">⚡ 烧录固件</button>
                         </div>
                         
@@ -402,13 +402,15 @@
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">📂 BL 文件</label>
-                                <select class="form-control form-select" id="blFileSelect">
+                                <select class="form-control form-select" id="blFileSelect" onchange="onBlFileChange()">
                                     <option value="">-- 选择 BL 文件 --</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">📍 烧录地址</label>
-                                <input type="text" class="form-control" id="blFlashAddress" value="0x8000000" placeholder="0x8000000">
+                                <label class="form-label">📍 烧录地址/偏移</label>
+                                <select class="form-control form-select" id="blFlashAddress">
+                                    <option value="0x08000000" data-offset="0" data-platform-key="stm32">NO BL</option>
+                                </select>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">🔧 烧录工具</label>
@@ -432,7 +434,7 @@
                         <div class="form-row" style="align-items:center;">
                             <label class="form-label" style="margin-bottom:0; margin-right:15px; cursor:pointer;">
                                 <input type="checkbox" id="blEraseFlash" checked style="margin-right:5px; vertical-align:middle;">
-                                烧录前擦除整个 Flash（防止 BL 烧录后自动跳入旧固件）
+                                烧录前擦除整个 Flash（避免旧固件与 BL 偏移规则冲突）
                             </label>
                         </div>
                         <div class="form-row">
@@ -910,7 +912,7 @@
 
                 <!-- Tab 1: 主板与连接 -->
                 <div class="cg-tab-panel active" data-tab="1">
-                    <div class="card">
+                    <div class="card" style="margin-top:12px;">
                         <div class="card-header"><h3><i class="fas fa-microchip" style="margin-right:8px;color:var(--primary-color)"></i> 主板与连接</h3></div>
                         <div class="card-body">
                             <div class="cg-row">
@@ -925,7 +927,9 @@
                                 <span id="cgBoardInfo" class="cg-board-info"></span>
                             </div>
                             <div id="cgBoardImageContainer" class="cg-board-image-container">
-                                <img id="cgBoardImage" class="cg-board-image" alt="板卡图片">
+                                <div id="cgBoardImageStage" class="cg-board-image-stage">
+                                    <img id="cgBoardImage" class="cg-board-image" alt="板卡图片">
+                                </div>
                             </div>
                             <div class="cg-row" style="margin-top:10px;">
                                 <label>连接方式：</label>
@@ -956,6 +960,7 @@
                                 </select>
                             </div>
                             <div id="cgToolboardConfig" style="display:none;margin-top:12px;">
+                                <div id="cgToolboardConflictSummary" class="cg-toolboard-check ok" style="margin-bottom:10px;"></div>
                                 <div id="cgToolboardContainer"></div>
                             </div>
                             <div id="cgToolboardSection"></div>
@@ -1012,7 +1017,13 @@
 
                 <!-- Tab 2: 轴分配与TMC驱动配置 -->
                 <div class="cg-tab-panel" data-tab="2">
-                    <div class="card">
+                    <div class="card" style="margin-top:12px;">
+                        <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> 驱动接口位置</h3></div>
+                        <div class="card-body">
+                            <div class="cg-board-map" data-map-types="drive" data-map-empty="当前板卡没有驱动接口坐标数据"></div>
+                        </div>
+                    </div>
+                    <div class="card" style="margin-top:12px;">
                         <div class="card-header">
                             <h3><i class="fas fa-server" style="margin-right:8px;color:var(--primary-color)"></i> 驱动器轴分配与TMC配置</h3>
                             <button class="btn btn-sm btn-primary" onclick="smartAutoAssign()">
@@ -1038,6 +1049,12 @@
                 <!-- Tab 3: 限位开关与调平传感器 -->
                 <div class="cg-tab-panel" data-tab="3">
                     <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> 限位/探针接口位置</h3></div>
+                        <div class="card-body">
+                            <div class="cg-board-map" data-map-types="stop,probe,servo" data-map-empty="当前板卡没有限位或探针接口坐标数据"></div>
+                        </div>
+                    </div>
+                    <div class="card" style="margin-top:12px;">
                         <div class="card-header"><h3><i class="fas fa-hand-paper" style="margin-right:8px;color:var(--primary-color)"></i> 限位开关</h3></div>
                         <div class="card-body">
                             <div id="cgEndstopContainer">
@@ -1078,6 +1095,12 @@
 <!-- Tab 5: 加热器 -->
                 <div class="cg-tab-panel" data-tab="5">
                     <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> 温控/风扇接口位置</h3></div>
+                        <div class="card-body">
+                            <div class="cg-board-map" data-map-types="heat,temp,fan,stop,probe" data-map-empty="当前板卡没有温控、风扇或传感器接口坐标数据"></div>
+                        </div>
+                    </div>
+                    <div class="card" style="margin-top:12px;">
                         <div class="card-header">
                             <h3><i class="fas fa-thermometer-half" style="margin-right:8px;color:var(--primary-color)"></i> 温控与冷却</h3>
                             <button class="btn btn-sm btn-secondary" onclick="addExtraHeater()" id="cgAddHeaterBtn">
@@ -1122,11 +1145,55 @@
                 <div class="cg-tab-panel" data-tab="6">
                     <div class="card">
                         <div class="card-header">
+                            <h3><i class="fas fa-search" style="margin-right:8px;color:var(--primary-color)"></i> 解析已有配置</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="cg-row" style="margin-bottom:10px;">
+                                <button class="btn btn-primary" id="cgParserRemoteBtn" onclick="cgParserLoadRemoteConfigList()"><i class="fas fa-server"></i> 从被控机器加载</button>
+                                <button class="btn btn-secondary" id="cgParserBaselineBtn" onclick="cgParserUpdateMainsailBaseline()"><i class="fas fa-sync-alt"></i> 更新宏基准</button>
+                                <input type="file" id="cgParserFileInput" class="file-input" multiple accept=".cfg,.conf,.txt" onchange="cgParserHandleFiles(event)">
+                                <button class="btn btn-secondary" onclick="document.getElementById('cgParserFileInput').click()"><i class="fas fa-upload"></i> 上传/合并配置</button>
+                                <button class="btn btn-secondary" onclick="cgParserLoadGeneratedConfig()"><i class="fas fa-code"></i> 解析生成结果</button>
+                                <button class="btn btn-warning" onclick="cgParserUseAsImported()"><i class="fas fa-file-import"></i> 作为旧配置</button>
+                                <span id="cgParserStatus" style="font-size:13px;color:var(--text-secondary);"></span>
+                            </div>
+                            <div id="cgParserProgress" class="remote-progress-bar" style="display:none;"><div class="bar" style="width:100%"></div></div>
+                            <div id="cgParserRemoteFileList" style="display:none;margin-bottom:12px;">
+                                <div class="file-list" id="cgParserRemoteFileListContent" style="max-height:200px;"></div>
+                            </div>
+                            <textarea id="cgParserInput" class="config-textarea" style="min-height:170px;" placeholder="可粘贴 printer.cfg，也可以从被控机器加载或上传多个 .cfg 文件。"></textarea>
+                            <div class="btn-group" style="margin-top:10px;justify-content:flex-start;">
+                                <button class="btn btn-primary" onclick="cgParserRun()"><i class="fas fa-cogs"></i> 解析配置</button>
+                                <button class="btn btn-secondary" onclick="cgParserClear()"><i class="fas fa-redo"></i> 清空解析</button>
+                            </div>
+                            <div class="result-content" id="cgParserResult" style="margin-top:12px;">
+                                <p style="text-align:center;color:var(--text-secondary);padding:30px 0;">解析结果将显示在这里...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
                             <h3><i class="fas fa-code" style="margin-right:8px;color:var(--primary-color)"></i> 配置预览</h3>
                             <div class="status-indicator" id="configStatus"><span class="dot"></span><span>未生成</span></div>
                         </div>
                         <div class="card-body">
                             <div id="errorMessage" class="error-message"></div>
+                            <div class="cg-row" style="margin-bottom:10px;">
+                                <label>输出模式：</label>
+                                <select id="cgOutputMode" style="min-width:190px;">
+                                    <option value="full" selected>完整配置</option>
+                                    <option value="toolboard">仅工具板配置片段</option>
+                                    <option value="mainboard">仅主板配置片段</option>
+                                    <option value="merge">与现有配置合并建议</option>
+                                </select>
+                                <input type="file" id="cgImportCfgFile" class="file-input" accept=".cfg,.conf,.txt" onchange="importExistingPrinterConfig(event)">
+                                <button class="btn btn-secondary" onclick="document.getElementById('cgImportCfgFile').click()"><i class="fas fa-file-import"></i> 导入 printer.cfg</button>
+                                <button class="btn btn-secondary" onclick="showGeneratedConfigDiff()"><i class="fas fa-code-branch"></i> 对比旧配置</button>
+                                <button class="btn btn-secondary" onclick="validateGeneratedConfigLocal()"><i class="fas fa-check-circle"></i> 本地结构校验</button>
+                            </div>
+                            <div id="cgImportSummary" class="cg-config-side-panel" style="display:none;"></div>
+                            <div id="cgDiffSummary" class="cg-config-side-panel" style="display:none;"></div>
                             <pre id="output" class="output-pre">请完成配置后点击"生成配置"按钮...</pre>
                             <div class="action-buttons">
                                 <button class="btn btn-primary" onclick="generateConfig()"><i class="fas fa-cogs"></i> 生成配置</button>
@@ -1145,7 +1212,7 @@
     <script src="/static/js/app.js?v=20260605c"></script>
     <script src="/static/js/mcu-presets.js?v=20260320f"></script>
     <script src="/static/js/config-manager.js?v=20260320f"></script>
-    <script src="/static/js/firmware-compile.js?v=20260605g"></script>
+    <script src="/static/js/firmware-compile.js?v=20260708c"></script>
     <script src="/static/js/firmware-update.js?v=20260320f"></script>
     <script src="/static/js/klipper-parser.js?v=20260702b"></script>
     <script src="/static/js/config-generator.js?v=20260704za"></script>

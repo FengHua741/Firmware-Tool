@@ -3,23 +3,52 @@ Klipper MCU 数据库蓝图 - Kconfig 解析、MCU 查询
 """
 
 from flask import Blueprint, jsonify
+import os
 
-from shared import app, config, logger
+from shared import app, config, logger, expand_klipper_path
 from klipper_kconfig_parser import KlipperKconfigParser
-from kconfig_can_parser import parse_can_options, load_cache, save_cache
+from kconfig_can_parser import parse_can_options
 
 klipper_bp = Blueprint('klipper', __name__, url_prefix='/api/klipper')
 
 # 初始化解析器
-klipper_parser = KlipperKconfigParser(config.get('klipper_path', '~/klipper'))
+klipper_parser = None
 klipper_mcu_db = {}
+_mcu_db_signature = None
 
 
-def init_klipper_mcu_db():
+def _local_klipper_path():
+    return expand_klipper_path(config.get('klipper_path', '~/klipper'), force_local=True)
+
+
+def _kconfig_signature(klipper_path):
+    """用 Kconfig 文件的 mtime/size 判断 Klipper 编译参数是否变化。"""
+    src_path = os.path.join(klipper_path, 'src')
+    paths = [os.path.join(src_path, 'Kconfig')]
+    for platform_dir in KlipperKconfigParser.PLATFORM_DEFINITIONS.keys():
+        paths.append(os.path.join(src_path, platform_dir, 'Kconfig'))
+
+    signature = []
+    for path in paths:
+        try:
+            stat_info = os.stat(path)
+        except OSError:
+            continue
+        signature.append((path, stat_info.st_mtime_ns, stat_info.st_size))
+    return tuple(signature)
+
+
+def init_klipper_mcu_db(force=False):
     """初始化 Klipper MCU 数据库"""
-    global klipper_mcu_db
+    global klipper_parser, klipper_mcu_db, _mcu_db_signature
     try:
+        klipper_path = _local_klipper_path()
+        signature = _kconfig_signature(klipper_path)
+        if not force and klipper_mcu_db and signature == _mcu_db_signature:
+            return
+        klipper_parser = KlipperKconfigParser(klipper_path)
         klipper_mcu_db = klipper_parser.parse_all_platforms()
+        _mcu_db_signature = signature
         logger.info(f"✓ Klipper MCU 数据库已加载: {len(klipper_mcu_db)} 个平台")
         for platform, data in klipper_mcu_db.items():
             logger.info(f"  - {platform}: {len(data['mcus'])} 个 MCU")
@@ -32,22 +61,21 @@ def init_klipper_mcu_db():
 init_klipper_mcu_db()
 
 
-# 通信选项缓存（启动时加载）
+# 通信选项缓存（按 Kconfig 文件签名自动失效）
 _can_options_data = {}
+_can_options_signature = None
 
-def init_can_options():
-    """初始化通信选项：优先从缓存加载，缓存不存在则从 Klipper 源码解析"""
-    global _can_options_data
+def init_can_options(force=False):
+    """初始化通信选项：从当前 Klipper Kconfig 解析，Kconfig 变化时自动刷新。"""
+    global _can_options_data, _can_options_signature
     try:
-        cached = load_cache()
-        if cached:
-            _can_options_data = cached
-            logger.info(f"✓ CAN 通信选项已从缓存加载: {len(cached)} 个平台")
-        else:
-            klipper_path = config.get('klipper_path', '~/klipper')
-            _can_options_data = parse_can_options(klipper_path)
-            save_cache(_can_options_data)
-            logger.info(f"✓ CAN 通信选项已从 Klipper 源码解析: {len(_can_options_data)} 个平台")
+        klipper_path = _local_klipper_path()
+        signature = _kconfig_signature(klipper_path)
+        if not force and _can_options_data and signature == _can_options_signature:
+            return
+        _can_options_data = parse_can_options(klipper_path)
+        _can_options_signature = signature
+        logger.info(f"✓ CAN 通信选项已从 Klipper 源码解析: {len(_can_options_data)} 个平台")
     except Exception as e:
         logger.error(f"加载 CAN 通信选项失败: {e}")
         _can_options_data = {}
@@ -59,12 +87,14 @@ init_can_options()
 @klipper_bp.route('/communication-options')
 def get_communication_options():
     """获取通信选项（返回按平台分类的完整数据）"""
+    init_can_options()
     return jsonify(_can_options_data)
 
 
 @klipper_bp.route('/mcu-database')
 def get_klipper_mcu_database():
     """获取完整的 Klipper MCU 数据库"""
+    init_klipper_mcu_db()
     return jsonify({
         'success': True,
         'platforms': list(klipper_mcu_db.keys()),
@@ -75,6 +105,7 @@ def get_klipper_mcu_database():
 @klipper_bp.route('/platforms')
 def get_klipper_platforms():
     """获取所有 MCU 平台列表"""
+    init_klipper_mcu_db()
     platforms = []
     for platform_name, data in klipper_mcu_db.items():
         platforms.append({
@@ -92,6 +123,7 @@ def get_klipper_platforms():
 @klipper_bp.route('/mcus/<platform>')
 def get_klipper_mcus(platform):
     """获取指定平台的所有 MCU"""
+    init_klipper_mcu_db()
     if platform in klipper_mcu_db:
         platform_key = platform
     else:
@@ -130,6 +162,8 @@ def get_klipper_mcus(platform):
     return jsonify({
         'success': True,
         'platform': platform,
+        'platform_key': data.get('platform'),
+        'arch_config': data.get('arch_config', ''),
         'mcus': mcus,
         'flash_modes': data.get('flash_modes', []),
         'connections': data.get('connections', [])
@@ -139,6 +173,7 @@ def get_klipper_mcus(platform):
 @klipper_bp.route('/mcu-info/<mcu_id>')
 def get_klipper_mcu_info(mcu_id):
     """获取特定 MCU 的详细信息"""
+    init_klipper_mcu_db()
     mcu_id = mcu_id.lower()
     
     for platform, data in klipper_mcu_db.items():
@@ -147,6 +182,8 @@ def get_klipper_mcu_info(mcu_id):
             return jsonify({
                 'success': True,
                 'platform': platform,
+                'platform_key': data.get('platform'),
+                'arch_config': data.get('arch_config', ''),
                 'mcu': mcu,
                 'flash_modes': data.get('flash_modes', []),
                 'connections': data.get('connections', [])
@@ -162,7 +199,8 @@ def get_klipper_mcu_info(mcu_id):
 def refresh_klipper_database():
     """强制刷新 Klipper MCU 数据库"""
     try:
-        init_klipper_mcu_db()
+        init_klipper_mcu_db(force=True)
+        init_can_options(force=True)
         return jsonify({
             'success': True,
             'message': 'MCU 数据库已刷新',

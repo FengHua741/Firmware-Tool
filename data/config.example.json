@@ -1,0 +1,17 @@
+{
+  "port": 9999,
+  "bind_host": "0.0.0.0",
+  "klipper_path": "~/klipper",
+  "katapult_path": "~/katapult",
+  "json_repo_url": "",
+  "last_json_update": null,
+  "moonraker_host": "127.0.0.1",
+  "moonraker_port": 7125,
+  "connection_mode": "local",
+  "ssh_host": "",
+  "ssh_port": 22,
+  "ssh_user": "",
+  "sudo_mode": "password",
+  "allowed_origins": [],
+  "api_token": ""
+}

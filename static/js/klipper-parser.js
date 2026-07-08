@@ -2,6 +2,177 @@
  * Klipper配置解析器 - 页面逻辑
  */
 
+function klipperParserProcessPinValue(value) {
+    let cleanValue = String(value || '').split('#')[0].trim();
+    if (cleanValue.toLowerCase() === 'host:none') return { value: 'host:None', cleanedValue: 'host:None', type: 'host' };
+    if (cleanValue.toLowerCase().includes('virtual_endstop')) return { value: '虚拟引脚', type: 'virtual' };
+    if (cleanValue.includes(':')) {
+        const parts = cleanValue.split(':');
+        const cleanedPin = (parts[1] || '').replace(/^[!^]/, '');
+        return { value: cleanValue, cleanedValue: `${parts[0]}:${cleanedPin}`, type: 'toolboard', board: parts[0], pin: cleanedPin };
+    }
+    const cleanedValue = cleanValue.replace(/^[!^]/, '');
+    return { value: cleanValue, cleanedValue: cleanedValue, type: 'standard' };
+}
+
+function klipperParserParseConfig(config) {
+    const lines = String(config || '').split('\n');
+    let currentSection = '';
+    const results = {
+        axes: [], extruders: [], heaterBed: null, probe: null, fans: [],
+        toolboards: [], drivers: {},
+        pinAliases: { steppers: {}, heaters: {}, sensors: {}, fans: [], endstops: {}, bltouch: {}, drivers: {} }
+    };
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            currentSection = trimmed.slice(1, -1);
+            if (currentSection.toLowerCase().startsWith('mcu') && !currentSection.toLowerCase().endsWith('mcu') && !results.toolboards.includes(currentSection)) {
+                results.toolboards.push(currentSection);
+            }
+            continue;
+        }
+        if (trimmed.startsWith('#') || trimmed === '') continue;
+        const lineWithoutComment = trimmed.split('#')[0].trim();
+        const parts = lineWithoutComment.split(':');
+        if (parts.length < 2) continue;
+        const key = parts[0].trim();
+        const value = parts.slice(1).join(':').trim();
+        const pinData = klipperParserProcessPinValue(value);
+
+        if (currentSection.match(/stepper_([xyz]\d*)/i)) {
+            const match = currentSection.match(/stepper_([xyz]\d*)/i);
+            const axisType = match[1].toLowerCase();
+            let axis = results.axes.find(a => a.name === axisType);
+            if (!axis) { axis = { name: axisType, section: currentSection }; results.axes.push(axis); }
+            if (key === 'step_pin') { axis.step_pin = pinData; results.pinAliases.steppers[`${axisType.toUpperCase()}_STEP`] = pinData.cleanedValue; }
+            if (key === 'dir_pin') { axis.dir_pin = pinData; results.pinAliases.steppers[`${axisType.toUpperCase()}_DIR`] = pinData.cleanedValue; }
+            if (key === 'enable_pin') { axis.enable_pin = pinData; results.pinAliases.steppers[`${axisType.toUpperCase()}_EN`] = pinData.cleanedValue; }
+            if (key === 'endstop_pin') { axis.endstop_pin = pinData; results.pinAliases.endstops[`${axisType.toUpperCase()}_STOP`] = pinData.cleanedValue; }
+        }
+        if (currentSection.match(/extruder(\d*)/i)) {
+            const match = currentSection.match(/extruder(\d*)/i);
+            const extruderNum = match[1] || '';
+            const extruderName = extruderNum ? `挤出机${extruderNum}` : '挤出机';
+            let extruder = results.extruders.find(e => e.name === extruderName);
+            if (!extruder) { extruder = { name: extruderName, section: currentSection }; results.extruders.push(extruder); }
+            if (key === 'step_pin') { extruder.step_pin = pinData; results.pinAliases.steppers['E_STEP'] = pinData.cleanedValue; }
+            if (key === 'dir_pin') { extruder.dir_pin = pinData; results.pinAliases.steppers['E_DIR'] = pinData.cleanedValue; }
+            if (key === 'enable_pin') { extruder.enable_pin = pinData; results.pinAliases.steppers['E_EN'] = pinData.cleanedValue; }
+            if (key === 'heater_pin') { extruder.heater_pin = pinData; results.pinAliases.heaters['HEAT'] = pinData.cleanedValue; }
+            if (key === 'sensor_pin') { extruder.sensor_pin = pinData; results.pinAliases.sensors['HEAT_TEMP'] = pinData.cleanedValue; }
+        }
+        if (currentSection === 'heater_bed') {
+            if (!results.heaterBed) results.heaterBed = { section: currentSection };
+            if (key === 'heater_pin') { results.heaterBed.heater_pin = pinData; results.pinAliases.heaters['BED_OUT'] = pinData.cleanedValue; }
+            if (key === 'sensor_pin') { results.heaterBed.sensor_pin = pinData; results.pinAliases.sensors['BED_TEMP'] = pinData.cleanedValue; }
+        }
+        if (currentSection === 'probe' || currentSection === 'bltouch') {
+            if (!results.probe) results.probe = { type: currentSection, section: currentSection };
+            if (key === 'pin' || key === 'sensor_pin') { results.probe.sensor_pin = pinData; results.pinAliases.bltouch['PROBE'] = pinData.cleanedValue; }
+            if (key === 'control_pin') { results.probe.control_pin = pinData; results.pinAliases.bltouch['SERVO'] = pinData.cleanedValue; }
+        }
+        if (currentSection === 'fan' || currentSection.startsWith('heater_fan')) {
+            let fan = results.fans.find(f => f.section === currentSection);
+            if (!fan) {
+                fan = { name: currentSection === 'fan' ? '主风扇' : currentSection, section: currentSection, type: currentSection.startsWith('heater_fan') ? '加热器风扇' : '冷却风扇' };
+                results.fans.push(fan);
+            }
+            if (key === 'pin') { const pd = klipperParserProcessPinValue(value); fan.pin = pd; results.pinAliases.fans.push(pd.cleanedValue); }
+        }
+        if (currentSection.startsWith('tmc')) {
+            const parts2 = currentSection.split(' ');
+            if (parts2.length > 1) {
+                const driverType = parts2[0]; const targetAxis = parts2[1];
+                if (!results.drivers[targetAxis]) results.drivers[targetAxis] = { type: driverType };
+                if (key === 'cs_pin') { results.drivers[targetAxis].cs_pin = pinData; const at = targetAxis.split('_')[1] || 'E'; results.pinAliases.drivers[`${at.toUpperCase()}_CS`] = pinData.cleanedValue; }
+                if (key === 'uart_pin') { results.drivers[targetAxis].uart_pin = pinData; const at = targetAxis.split('_')[1] || 'E'; results.pinAliases.drivers[`${at.toUpperCase()}_UART`] = pinData.cleanedValue; }
+            }
+        }
+    }
+    for (const [axisSection, driverData] of Object.entries(results.drivers)) {
+        let targetAxis = results.axes.find(a => a.section === axisSection);
+        if (!targetAxis) targetAxis = results.extruders.find(e => e.section === axisSection);
+        if (targetAxis) {
+            targetAxis.driver_cs_pin = driverData.cs_pin;
+            targetAxis.driver_uart_pin = driverData.uart_pin;
+            targetAxis.driver_type = driverData.type;
+        }
+    }
+    return results;
+}
+
+function klipperParserFormatPinValue(pinData) {
+    if (!pinData || !pinData.value) return '<span class="pin-value">未配置</span>';
+    if (pinData.type === 'virtual') return `<span class="virtual-pin">${pinData.value}</span>`;
+    if (pinData.type === 'host') return `<span class="host-pin">${pinData.value}</span>`;
+    if (pinData.type === 'toolboard') return `<span class="toolboard-name">${pinData.board}</span>:<span class="pin-number">${pinData.pin}</span> <span class="toolboard-hint">工具板</span>`;
+    if (pinData.value.includes('cs_pin') || pinData.value.includes('uart_pin')) return `<span class="driver-pin">${pinData.value}</span>`;
+    return `<span class="pin-value">${pinData.value}</span>`;
+}
+
+function klipperParserBuildResultHTML(result, checkReport) {
+    let html = '';
+    if (checkReport) {
+        html += buildCheckReportHTML(checkReport.duplicates, checkReport.conflicts, checkReport.macroCheck);
+        html += '<hr style="margin:20px 0;">';
+    }
+    if (result.toolboards && result.toolboards.length > 0) {
+        html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-toolbox" style="margin-right:10px;"></i> 工具板配置</h3><div class="toolboard-section">';
+        result.toolboards.forEach(tb => { html += `<div class="toolboard-card"><i class="fas fa-microchip"></i><div><strong>${tb}</strong><div class="toolboard-pin">已配置工具板引脚</div></div></div>`; });
+        html += '</div></div><hr>';
+    }
+    if (result.axes.length > 0) {
+        html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-arrows-alt" style="margin-right:10px;"></i> 步进电机轴配置</h3>';
+        result.axes.forEach(axis => {
+            html += `<div class="axis-config"><h4><i class="fas fa-arrows-alt-h"></i> ${axis.name.toUpperCase()}轴</h4><ul>`;
+            if (axis.step_pin) html += `<li><strong>STEP引脚</strong>: ${klipperParserFormatPinValue(axis.step_pin)}</li>`;
+            if (axis.dir_pin) html += `<li><strong>DIR引脚</strong>: ${klipperParserFormatPinValue(axis.dir_pin)}</li>`;
+            if (axis.enable_pin) html += `<li><strong>EN引脚</strong>: ${klipperParserFormatPinValue(axis.enable_pin)}</li>`;
+            if (axis.endstop_pin) html += `<li><strong>限位开关引脚</strong>: ${klipperParserFormatPinValue(axis.endstop_pin)}</li>`;
+            if (axis.driver_cs_pin) html += `<li><strong>CS引脚</strong>: ${klipperParserFormatPinValue(axis.driver_cs_pin)}</li>`;
+            if (axis.driver_uart_pin) html += `<li><strong>UART引脚</strong>: ${klipperParserFormatPinValue(axis.driver_uart_pin)}</li>`;
+            if (axis.driver_type) html += `<li><strong>驱动类型</strong>: ${axis.driver_type}</li>`;
+            html += `</ul></div>`;
+        });
+        html += '</div><hr>';
+    }
+    if (result.extruders.length > 0) {
+        html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-fire" style="margin-right:10px;"></i> 挤出机配置</h3>';
+        result.extruders.forEach(extruder => {
+            html += `<div class="extruder-config"><h4><i class="fas fa-temperature-high"></i> ${extruder.name}</h4><ul>`;
+            if (extruder.step_pin) html += `<li><strong>STEP引脚</strong>: ${klipperParserFormatPinValue(extruder.step_pin)}</li>`;
+            if (extruder.dir_pin) html += `<li><strong>DIR引脚</strong>: ${klipperParserFormatPinValue(extruder.dir_pin)}</li>`;
+            if (extruder.enable_pin) html += `<li><strong>EN引脚</strong>: ${klipperParserFormatPinValue(extruder.enable_pin)}</li>`;
+            if (extruder.heater_pin) html += `<li><strong>加热引脚</strong>: ${klipperParserFormatPinValue(extruder.heater_pin)}</li>`;
+            if (extruder.sensor_pin) html += `<li><strong>热敏引脚</strong>: ${klipperParserFormatPinValue(extruder.sensor_pin)}</li>`;
+            if (extruder.driver_cs_pin) html += `<li><strong>CS引脚</strong>: ${klipperParserFormatPinValue(extruder.driver_cs_pin)}</li>`;
+            if (extruder.driver_uart_pin) html += `<li><strong>UART引脚</strong>: ${klipperParserFormatPinValue(extruder.driver_uart_pin)}</li>`;
+            if (extruder.driver_type) html += `<li><strong>驱动类型</strong>: ${extruder.driver_type}</li>`;
+            html += `</ul></div>`;
+        });
+        html += '</div><hr>';
+    }
+    if (result.heaterBed) {
+        html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-bed" style="margin-right:10px;"></i> 热床配置</h3><div class="heater-config-result"><h4><i class="fas fa-temperature-high"></i> 热床加热器</h4><ul>';
+        if (result.heaterBed.heater_pin) html += `<li><strong>加热引脚</strong>: ${klipperParserFormatPinValue(result.heaterBed.heater_pin)}</li>`;
+        if (result.heaterBed.sensor_pin) html += `<li><strong>热敏引脚</strong>: ${klipperParserFormatPinValue(result.heaterBed.sensor_pin)}</li>`;
+        html += `</ul></div></div><hr>`;
+    }
+    return html || '<p style="text-align:center; color:var(--text-secondary); padding:30px 0;">未找到可解析的配置信息</p>';
+}
+
+function klipperParserAnalyzeConfig(config, mainsailBaseline='') {
+    const result = klipperParserParseConfig(config);
+    const sections = parseMergedSections(config);
+    const duplicates = checkDuplicateSections(sections);
+    const conflicts = checkPinConflicts(config);
+    const macroCheck = checkMacroModifications(config, mainsailBaseline);
+    const html = klipperParserBuildResultHTML(result, { duplicates, conflicts, macroCheck });
+    return { result, sections, duplicates, conflicts, macroCheck, html };
+}
+
 function initKlipperParser() {
     // 防止重复初始化
     if (window._klipperParserInited) return;

@@ -15,6 +15,12 @@ board_config_bp = Blueprint('board_config', __name__, url_prefix='/api/config')
 
 # 预设厂家列表
 PRESET_MANUFACTURERS = ["FLY", "BTT", "MKS", "Creality", "Prusa", "Voron", "自定义"]
+ALLOWED_BOARD_TYPES = {'mainboard', 'toolboard', 'expansion'}
+
+
+def _normalize_board_type(board_type):
+    board_type = sanitize_config_id(str(board_type or 'mainboard'))
+    return board_type if board_type in ALLOWED_BOARD_TYPES else 'mainboard'
 
 KLIPPER_MCU_LIST = {
     "STM32": {
@@ -182,11 +188,18 @@ def create_config(manufacturer):
         if not data or 'name' not in data:
             return jsonify({'error': 'Missing required fields'}), 400
         
-        product_type = data.get('type', 'mainboard')
-        if product_type not in ['mainboard', 'toolboard', 'expansion']:
-            product_type = 'mainboard'
+        manufacturer = sanitize_manufacturer(manufacturer)
+        if not manufacturer:
+            return jsonify({'error': '无效的厂家名称'}), 400
+
+        product_type = _normalize_board_type(data.get('type', 'mainboard'))
         
-        config_id = data.get('id', generate_id_from_name(data['name']))
+        config_id = sanitize_config_id(data.get('id') or generate_id_from_name(data['name']))
+        if not config_id:
+            return jsonify({'error': '无效的配置ID'}), 400
+        data['manufacturer'] = manufacturer
+        data['type'] = product_type
+        data['id'] = config_id
         
         type_dir = os.path.join(CONFIGS_DIR, manufacturer, product_type)
         os.makedirs(type_dir, exist_ok=True)
@@ -319,13 +332,10 @@ def create_manufacturer():
     """创建新厂家目录"""
     try:
         data = request.get_json()
-        manufacturer = data.get('name', '').strip()
+        manufacturer = sanitize_manufacturer(data.get('name', '').strip())
 
         if not manufacturer:
             return jsonify({'success': False, 'error': '厂家名称不能为空'}), 400
-
-        if not manufacturer.replace('-', '').replace('_', '').isalnum():
-            return jsonify({'success': False, 'error': '厂家名称只能包含字母、数字、连字符和下划线'}), 400
 
         mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
 
@@ -395,15 +405,25 @@ def save_board_config():
     try:
         config_data = request.json
         
-        manufacturer = config_data.get('manufacturer', 'FLY')
-        board_type = config_data.get('type', 'mainboard')
-        config_id = config_data.get('id')
+        manufacturer = sanitize_manufacturer(config_data.get('manufacturer', 'FLY'))
+        board_type = _normalize_board_type(config_data.get('type', 'mainboard'))
+        config_id = sanitize_config_id(config_data.get('id'))
         
+        if not manufacturer:
+            return jsonify({
+                'success': False,
+                'error': '无效的厂家名称'
+            }), 400
+
         if not config_id:
             return jsonify({
                 'success': False,
                 'error': '缺少配置 ID'
             }), 400
+
+        config_data['manufacturer'] = manufacturer
+        config_data['type'] = board_type
+        config_data['id'] = config_id
         
         config_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer, board_type)
         os.makedirs(config_dir, exist_ok=True)

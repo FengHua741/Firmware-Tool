@@ -7,9 +7,18 @@ Klipper Kconfig 解析器
 import os
 import re
 import json
-from pathlib import Path
 
 class KlipperKconfigParser:
+    PLATFORM_DEFINITIONS = {
+        'stm32': {'name': 'STM32', 'arch_symbol': 'MACH_STM32'},
+        'rp2040': {'name': 'RP2040', 'arch_symbol': 'MACH_RPXXXX'},
+        'atsamd': {'name': 'ATSAMD', 'arch_symbol': 'MACH_ATSAMD'},
+        'lpc176x': {'name': 'LPC176x', 'arch_symbol': 'MACH_LPC176X'},
+        'hc32f460': {'name': 'HC32F460', 'arch_symbol': 'MACH_HC32F460'},
+        'atsam': {'name': 'ATSAM', 'arch_symbol': 'MACH_ATSAM'},
+        'avr': {'name': 'AVR', 'arch_symbol': 'MACH_AVR'},
+    }
+
     def __init__(self, klipper_path='~/klipper'):
         # 处理 ~ 路径，避免 systemd root 下扩展到 /root
         if klipper_path.startswith('~'):
@@ -29,24 +38,16 @@ class KlipperKconfigParser:
         
     def parse_all_platforms(self):
         """解析所有平台的 Kconfig"""
-        platforms = {
-            'stm32': 'STM32',
-            'rp2040': 'RP2040',
-            'atsamd': 'ATSAMD',
-            'lpc176x': 'LPC176x',
-            'hc32f460': 'HC32F460',
-            'atsam': 'ATSAM',
-            'avr': 'AVR'
-        }
-        
-        for platform_dir, platform_name in platforms.items():
+        for platform_dir, platform_info in self.PLATFORM_DEFINITIONS.items():
             kconfig_path = os.path.join(self.src_path, platform_dir, 'Kconfig')
             if os.path.exists(kconfig_path):
-                self.mcu_database[platform_name] = self._parse_kconfig(kconfig_path, platform_dir)
+                self.mcu_database[platform_info['name']] = self._parse_kconfig(
+                    kconfig_path, platform_dir, platform_info
+                )
         
         return self.mcu_database
     
-    def _parse_kconfig(self, kconfig_path, platform_dir):
+    def _parse_kconfig(self, kconfig_path, platform_dir, platform_info=None):
         """解析单个 Kconfig 文件"""
         try:
             with open(kconfig_path, 'r') as f:
@@ -62,6 +63,8 @@ class KlipperKconfigParser:
         
         result = {
             'platform': platform_dir,
+            'platform_name': (platform_info or {}).get('name', platform_dir),
+            'arch_config': (platform_info or {}).get('arch_symbol', ''),
             'mcus': {},
             'flash_modes': [],
             'default_connections': []
@@ -84,33 +87,153 @@ class KlipperKconfigParser:
         
         return result
     
+    def _iter_config_blocks(self, content):
+        """遍历 Kconfig 中的 config 块。"""
+        lines = content.splitlines()
+        i = 0
+        while i < len(lines):
+            stripped = lines[i].strip()
+            match = re.match(r'^config\s+(\w+)', stripped)
+            if not match:
+                i += 1
+                continue
+
+            symbol = match.group(1)
+            block = [lines[i]]
+            i += 1
+            while i < len(lines):
+                next_stripped = lines[i].strip()
+                if re.match(r'^config\s+\w+', next_stripped):
+                    break
+                if next_stripped in ('choice', 'endchoice', 'menu', 'endmenu', 'endif'):
+                    break
+                block.append(lines[i])
+                i += 1
+            yield symbol, block
+
+    def _select_closure(self, symbol, select_graph):
+        """计算 config symbol 通过 select 带出的符号闭包。"""
+        seen = set()
+        stack = [symbol]
+        while stack:
+            current = stack.pop()
+            for selected in select_graph.get(current, []):
+                if selected in seen:
+                    continue
+                seen.add(selected)
+                stack.append(selected)
+        return seen
+
     def _parse_mcus(self, content):
         """解析 MCU 型号列表"""
         mcus = {}
-        
-        # 匹配 config MACH_XXX 和 bool "名称"
-        pattern = r'config (MACH_\w+)\s+bool "([^"]+)"(?:\s+select\s+(\w+))?(?:\s+select\s+(\w+))?'
-        
-        for match in re.finditer(pattern, content):
-            config_name = match.group(1)
-            display_name = match.group(2)
-            select1 = match.group(3)
-            select2 = match.group(4)
-            
+        select_graph = {}
+
+        for config_name, block in self._iter_config_blocks(content):
+            block_text = '\n'.join(block)
+            selects = re.findall(r'^\s*select\s+(\w+)', block_text, re.MULTILINE)
+            select_graph[config_name] = selects
+
+            bool_match = re.search(r'^\s*bool\s+"([^"]+)"', block_text, re.MULTILINE)
+            if not config_name.startswith('MACH_') or not bool_match:
+                continue
+
+            display_name = bool_match.group(1)
             # 提取 MCU ID（小写）
             mcu_id = config_name.replace('MACH_', '').lower()
-            
+
             mcus[mcu_id] = {
                 'id': mcu_id,
                 'name': display_name,
                 'config_name': config_name,
-                'selects': [s for s in [select1, select2] if s],
+                'config_symbol': config_name,
+                'selects': [],
+                'capabilities': [],
                 'crystals': [],
+                'crystal_options': [],
                 'bl_offsets': [],
+                'bl_offset_options': [],
                 'connections': []
             }
+
+        for mcu in mcus.values():
+            capabilities = self._select_closure(mcu['config_name'], select_graph)
+            mcu['selects'] = sorted(capabilities)
+            mcu['capabilities'] = sorted(set(capabilities) | {mcu['config_name']})
         
         return mcus
+
+    def _strip_outer_parens(self, expr):
+        expr = expr.strip()
+        while expr.startswith('(') and expr.endswith(')'):
+            depth = 0
+            wraps = True
+            for idx, char in enumerate(expr):
+                if char == '(':
+                    depth += 1
+                elif char == ')':
+                    depth -= 1
+                    if depth == 0 and idx != len(expr) - 1:
+                        wraps = False
+                        break
+            if not wraps:
+                break
+            expr = expr[1:-1].strip()
+        return expr
+
+    def _split_expr(self, expr, op):
+        parts = []
+        depth = 0
+        current = []
+        i = 0
+        while i < len(expr):
+            char = expr[i]
+            if char == '(':
+                depth += 1
+                current.append(char)
+            elif char == ')':
+                depth -= 1
+                current.append(char)
+            elif depth == 0 and expr.startswith(op, i):
+                parts.append(''.join(current).strip())
+                current = []
+                i += len(op)
+                continue
+            else:
+                current.append(char)
+            i += 1
+        if current:
+            parts.append(''.join(current).strip())
+        return parts
+
+    def _eval_condition(self, expr, symbols):
+        """求值 Kconfig 条件表达式中的常见布尔语法。"""
+        expr = self._strip_outer_parens((expr or '').strip())
+        if not expr:
+            return True
+
+        or_parts = self._split_expr(expr, '||')
+        if len(or_parts) > 1:
+            return any(self._eval_condition(part, symbols) for part in or_parts)
+
+        and_parts = self._split_expr(expr, '&&')
+        if len(and_parts) > 1:
+            return all(self._eval_condition(part, symbols) for part in and_parts)
+
+        if expr.startswith('!'):
+            return not self._eval_condition(expr[1:].strip(), symbols)
+
+        if expr in ('y', 'Y', 'LOW_LEVEL_OPTIONS'):
+            return True
+        if expr in ('n', 'N'):
+            return False
+
+        token_match = re.match(r'^([A-Za-z_]\w*)$', expr)
+        if token_match:
+            return token_match.group(1) in symbols
+
+        # 不支持的比较表达式保守视为不匹配，避免展示/写入错误选项。
+        return False
     
     def _parse_clock_options(self, content, mcus):
         """解析晶振选项 - 支持多种格式"""
@@ -149,6 +272,25 @@ class KlipperKconfigParser:
                 if str(freq_hz) not in crystals:
                     crystals.append(str(freq_hz))
         
+        clock_options = self._parse_choice_options(content, 'Clock Reference')
+        if clock_options:
+            for mcu in mcus.values():
+                options = []
+                for option in clock_options:
+                    if not self._check_condition(option['condition'], mcu):
+                        continue
+                    freq = self._frequency_from_prompt(option['display'])
+                    if not freq:
+                        continue
+                    options.append({
+                        'value': freq,
+                        'display': option['display'],
+                        'config_symbol': option['config_symbol'],
+                    })
+                mcu['crystal_options'] = options
+                mcu['crystals'] = [opt['value'] for opt in options]
+            return
+
         # 如果没有找到晶振选项，根据 MCU 类型添加默认值
         if not crystals:
             # 为每个 MCU 单独设置晶振
@@ -161,9 +303,101 @@ class KlipperKconfigParser:
             # 应用到所有 MCU（平台通用）
             for mcu in mcus.values():
                 mcu['crystals'] = sorted(crystals.copy(), key=lambda x: int(x))
+
+    def _parse_choice_options(self, content, prompt_text):
+        """解析指定 prompt 的 choice 选项。"""
+        lines = content.splitlines()
+        choices = []
+        i = 0
+        while i < len(lines):
+            if lines[i].strip() != 'choice':
+                i += 1
+                continue
+
+            block = []
+            i += 1
+            while i < len(lines) and lines[i].strip() != 'endchoice':
+                block.append(lines[i])
+                i += 1
+
+            block_text = '\n'.join(block)
+            if prompt_text not in block_text:
+                i += 1
+                continue
+
+            j = 0
+            while j < len(block):
+                line = block[j].strip()
+                match = re.match(r'^config\s+(\w+)', line)
+                if not match:
+                    j += 1
+                    continue
+
+                symbol = match.group(1)
+                display = ''
+                conditions = []
+                j += 1
+                while j < len(block):
+                    sline = block[j].strip()
+                    if re.match(r'^config\s+\w+', sline):
+                        break
+                    bool_match = re.match(r'bool\s+"([^"]+)"(?:\s+if\s+(.+))?', sline)
+                    if bool_match:
+                        display = bool_match.group(1)
+                        if bool_match.group(2):
+                            conditions.append(bool_match.group(2).strip())
+                    dep_match = re.match(r'depends\s+on\s+(.+)', sline)
+                    if dep_match:
+                        conditions.append(dep_match.group(1).strip())
+                    j += 1
+
+                if display:
+                    choices.append({
+                        'config_symbol': symbol,
+                        'display': display,
+                        'condition': ' && '.join(conditions),
+                    })
+            i += 1
+
+        return choices
+
+    def _frequency_from_prompt(self, prompt):
+        """从 Kconfig prompt 中提取频率 Hz。"""
+        if 'Internal clock' in prompt:
+            return 'internal'
+        match = re.search(r'([\d.]+)\s*([kKmM])\s*[hH]z', prompt)
+        if not match:
+            return None
+        value = float(match.group(1))
+        unit = match.group(2).lower()
+        multiplier = 1000 if unit == 'k' else 1000000
+        freq = int(value * multiplier)
+        return str(freq)
     
     def _parse_bootloader_options(self, content, mcus):
         """解析 Bootloader 偏移选项 - 支持多种平台"""
+        choice_options = self._parse_choice_options(content, 'Bootloader offset')
+        if choice_options:
+            for mcu in mcus.values():
+                offsets = []
+                option_rows = []
+                for option in choice_options:
+                    if not self._check_condition(option['condition'], mcu):
+                        continue
+                    suffix_match = re.search(r'_FLASH_START_([0-9A-Fa-f]+)$', option['config_symbol'])
+                    if not suffix_match:
+                        continue
+                    offset = str(int(suffix_match.group(1), 16))
+                    option_rows.append({
+                        'offset': offset,
+                        'display': option['display'],
+                        'config_symbol': option['config_symbol'],
+                    })
+                    offsets.append(offset)
+                mcu['bl_offset_options'] = option_rows
+                mcu['bl_offsets'] = offsets
+            return
+
         bl_options = []
         
         # 匹配带条件的 Bootloader offset 选项
@@ -249,7 +483,13 @@ class KlipperKconfigParser:
     
     def _check_condition(self, condition, mcu):
         """检查条件是否匹配 MCU"""
-        # 简单的条件匹配
+        if not condition:
+            return True
+        symbols = set(mcu.get('capabilities') or [])
+        if self._eval_condition(condition, symbols):
+            return True
+
+        # 保留旧的简单条件匹配作为兜底。
         config_name = mcu['config_name']
         base_name = config_name.replace('MACH_', '')
         mcu_id = mcu.get('id', '').lower()
@@ -297,6 +537,57 @@ class KlipperKconfigParser:
                     return True
         
         return False
+
+    def get_mcu_info(self, mcu_id):
+        """获取特定 MCU 的详细信息"""
+        mcu_id = mcu_id.lower()
+
+        if not self.mcu_database:
+            self.parse_all_platforms()
+
+        for platform, data in self.mcu_database.items():
+            if mcu_id in data['mcus']:
+                mcu = data['mcus'][mcu_id]
+                return {
+                    'platform': platform,
+                    'platform_key': data.get('platform'),
+                    'arch_config': data.get('arch_config', ''),
+                    'mcu': mcu,
+                    'flash_modes': data['flash_modes'],
+                    'connections': data['connections']
+                }
+
+        return None
+
+    def resolve_mcu_info(self, mcu_id, platform=None):
+        """按 MCU 与可选平台名解析编译需要的 MCU 信息。"""
+        mcu_id = (mcu_id or '').lower()
+        platform_norm = (platform or '').lower()
+
+        if not self.mcu_database:
+            self.parse_all_platforms()
+
+        for platform_name, data in self.mcu_database.items():
+            platform_candidates = {
+                platform_name.lower(),
+                data.get('platform', '').lower(),
+                data.get('platform_name', '').lower(),
+            }
+            if platform_norm and platform_norm not in platform_candidates:
+                continue
+            if mcu_id in data['mcus']:
+                return {
+                    'platform': platform_name,
+                    'platform_key': data.get('platform'),
+                    'arch_config': data.get('arch_config', ''),
+                    'mcu': data['mcus'][mcu_id],
+                    'flash_modes': data.get('flash_modes', []),
+                    'connections': data.get('connections', []),
+                }
+
+        if platform_norm:
+            return self.resolve_mcu_info(mcu_id)
+        return None
     
     def _parse_connections(self, content):
         """解析连接方式"""
@@ -330,22 +621,6 @@ class KlipperKconfigParser:
             'avr': ['DFU']
         }
         return flash_modes_map.get(platform_dir, ['DFU'])
-    
-    def get_mcu_info(self, mcu_id):
-        """获取特定 MCU 的详细信息"""
-        mcu_id = mcu_id.lower()
-        
-        for platform, data in self.mcu_database.items():
-            if mcu_id in data['mcus']:
-                mcu = data['mcus'][mcu_id]
-                return {
-                    'platform': platform,
-                    'mcu': mcu,
-                    'flash_modes': data['flash_modes'],
-                    'connections': data['connections']
-                }
-        
-        return None
     
     def save_database(self, output_path=None):
         """保存数据库到 JSON 文件"""

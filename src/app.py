@@ -33,5 +33,6 @@ app.register_blueprint(tools_bp)
 # 启动
 if __name__ == '__main__':
     os.chdir(BASE_DIR)
-    logger.info(f"Firmware-Tool 启动在 0.0.0.0:{PORT}")
-    app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
+    bind_host = os.environ.get('FIRMWARE_TOOL_HOST') or config.get('bind_host', '0.0.0.0')
+    logger.info(f"Firmware-Tool 启动在 {bind_host}:{PORT}")
+    app.run(host=bind_host, port=PORT, debug=False, threaded=True)

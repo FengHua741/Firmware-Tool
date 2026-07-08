@@ -85,28 +85,41 @@ fi
 
 # 创建配置文件
 echo "创建配置文件..."
+mkdir -p "$PROJECT_DIR/data"
+if [ ! -f "$PROJECT_DIR/data/config.json" ]; then
 cat > "$PROJECT_DIR/data/config.json" << EOF
 {
   "port": $PORT,
+  "bind_host": "0.0.0.0",
   "klipper_path": "~/klipper",
   "json_repo_url": "",
-  "last_json_update": null
+  "last_json_update": null,
+  "connection_mode": "local",
+  "allowed_origins": [],
+  "api_token": ""
 }
 EOF
+else
+    echo "配置文件已存在，跳过覆盖: $PROJECT_DIR/data/config.json"
+fi
 
-chown $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR/data/config.json"
+chown "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR/data/config.json"
 
 # 安装依赖
 echo "安装依赖..."
 apt update
-apt install -y python3-flask python3-flask-cors python3-paramiko python3-cryptography
+apt install -y python3-pip python3-flask python3-flask-cors python3-paramiko python3-cryptography python3-psutil python3-requests
 
 # 检查 pip 可用并安装可能缺失的包
-pip3 install paramiko cryptography 2>/dev/null || pip install paramiko cryptography 2>/dev/null || true
+if [ -f "$PROJECT_DIR/requirements.txt" ]; then
+    pip3 install -r "$PROJECT_DIR/requirements.txt" 2>/dev/null || pip install -r "$PROJECT_DIR/requirements.txt" 2>/dev/null || true
+else
+    pip3 install flask flask-cors psutil paramiko cryptography requests 2>/dev/null || pip install flask flask-cors psutil paramiko cryptography requests 2>/dev/null || true
+fi
 
 # 设置目录权限
 echo "设置目录权限..."
-chown -R $CURRENT_USER:$CURRENT_USER "$PROJECT_DIR"
+chown -R "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR"
 chmod +x "$PROJECT_DIR/src/app.py"
 chmod +x "$SCRIPT_DIR"/*.sh 2>/dev/null || true
 

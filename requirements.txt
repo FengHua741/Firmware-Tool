@@ -1,0 +1,6 @@
+flask
+flask-cors
+psutil
+paramiko
+cryptography
+requests

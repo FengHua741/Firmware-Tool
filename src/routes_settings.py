@@ -16,7 +16,7 @@ from shared import (
     expand_klipper_path, sudo_write_file, sudo_mkdir,
     SSHManager, get_fast_ssh_credentials,
 )
-from routes_system import _ssh_connection_status, _update_ssh_disconnect_status
+from routes_system import _ssh_connection_status, _update_ssh_disconnect_status, _normalize_service_name
 
 settings_bp = Blueprint('settings', __name__)
 
@@ -859,10 +859,13 @@ def manage_service(action):
         return jsonify({'error': '无效的操作'}), 400
     
     data = request.json
-    service = data.get('service', '')
+    requested_service = data.get('service', '')
+    service = _normalize_service_name(requested_service)
     
-    if not service:
+    if not requested_service:
         return jsonify({'error': '未指定服务'}), 400
+    if not service:
+        return jsonify({'error': '不允许控制该服务'}), 400
     
     try:
         if action == 'status':

@@ -47,6 +47,53 @@ def get_klipper_config_dir():
     return candidates
 
 
+def _parse_cfg_sections(content):
+    """轻量解析 Klipper 配置 section 和 key/value。"""
+    sections = []
+    current = None
+    for line_no, line in enumerate((content or '').splitlines(), 1):
+        header = re.match(r'^\s*\[([^\]]+)\]\s*(?:#.*)?$', line)
+        if header:
+            current = {'name': header.group(1).strip(), 'line': line_no, 'options': {}}
+            sections.append(current)
+            continue
+        if not current:
+            continue
+        kv = re.match(r'^\s*([^:#]+)\s*:\s*(.*?)\s*(?:#.*)?$', line)
+        if kv:
+            current['options'][kv.group(1).strip()] = kv.group(2).strip()
+    return sections
+
+
+def _static_validate_klipper_config(content):
+    sections = _parse_cfg_sections(content)
+    section_map = {sec['name']: sec for sec in sections}
+    seen = {}
+    errors = []
+    warnings = []
+
+    for sec in sections:
+        seen.setdefault(sec['name'], []).append(sec['line'])
+        for key, value in sec.get('options', {}).items():
+            if not (key.endswith('_pin') or key == 'pin'):
+                continue
+            m = re.search(r'[!^~]?\b([A-Za-z_][\w.-]*):[A-Za-z0-9_.-]+', value)
+            if not m:
+                continue
+            mcu = m.group(1)
+            if mcu not in ('mcu', 'probe') and f'mcu {mcu}' not in section_map:
+                errors.append(f'[{sec["name"]}] {key} 使用 {mcu}: 前缀，但缺少 [mcu {mcu}]')
+
+    for name, lines in seen.items():
+        if len(lines) > 1:
+            errors.append(f'重复 section [{name}]，行号: {", ".join(map(str, lines))}')
+
+    if 'mcu' not in section_map:
+        warnings.append('未发现 [mcu] 主控 section')
+
+    return {'ok': not errors, 'errors': errors, 'warnings': warnings, 'method': 'static'}
+
+
 @tools_bp.route('/api/tools/config-files', methods=['GET'])
 def list_config_files():
     """列出被控机器上的 Klipper 配置文件
@@ -191,6 +238,17 @@ def list_wildcard_files():
             return jsonify({'success': True, 'files': matched})
 
     return jsonify({'success': True, 'files': []})
+
+
+@tools_bp.route('/api/tools/validate-klipper-config', methods=['POST'])
+def validate_klipper_config():
+    """校验生成的 Klipper 配置。"""
+    data = request.json or {}
+    content = data.get('content', '')
+    if not content.strip():
+        return jsonify({'success': False, 'error': '配置内容为空'})
+    result = _static_validate_klipper_config(content)
+    return jsonify({'success': True, **result})
 
 
 @tools_bp.route('/api/tools/config-content', methods=['POST'])
@@ -457,9 +515,9 @@ def list_boards():
 
 @tools_bp.route('/api/tools/boards/<board_id>/mapping', methods=['GET'])
 def get_board_mapping(board_id):
-    """获取指定板卡的 klipper_Mapping.json 内容
+    """获取指定板卡的 klipper_Mapping.json 内容和图片坐标布局
 
-    返回: { success, mapping, board_info }
+    返回: { success, mapping, layout, board_info }
     """
     try:
         index = _load_boards_index()
@@ -485,9 +543,23 @@ def get_board_mapping(board_id):
         with open(mapping_file, 'r', encoding='utf-8') as f:
             mapping = json.load(f)
 
+        layout = None
+        layout_candidates = []
+        if board_info.get('image'):
+            layout_candidates.append(os.path.splitext(os.path.basename(board_info['image']))[0] + '.json')
+        if mapping_dir:
+            layout_candidates.append(os.path.basename(mapping_dir.rstrip('/')) + '.json')
+        for filename in dict.fromkeys(layout_candidates):
+            layout_file = os.path.join(BOARDS_BASE_DIR, mapping_dir, filename)
+            if os.path.isfile(layout_file):
+                with open(layout_file, 'r', encoding='utf-8') as f:
+                    layout = json.load(f)
+                break
+
         return jsonify({
             'success': True,
             'mapping': mapping,
+            'layout': layout,
             'board_info': board_info,
         })
     except Exception as e:
