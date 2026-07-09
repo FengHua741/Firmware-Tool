@@ -1426,7 +1426,8 @@ def flash_firmware():
                         cmd = f'{python_bin} {fast_flash_can} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                         logging.info(f'FAST-SSH 旧版烧录命令 (canboot/flash_can.py, {can_iface}): {cmd}')
                     else:
-                        yield f'data: {json.dumps({"error": f"未找到烧录工具。请确认 Klipper 已安装。\\n查找路径:\\n  {fast_flashtool}\\n  {fast_flash_can}"})}\n\n'
+                        _err_msg = f"未找到烧录工具。请确认 Klipper 已安装。\n查找路径:\n  {fast_flashtool}\n  {fast_flash_can}"
+                        yield f'data: {json.dumps({"error": _err_msg})}\n\n'
                         return
                     result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
                 else:

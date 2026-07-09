@@ -14,6 +14,9 @@ NC='\033[0m' # No Color
 echo -e "${GREEN}=== Firmware-Tool 安装脚本 ===${NC}"
 echo ""
 
+# 获取脚本所在目录（所有系统都需要）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # 检测是否为FlyOS-Fast系统
 IS_FAST=false
 if [ -f /etc/issue ]; then
@@ -37,7 +40,6 @@ if [ "$IS_FAST" = true ]; then
     echo -e "${YELLOW}Fast系统: 项目将安装到 $PROJECT_DIR${NC}"
 else
     # 普通系统
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
     
     # 检查root权限
@@ -80,7 +82,7 @@ echo ""
 if [ "$IS_FAST" = true ] && [ "$(pwd)" != "$PROJECT_DIR" ]; then
     echo "复制项目到 $PROJECT_DIR..."
     mkdir -p "$PROJECT_DIR"
-    cp -r "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"/* "$PROJECT_DIR/"
+    cp -r "$(dirname "$SCRIPT_DIR")/"* "$PROJECT_DIR/"
 fi
 
 # 创建配置文件
@@ -107,27 +109,84 @@ chown "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR/data/config.json"
 
 # 安装依赖
 echo "安装依赖..."
-apt update
-apt install -y python3-pip python3-flask python3-flask-cors python3-paramiko python3-cryptography python3-psutil python3-requests
 
-# 检查 pip 可用并安装可能缺失的包
-if [ -f "$PROJECT_DIR/requirements.txt" ]; then
-    pip3 install -r "$PROJECT_DIR/requirements.txt" 2>/dev/null || pip install -r "$PROJECT_DIR/requirements.txt" 2>/dev/null || true
+# 检测 Python3 路径
+PYTHON3_BIN=$(which python3 2>/dev/null || echo /usr/bin/python3)
+echo "Python3: $PYTHON3_BIN ($($PYTHON3_BIN --version 2>/dev/null || echo 'unknown'))"
+
+# 尝试 apt 安装系统包（可能不可用，如 FAST 系统）
+if command -v apt &>/dev/null; then
+    echo "尝试 apt 安装系统包..."
+    apt update 2>/dev/null || echo -e "${YELLOW}apt update 失败，跳过${NC}"
+    apt install -y python3-pip python3-flask python3-flask-cors python3-paramiko python3-cryptography python3-psutil python3-requests 2>/dev/null || \
+        echo -e "${YELLOW}apt 安装部分包失败，将通过 pip 补充${NC}"
 else
-    pip3 install flask flask-cors psutil paramiko cryptography requests 2>/dev/null || pip install flask flask-cors psutil paramiko cryptography requests 2>/dev/null || true
+    echo -e "${YELLOW}未检测到 apt，使用 pip 安装所有依赖${NC}"
 fi
+
+# 确保 pip3 可用
+if ! command -v pip3 &>/dev/null && ! command -v pip &>/dev/null; then
+    echo -e "${YELLOW}pip3 未安装，尝试安装...${NC}"
+    $PYTHON3_BIN -m ensurepip --upgrade 2>/dev/null || true
+    if ! command -v pip3 &>/dev/null; then
+        echo -e "${RED}无法安装 pip3，请手动安装后重试${NC}"
+        exit 1
+    fi
+fi
+
+# 确定 pip 命令
+PIP_CMD="pip3"
+command -v pip3 &>/dev/null || PIP_CMD="pip"
+
+# pip 安装依赖（FAST 系统需加 --break-system-packages 或使用 --user + 调整 PATH）
+PIP_INSTALL_OPTS=""
+if [ "$IS_FAST" = true ]; then
+    # FAST 系统 site-packages 可能不可写，使用 --break-system-packages 强制安装到系统目录
+    PIP_INSTALL_OPTS="--break-system-packages"
+fi
+
+if [ -f "$PROJECT_DIR/requirements.txt" ]; then
+    echo "通过 pip 安装 requirements.txt 依赖..."
+    $PIP_CMD install $PIP_INSTALL_OPTS -r "$PROJECT_DIR/requirements.txt" 2>&1 | tail -5
+else
+    $PIP_CMD install $PIP_INSTALL_OPTS flask flask-cors psutil paramiko cryptography requests 2>&1 | tail -5
+fi
+
+# 验证关键包是否可导入
+echo "验证依赖安装..."
+$PYTHON3_BIN -c "import flask; import flask_cors; import psutil; import paramiko; import requests; print('依赖验证通过')" || {
+    echo -e "${RED}依赖验证失败！请检查 pip 安装日志${NC}"
+    exit 1
+}
 
 # 设置目录权限
 echo "设置目录权限..."
 chown -R "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR"
 chmod +x "$PROJECT_DIR/src/app.py"
-chmod +x "$SCRIPT_DIR"/*.sh 2>/dev/null || true
+chmod +x "$PROJECT_DIR/scripts"/*.sh 2>/dev/null || true
 
 # 删除logs文件夹（如果存在）
 if [ -d "$PROJECT_DIR/logs" ]; then
     echo "清理logs文件夹..."
     rm -rf "$PROJECT_DIR/logs"
 fi
+
+# Python 语法兼容性检查（Python < 3.12 不支持 f-string 内反斜杠）
+echo "检查 Python 源文件语法..."
+SYNTAX_OK=true
+for pyfile in "$PROJECT_DIR"/src/*.py; do
+    [ -f "$pyfile" ] || continue
+    $PYTHON3_BIN -c "import ast; ast.parse(open('$pyfile').read())" 2>/dev/null || {
+        echo -e "${RED}语法错误: $pyfile${NC}"
+        $PYTHON3_BIN -m py_compile "$pyfile" 2>&1 || true
+        SYNTAX_OK=false
+    }
+done
+if [ "$SYNTAX_OK" = false ]; then
+    echo -e "${RED}存在语法错误，请修复后重试。常见原因: Python < 3.12 不支持 f-string 内使用 \\n${NC}"
+    exit 1
+fi
+echo "语法检查通过"
 
 # 创建systemd服务文件
 echo "创建systemd服务..."
@@ -144,14 +203,14 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=$PROJECT_DIR
-ExecStart=/usr/bin/python3 $PROJECT_DIR/src/app.py
+ExecStart=$PYTHON3_BIN $PROJECT_DIR/src/app.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
-# 环境变量
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# 环境变量（含 pip --user 安装路径，确保 FAST 系统也能找到包）
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/bin
 Environment=PYTHONPATH=$PROJECT_DIR/src
 
 [Install]
@@ -177,7 +236,9 @@ echo "  开机自启: sudo systemctl enable $SERVICE_NAME"
 echo "  查看日志：sudo journalctl -u $SERVICE_NAME -f"
 echo "  卸载程序：cd $PROJECT_DIR/scripts && sudo ./uninstall.sh"
 echo ""
-echo -e "${GREEN}访问地址: http://$(hostname -I | awk '{print $1}'):$PORT${NC}"
+# 获取本机 IP（兼容 FAST 系统无 hostname -I 的情况）
+LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -1 || echo "<IP>")
+echo -e "${GREEN}访问地址: http://$LOCAL_IP:$PORT${NC}"
 echo ""
 
 # 询问是否启动服务
