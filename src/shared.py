@@ -175,6 +175,14 @@ def get_klipper_owner(klipper_path=None):
 
     # SSH 模式: 通过远程命令获取 SSH 用户的 home 目录
     if is_ssh_mode():
+        # FAST-SSH: klipper 安装在 /data/klipper，返回 /data 作为家目录
+        if is_fast_ssh_mode() and path_exists('/data/klipper'):
+            try:
+                stat_info = os.stat('/data/klipper')
+                pw = pwd.getpwuid(stat_info.st_uid)
+                return pw.pw_name, '/data'
+            except (KeyError, OSError):
+                pass
         ssh_user = config.get('ssh_user', 'root')
         try:
             result = run_cmd(f'eval echo ~{ssh_user}', shell=True, capture_output=True, text=True, timeout=5)
@@ -190,16 +198,31 @@ def get_klipper_owner(klipper_path=None):
     
     # 本地模式
     if klipper_path.startswith('~'):
-        for user_dir in list_dir('/home'):
-            candidate = os.path.join('/home', user_dir, 'klipper')
-            if path_exists(candidate):
-                klipper_path = candidate
-                break
+        # /data/klipper 优先：FAST/嵌入式系统的常见安装路径
+        if path_exists('/data/klipper'):
+            klipper_path = '/data/klipper'
+        else:
+            for user_dir in list_dir('/home'):
+                candidate = os.path.join('/home', user_dir, 'klipper')
+                if path_exists(candidate):
+                    klipper_path = candidate
+                    break
     if path_exists(klipper_path):
         try:
             stat_info = os.stat(klipper_path)
             pw = pwd.getpwuid(stat_info.st_uid)
+            # 如果 klipper 在 /data 下，使用 /data 作为基目录
+            if klipper_path.startswith('/data/'):
+                return pw.pw_name, '/data'
             return pw.pw_name, pw.pw_dir
+        except (KeyError, OSError):
+            pass
+    # 回退时也检查 /data/klipper
+    if path_exists('/data/klipper'):
+        try:
+            stat_info = os.stat('/data/klipper')
+            pw = pwd.getpwuid(stat_info.st_uid)
+            return pw.pw_name, '/data'
         except (KeyError, OSError):
             pass
     for entry in pwd.getpwall():
@@ -219,6 +242,9 @@ def expand_klipper_path(path, force_local=False):
     """
     if not path.startswith('~'):
         return os.path.expanduser(path)
+    # /data/klipper 优先：FAST/嵌入式系统的常见 klipper 安装路径
+    if os.path.isdir('/data/klipper'):
+        return '/data' + path[1:]
     # 强制本地模式: 直接搜索本地 /home 下的 klipper 目录
     if force_local:
         try:
