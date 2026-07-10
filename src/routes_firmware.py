@@ -123,6 +123,162 @@ def _read_text_file(path):
         return f.read()
 
 
+def _decode_config_value(value):
+    value = str(value or '').strip()
+    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+        value = value[1:-1]
+        value = value.replace(r'\"', '"').replace(r'\\', '\\')
+    return value
+
+
+def _parse_klipper_config(content):
+    config_values = {}
+    raw_config = {}
+    for line in (content or '').splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        unset_match = re.match(r'^#\s*CONFIG_([A-Za-z0-9_]+)\s+is\s+not\s+set$', stripped)
+        if unset_match:
+            symbol = unset_match.group(1)
+            config_values[symbol] = 'n'
+            raw_config[f'CONFIG_{symbol}'] = 'n'
+            continue
+        if not stripped.startswith('CONFIG_') or '=' not in stripped:
+            continue
+        key, value = stripped.split('=', 1)
+        symbol = key[7:]
+        decoded = _decode_config_value(value)
+        config_values[symbol] = decoded
+        raw_config[key] = decoded
+    return config_values, raw_config
+
+
+def _config_truthy(config_values, symbol):
+    symbol = _normalize_config_symbol(symbol)
+    if not symbol:
+        return False
+    return str(config_values.get(symbol, '')).strip().lower() in ('y', '1', 'true', 'yes', 'on')
+
+
+def _first_enabled_option(options, config_values, symbol_key='config_symbol'):
+    for option in options or []:
+        if _config_truthy(config_values, option.get(symbol_key)):
+            return option
+    return None
+
+
+def _infer_crystal_from_symbols(config_values):
+    for symbol, value in config_values.items():
+        if str(value).strip().lower() not in ('y', '1', 'true', 'yes', 'on'):
+            continue
+        upper = symbol.upper()
+        if 'CLOCK_REF_INTERNAL' in upper:
+            return 'internal'
+        if 'CLOCK_REF_X32K' in upper:
+            return '32768'
+        match = re.search(r'CLOCK_REF_X?(\d+)M\b', upper)
+        if match:
+            return str(int(match.group(1)) * 1000000)
+        match = re.search(r'CLOCK_REF_(\d+)$', upper)
+        if match and match.group(1) in ('8', '12', '16', '20', '24', '25'):
+            return str(int(match.group(1)) * 1000000)
+    return ''
+
+
+def _infer_bl_offset_from_symbols(config_values):
+    for symbol, value in config_values.items():
+        if str(value).strip().lower() not in ('y', '1', 'true', 'yes', 'on'):
+            continue
+        match = re.search(r'FLASH_START_([0-9A-Fa-f]+)$', symbol)
+        if match:
+            try:
+                return str(int(match.group(1), 16))
+            except ValueError:
+                return ''
+    return ''
+
+
+def _find_current_mcu(mcu_database, config_values):
+    fallback = None
+    for platform_name, platform_data in (mcu_database or {}).items():
+        arch_enabled = _config_truthy(config_values, platform_data.get('arch_config'))
+        for mcu_id, mcu in (platform_data.get('mcus') or {}).items():
+            mcu_symbol = mcu.get('config_symbol') or mcu.get('config_name')
+            if not _config_truthy(config_values, mcu_symbol):
+                continue
+            result = {
+                'platform': platform_name,
+                'platform_key': platform_data.get('platform', ''),
+                'arch_config': platform_data.get('arch_config', ''),
+                'mcu_id': mcu_id,
+                'mcu': mcu,
+            }
+            if arch_enabled:
+                return result
+            if fallback is None:
+                fallback = result
+    return fallback
+
+
+def _resolve_current_config_params(kconfig_klipper_path, config_values):
+    warnings = []
+    parser = KlipperKconfigParser(kconfig_klipper_path)
+    mcu_database = parser.parse_all_platforms()
+    selected = _find_current_mcu(mcu_database, config_values)
+    if not selected:
+        return {}, ['未能从 .config 识别 MCU 平台和型号']
+
+    mcu = selected['mcu']
+    params = {
+        'platform': selected['platform'],
+        'platform_key': selected.get('platform_key', ''),
+        'arch_config': selected.get('arch_config', ''),
+        'mcu': selected['mcu_id'],
+        'mcu_name': mcu.get('name', ''),
+        'mcu_config_symbol': mcu.get('config_symbol') or mcu.get('config_name', ''),
+        'startup_pin': config_values.get('INITIAL_PINS', ''),
+    }
+
+    crystal_option = _first_enabled_option(mcu.get('crystal_options', []), config_values)
+    if crystal_option:
+        params['crystal'] = crystal_option.get('value', '')
+        params['crystal_config_symbol'] = crystal_option.get('config_symbol', '')
+        params['crystal_display'] = crystal_option.get('display', '')
+    else:
+        params['crystal'] = _infer_crystal_from_symbols(config_values)
+
+    bl_option = _first_enabled_option(mcu.get('bl_offset_options', []), config_values)
+    if bl_option:
+        params['bl_offset'] = bl_option.get('offset', '')
+        params['bl_offset_config_symbol'] = bl_option.get('config_symbol', '')
+        params['bl_offset_display'] = bl_option.get('display', '')
+    else:
+        params['bl_offset'] = _infer_bl_offset_from_symbols(config_values)
+
+    comm_data = parse_can_options(kconfig_klipper_path)
+    platform_data = comm_data.get(selected.get('platform_key', ''), {})
+    comm_option = _first_enabled_option(platform_data.get('communication_options', []), config_values)
+    if comm_option:
+        params['comm_type'] = comm_option.get('comm_type', '')
+        params['comm_config_symbol'] = comm_option.get('config_symbol', '')
+        params['communication'] = comm_option.get('display', '')
+    else:
+        warnings.append('未能从 .config 识别通信接口')
+
+    bridge_option = _first_enabled_option(platform_data.get('bridge_can', []), config_values, 'config')
+    if bridge_option:
+        params['bridge_can_config'] = bridge_option.get('config', '')
+        params['bridge_can_display'] = bridge_option.get('display', '')
+
+    if 'RPXXXX_CANBUS_GPIO_RX' in config_values:
+        params['rp2040_can_rx_gpio'] = config_values.get('RPXXXX_CANBUS_GPIO_RX')
+    if 'RPXXXX_CANBUS_GPIO_TX' in config_values:
+        params['rp2040_can_tx_gpio'] = config_values.get('RPXXXX_CANBUS_GPIO_TX')
+
+    return params, warnings
+
+
 def _file_sha256(path):
     if is_ssh_mode():
         result = run_cmd(f'sha256sum {shlex.quote(path)} 2>/dev/null', shell=True, capture_output=True, text=True, timeout=20)
@@ -761,6 +917,36 @@ def get_all_rules():
         return jsonify(rules)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@firmware_bp.route('/api/firmware/current-config')
+def get_current_firmware_config():
+    """读取 Klipper .config 并解析为页面可回填的编译参数。"""
+    try:
+        raw_klipper_path = request.args.get('klipper_path') or config.get('klipper_path', '~/klipper')
+        klipper_path = expand_klipper_path(raw_klipper_path)
+        kconfig_klipper_path = expand_klipper_path(raw_klipper_path, force_local=True)
+        config_path = os.path.join(klipper_path, '.config')
+        content = _read_text_file(config_path)
+        if not content.strip():
+            return jsonify({
+                'success': False,
+                'error': f'未找到 Klipper .config: {config_path}'
+            }), 404
+
+        config_values, raw_config = _parse_klipper_config(content)
+        params, warnings = _resolve_current_config_params(kconfig_klipper_path, config_values)
+        return jsonify({
+            'success': True,
+            'klipper_path': klipper_path,
+            'config_path': config_path,
+            'params': params,
+            'config': raw_config,
+            'warnings': warnings,
+        })
+    except Exception as e:
+        logger.exception('读取当前 Klipper 编译参数失败')
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== 编译依赖检测 API ====================
 @firmware_bp.route('/api/firmware/dependencies')

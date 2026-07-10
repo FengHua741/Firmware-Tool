@@ -249,6 +249,7 @@ Firmware-Tool/
 | `/api/system/can-iface` | GET | CAN 接口列表 |
 | `/api/system/can-uuid` | POST | CAN 设备 UUID 扫描 |
 | `/api/system/video` | GET | 摄像头设备 |
+| `/api/firmware/current-config` | GET | 读取 Klipper `.config` 并返回可回填的编译参数 |
 | `/api/firmware/compile` | POST | 编译固件（SSE 流式） |
 | `/api/firmware/manifest` | GET | 最近一次编译生成的固件 manifest |
 | `/api/firmware/flash/plan` | POST | 生成烧录推荐与预检结果 |

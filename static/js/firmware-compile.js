@@ -116,7 +116,7 @@ function onCompileModeChange() {
 }
 
 // 加载 MCU 平台列表
-function loadCompileMcuPlatforms() {
+function loadCompileMcuPlatforms(autoDefault = true) {
     const select = document.getElementById('compileMcuPlatform');
     select.innerHTML = '<option value="">-- 选择平台 --</option>';
     
@@ -124,7 +124,7 @@ function loadCompileMcuPlatforms() {
         select.innerHTML += `<option value="${platform}">${platform}</option>`;
     }
     // 默认选中 STM32
-    if (compileMcuDatabase['STM32']) {
+    if (autoDefault && compileMcuDatabase['STM32']) {
         select.value = 'STM32';
         onCompileMcuPlatformChange();
     }
@@ -589,7 +589,7 @@ async function onCompilePresetModelChange() {
     document.getElementById('compileCustomSection').style.display = 'block';
 
     // 加载MCU平台列表
-    loadCompileMcuPlatforms();
+    loadCompileMcuPlatforms(false);
 
     // 选择预设对应的平台
     const platformSelect = document.getElementById('compileMcuPlatform');
@@ -742,6 +742,134 @@ function _autoSelectPresetConnection(config) {
         const txInput = document.getElementById('compileRp2040CanTx');
         if (rxInput) rxInput.value = config.can_gpio.rx;
         if (txInput) txInput.value = config.can_gpio.tx;
+    }
+}
+
+function _normalizeCompileSymbol(symbol) {
+    return String(symbol || '').replace(/^CONFIG_/, '').toUpperCase();
+}
+
+function _selectCompileOption(select, value) {
+    if (!select || value === undefined || value === null || value === '') return false;
+    const target = String(value);
+    for (let i = 0; i < select.options.length; i++) {
+        if (select.options[i].value === target) {
+            select.value = select.options[i].value;
+            return true;
+        }
+    }
+    const targetLower = target.toLowerCase();
+    for (let i = 0; i < select.options.length; i++) {
+        if (select.options[i].value.toLowerCase() === targetLower) {
+            select.value = select.options[i].value;
+            return true;
+        }
+    }
+    return false;
+}
+
+function _setCompileSelectValue(select, value, label) {
+    if (!select || value === undefined || value === null || value === '') return false;
+    if (_selectCompileOption(select, value)) return true;
+    const opt = document.createElement('option');
+    opt.value = String(value);
+    opt.textContent = label || String(value);
+    select.appendChild(opt);
+    select.value = opt.value;
+    return true;
+}
+
+function _selectCompileSymbol(select, symbol) {
+    if (!select || !symbol) return false;
+    const target = _normalizeCompileSymbol(symbol);
+    for (let i = 0; i < select.options.length; i++) {
+        if (_normalizeCompileSymbol(select.options[i].value) === target) {
+            select.value = select.options[i].value;
+            return true;
+        }
+    }
+    return false;
+}
+
+async function loadCurrentCompileConfig() {
+    const klipperPath = document.getElementById('klipperPath')?.value || '~/klipper';
+    try {
+        const params = new URLSearchParams({ klipper_path: klipperPath });
+        const response = await fetch('/api/firmware/current-config?' + params.toString());
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || '读取当前编译参数失败');
+        }
+
+        const current = data.params || {};
+        if (!current.mcu) {
+            throw new Error((data.warnings && data.warnings[0]) || '当前 .config 未识别到 MCU');
+        }
+
+        const customMode = document.querySelector('input[name="compileMode"][value="custom"]');
+        if (customMode) customMode.checked = true;
+        document.getElementById('compilePresetSection').style.display = 'none';
+        document.getElementById('compileCustomSection').style.display = 'block';
+        document.getElementById('compileMcuDetails').style.display = 'none';
+        currentCompileMcu = null;
+        loadCompileMcuPlatforms(false);
+
+        const platformSelect = document.getElementById('compileMcuPlatform');
+        const platformValue = current.platform || current.platform_key;
+        if (!_selectCompileOption(platformSelect, platformValue)) {
+            throw new Error(`当前 .config 的平台 ${platformValue || ''} 不在 MCU 数据库中`);
+        }
+        await onCompileMcuPlatformChange();
+
+        const modelSelect = document.getElementById('compileMcuModel');
+        if (!_selectCompileOption(modelSelect, current.mcu)) {
+            throw new Error(`当前 .config 的 MCU ${current.mcu} 不在平台 ${platformSelect.value} 中`);
+        }
+        await onCompileMcuModelChange();
+
+        _setCompileSelectValue(
+            document.getElementById('compileCrystal'),
+            current.crystal,
+            current.crystal_display || formatCompileFrequency(current.crystal)
+        );
+        _setCompileSelectValue(
+            document.getElementById('compileBlOffset'),
+            current.bl_offset,
+            current.bl_offset_display || formatCompileBlOffset(current.bl_offset, current.mcu)
+        );
+
+        const startupPin = document.getElementById('compileStartupPin');
+        if (startupPin) startupPin.value = current.startup_pin || '';
+
+        let commType = current.comm_type || '';
+        if (!commType && current.comm_config_symbol) {
+            const matched = _commAllOptions.find(opt =>
+                _normalizeCompileSymbol(opt.config_symbol) === _normalizeCompileSymbol(current.comm_config_symbol)
+            );
+            commType = matched ? matched.comm_type : '';
+        }
+        const connSelect = document.getElementById('compileConnection');
+        if (commType && _selectCompileOption(connSelect, commType)) {
+            onCompileConnectionChange();
+            _selectCompileSymbol(document.getElementById('compileConnectionDetail'), current.comm_config_symbol);
+        }
+        if (current.bridge_can_config) {
+            _selectCompileSymbol(document.getElementById('compileBridgeCanPin'), current.bridge_can_config);
+        }
+        if (current.rp2040_can_rx_gpio !== undefined) {
+            const rxInput = document.getElementById('compileRp2040CanRx');
+            if (rxInput) rxInput.value = current.rp2040_can_rx_gpio;
+        }
+        if (current.rp2040_can_tx_gpio !== undefined) {
+            const txInput = document.getElementById('compileRp2040CanTx');
+            if (txInput) txInput.value = current.rp2040_can_tx_gpio;
+        }
+
+        const warningText = (data.warnings || []).length ? `（${data.warnings.join('；')}）` : '';
+        showSuccess(`已读取当前 Klipper 编译参数${warningText}`);
+    } catch (error) {
+        console.error('读取当前编译参数失败:', error);
+        showError('读取当前编译参数失败: ' + error.message);
     }
 }
 

@@ -238,6 +238,14 @@ class SSHManager:
     def _current_ssh_config(self):
         """从配置文件获取当前 SSH 配置"""
         cfg = _load_config_file()
+        if cfg.get('connection_mode') == 'fast-ssh':
+            fast_user, _ = get_fast_ssh_credentials()
+            return {
+                'ssh_host': cfg.get('ssh_host', ''),
+                'ssh_port': cfg.get('ssh_port', 22),
+                'ssh_user': fast_user or 'root',
+                'sudo_mode': 'password',
+            }
         return {
             'ssh_host': cfg.get('ssh_host', ''),
             'ssh_port': cfg.get('ssh_port', 22),
@@ -574,7 +582,7 @@ class SSHManager:
         try:
             result = self.exec_command('echo OK', timeout=5)
             if result.returncode == 0 and 'OK' in result.stdout:
-                cfg = _load_config_file()
+                cfg = self._current_ssh_config()
                 host = cfg.get('ssh_host', '')
                 user = cfg.get('ssh_user', '')
                 port = cfg.get('ssh_port', 22)
