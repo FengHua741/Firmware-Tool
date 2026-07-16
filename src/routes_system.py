@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request, send_from_directory, Response
 import subprocess
 import os
 import re
+import shlex
 import time
 import psutil
 import requests
@@ -18,7 +19,8 @@ from shared import (
     app, config, logger, BASE_DIR, CONFIG_PATH,
     DFU_KNOWN_DEVICES, DFU_KNOWN_VIDPIDS,
     run_cmd, run_cmd_check, path_exists, list_dir, is_ssh_mode, is_fast_ssh_mode,
-    SSHManager, get_klipper_owner, get_klipper_python_bin, expand_klipper_path
+    SSHManager, get_klipper_owner, get_klipper_python_bin, expand_klipper_path,
+    CSRF_COOKIE_NAME, new_csrf_token,
 )
 
 system_bp = Blueprint('system', __name__)
@@ -34,6 +36,17 @@ resource_history = {
 
 # 服务列表
 SERVICES = ['klipper', 'moonraker', 'nginx', 'crowsnest', 'KlipperScreen']
+SERVICE_CONTROL_DENYLIST = {
+    '',
+    'dbus',
+    'polkit',
+    'systemd',
+    'systemd-logind',
+    'networking',
+    'network-manager',
+    'ssh',
+    'sshd',
+}
 SERVICE_CONTROL_ALIASES = {
     'klipper': 'klipper',
     'moonraker': 'moonraker',
@@ -48,7 +61,22 @@ SERVICE_CONTROL_ALIASES = {
 
 def _normalize_service_name(service_name):
     key = str(service_name or '').strip().lower()
-    return SERVICE_CONTROL_ALIASES.get(key, '')
+    if key in SERVICE_CONTROL_ALIASES:
+        return SERVICE_CONTROL_ALIASES[key]
+    if key in SERVICE_CONTROL_DENYLIST:
+        return ''
+    if not re.match(r'^[a-zA-Z0-9_.@-]+$', key):
+        return ''
+    try:
+        result = run_cmd(
+            ['systemctl', 'list-unit-files', f'{key}.service'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and f'{key}.service' in (result.stdout or ''):
+            return key
+    except Exception:
+        pass
+    return ''
 
 # 远程资源采集缓存
 _remote_cpu_prev = None
@@ -212,7 +240,7 @@ def _collect_remote_resources():
                     net_info['interfaces'].append({'name': display_name, 'ips': [ip_addr]})
 
         global _remote_flyos_version, _remote_board_name
-        if _remote_flyos_version is None and 'VER' in sections:
+        if not _remote_flyos_version and 'VER' in sections:
             ver_line = sections['VER'].strip()
             import re as _re
             _ver_match = _re.search(r'FlyOS-Fast:\s*(v[\S]+)', ver_line)
@@ -221,7 +249,7 @@ def _collect_remote_resources():
             else:
                 _remote_flyos_version = ''
 
-        if _remote_board_name is None and 'BRD' in sections:
+        if not _remote_board_name and 'BRD' in sections:
             import re as _re
             _brd_match = _re.search(r'board_name=([^\s]+)', sections['BRD'].strip())
             if _brd_match:
@@ -352,7 +380,9 @@ monitor_thread.start()
 @system_bp.route('/')
 def index():
     """主页面"""
-    return send_from_directory('../static', 'index.html')
+    response = send_from_directory('../static', 'index.html')
+    response.set_cookie(CSRF_COOKIE_NAME, new_csrf_token(), samesite='Lax')
+    return response
 
 
 # ==================== 系统资源 API ====================
@@ -651,6 +681,65 @@ def get_can_interfaces():
 
 # ==================== CAN UUID 搜索辅助函数 ====================
 
+CAN_IFACE_RE = re.compile(r'^can[\w.-]*$')
+LOCAL_CANBUS_QUERY_SCRIPT = os.path.join(BASE_DIR, 'src', 'canbus_query.py')
+
+
+def _is_valid_can_iface(iface):
+    return bool(iface and CAN_IFACE_RE.match(str(iface)))
+
+
+def _get_canbus_query_script(home_dir):
+    """返回用于 CAN UUID 查询的脚本路径。
+
+    本地模式优先使用仓库内增强脚本；SSH 模式把增强脚本上传到远端临时目录。
+    失败时回退到 Klipper 自带脚本，保持旧环境可用。
+    """
+    klipper_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
+    if not os.path.exists(LOCAL_CANBUS_QUERY_SCRIPT):
+        return klipper_script, 'klipper'
+
+    if not is_ssh_mode():
+        return LOCAL_CANBUS_QUERY_SCRIPT, 'firmware-tool'
+
+    try:
+        from ssh_manager import ssh_upload
+        remote_path = '/tmp/firmware-tool-canbus_query.py'
+        return ssh_upload(LOCAL_CANBUS_QUERY_SCRIPT, remote_path), 'firmware-tool'
+    except Exception as e:
+        logger.warning(f"增强 CAN 查询脚本上传失败，回退到 Klipper 脚本: {e}")
+        return klipper_script, 'klipper'
+
+
+def _normalize_can_app(line):
+    if 'Klipper' in line:
+        return 'Klipper'
+    if 'Katapult' in line or 'CanBoot' in line:
+        return 'Katapult'
+    return 'Unknown'
+
+
+def _parse_can_uuid_line(line):
+    match = re.search(r'canbus_uuid=([a-fA-F0-9]+)', line)
+    if not match:
+        return None
+
+    device = {
+        'uuid': match.group(1),
+        'app': _normalize_can_app(line),
+        'raw': line.strip(),
+    }
+
+    processor_match = re.search(r'\bProcessor:\s*([^,]+)', line)
+    if processor_match:
+        device['mcu_model'] = processor_match.group(1).strip()
+
+    firmware_match = re.search(r'\bFirmware:\s*(.+)$', line)
+    if firmware_match:
+        device['mcu_version'] = firmware_match.group(1).strip()
+
+    return device
+
 def read_mcu_uuids_from_printer_cfg(content):
     """从 printer.cfg 内容中提取所有 MCU 段落的 canbus_uuid"""
     uuids = []
@@ -749,34 +838,35 @@ def read_printer_cfg_direct():
 def _scan_can_uuids(iface='can0'):
     """统一的 CAN UUID 扫描函数"""
     try:
+        if not _is_valid_can_iface(iface):
+            return [], '无效的CAN接口'
         klipper_owner, home_dir = get_klipper_owner()
         python_bin = get_klipper_python_bin(home_dir)
-        canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
+        canbus_script, script_source = _get_canbus_query_script(home_dir)
 
+        timeout = 30 if script_source == 'firmware-tool' else 10
         output = run_cmd(
-            f'{python_bin} {canbus_script} {iface} 2>&1',
-            shell=True, capture_output=True, text=True, timeout=10
+            f'{shlex.quote(python_bin)} {shlex.quote(canbus_script)} {shlex.quote(iface)} 2>&1',
+            shell=True, capture_output=True, text=True, timeout=timeout
         )
 
         devices = []
         error = None
         seen_uuids = set()
 
-        if output.stdout:
-            for line in output.stdout.strip().split('\n'):
+        combined = (output.stdout or '') + (output.stderr or '')
+        if combined:
+            for line in combined.strip().split('\n'):
                 if 'Error' in line or 'Traceback' in line:
                     if not error:
                         error = line.strip()
                     continue
                 if 'canbus_uuid' in line:
-                    match = re.search(r'canbus_uuid=([a-fA-F0-9]+)', line)
-                    if match:
-                        uuid = match.group(1)
-                        if uuid not in seen_uuids:
-                            seen_uuids.add(uuid)
-                            app_type = 'Klipper' if 'Klipper' in line else \
-                                       'Katapult' if ('Katapult' in line or 'CanBoot' in line) else 'Unknown'
-                            devices.append({'uuid': uuid, 'app': app_type, 'raw': line.strip()})
+                    device = _parse_can_uuid_line(line)
+                    if device and device['uuid'] not in seen_uuids:
+                        seen_uuids.add(device['uuid'])
+                        device['script_source'] = script_source
+                        devices.append(device)
 
         if not devices and not error:
             error = '未找到CAN设备，请确认CAN接口已启用且设备处于Katapult/Klipper模式'
@@ -899,31 +989,10 @@ def search_can_uuid():
     """通过指定CAN接口搜索UUID"""
     data = request.get_json() or {}
     iface = data.get('iface', 'can0')
-    if not iface or not iface.startswith('can'):
+    if not _is_valid_can_iface(iface):
         return jsonify({'uuids': [], 'error': '无效的CAN接口'})
     try:
-        klipper_owner, home_dir = get_klipper_owner()
-        python_bin = get_klipper_python_bin(home_dir)
-        canbus_script = os.path.join(home_dir, 'klipper', 'scripts', 'canbus_query.py')
-        output = run_cmd(
-            f'{python_bin} {canbus_script} {iface}',
-            shell=True, capture_output=True, text=True, timeout=10
-        )
-        uuids = []
-        error = None
-        combined = (output.stdout or '') + (output.stderr or '')
-        for line in combined.strip().split('\n'):
-            if 'canbus_uuid' in line:
-                match = re.search(r'canbus_uuid=([a-fA-F0-9]+)', line)
-                if match:
-                    uuid_val = match.group(1)
-                    app_type = 'Klipper' if 'Klipper' in line else \
-                          'Katapult' if ('Katapult' in line or 'CanBoot' in line) else 'Unknown'
-                    if not any(u['uuid'] == uuid_val for u in uuids):
-                        uuids.append({'uuid': uuid_val, 'app': app_type})
-            elif 'Error' in line or 'error' in line:
-                if not error:
-                    error = line.strip()
+        uuids, error = _scan_can_uuids(iface)
         if not uuids:
             error_msg = error
             mr_uuids, mr_available, mr_error = query_moonraker_printer_cfg()
@@ -994,7 +1063,7 @@ def get_video_devices():
 def detect_can_for_flash():
     """为固件烧录搜索 CAN UUID 设备"""
     iface = request.args.get('iface', 'can0')
-    if not iface.startswith('can'):
+    if not _is_valid_can_iface(iface):
         return jsonify({'devices': [], 'error': f'无效的CAN接口: {iface}'})
     try:
         devices, error = _scan_can_uuids(iface)
@@ -1220,7 +1289,12 @@ def get_available_services():
 
             if svc_lower == 'firmware-tool':
                 # 自身服务，能响应请求说明一定在运行
-                available_services.append({'name': 'firmware-tool', 'active': True, 'self_service': True})
+                available_services.append({
+                    'name': 'firmware-tool',
+                    'control_name': 'firmware-tool',
+                    'active': True,
+                    'self_service': True,
+                })
                 continue
 
             # 优先通过 Moonraker system_info 获取状态
@@ -1251,7 +1325,13 @@ def get_available_services():
             if svc_lower == 'klipper' and moonraker_active:
                 is_active = klipper_active
 
-            available_services.append({'name': display_name, 'active': is_active})
+            control_name = _normalize_service_name(display_name) or _normalize_service_name(svc_lower)
+            available_services.append({
+                'name': display_name,
+                'control_name': control_name,
+                'active': is_active,
+                'controllable': bool(control_name),
+            })
         except Exception as e:
             logger.warning(f'检查服务 {svc_lower} 状态失败: {e}')
             continue
@@ -1261,7 +1341,12 @@ def get_available_services():
             config_exists = any(os.path.isfile(cfg) for cfg in paths['nginx_configs'])
             root_exists = any(os.path.isdir(root) for root in paths['web_roots'])
             if config_exists or root_exists:
-                available_services.append({'name': frontend_name, 'active': nginx_active})
+                available_services.append({
+                    'name': frontend_name,
+                    'control_name': 'nginx',
+                    'active': nginx_active,
+                    'controllable': True,
+                })
         except Exception as e:
             logger.warning(f'检查 Web 前端 {frontend_name} 失败: {e}')
             continue

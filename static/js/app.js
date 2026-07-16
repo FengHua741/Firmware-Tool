@@ -19,12 +19,18 @@ let compileParams = {
     if (tokenFromUrl) {
         localStorage.setItem('firmwareToolApiToken', tokenFromUrl);
     }
+    function readCookie(name) {
+        const prefix = `${name}=`;
+        const found = document.cookie.split(';').map(v => v.trim()).find(v => v.startsWith(prefix));
+        return found ? decodeURIComponent(found.slice(prefix.length)) : '';
+    }
     const originalFetch = window.fetch.bind(window);
     window.fetch = function(resource, options = {}) {
         const apiToken = localStorage.getItem('firmwareToolApiToken') || '';
-        if (!apiToken) return originalFetch(resource, options);
         const headers = new Headers(options.headers || (resource instanceof Request ? resource.headers : undefined));
-        headers.set('X-API-Token', apiToken);
+        if (apiToken) headers.set('X-API-Token', apiToken);
+        const csrf = readCookie('firmware_tool_csrf');
+        if (csrf) headers.set('X-CSRF-Token', csrf);
         return originalFetch(resource, { ...options, headers });
     };
 })();
@@ -133,8 +139,8 @@ function updateNetworkDisplay(network) {
         network.interfaces.forEach(iface => {
             html += `
                 <div class="network-item">
-                    <span class="network-name">${iface.name}</span>
-                    <span class="network-ips">${iface.ips.join(', ')}</span>
+                    <span class="network-name">${escapeHtml(iface.name)}</span>
+                    <span class="network-ips">${escapeHtml((iface.ips || []).join(', '))}</span>
                 </div>
             `;
         });
@@ -160,15 +166,15 @@ async function searchSerial() {
                 const ids = [d.vid, d.pid].filter(Boolean).join(':');
                 // 使用后端推荐的 display_path（USB虚拟串口用 by-id，USB转串口用 by-path）
                 const displayVal = d.display_path || d.by_id || d.path;
-                const copyVal = displayVal.replace(/'/g, "\\'");
+                const copyVal = escapeJsString(displayVal);
                 return `
                     <div class="id-item" style="flex-direction:column;align-items:flex-start;">
                         <div style="display:flex;justify-content:space-between;width:100%;align-items:center;">
-                            <span class="id-text" style="font-weight:600;">${displayVal}</span>
+                            <span class="id-text" style="font-weight:600;">${escapeHtml(displayVal)}</span>
                             <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${copyVal}')">复制</button>
                         </div>
                         <div style="font-size:11px;color:#888;margin-top:3px;">
-                            ${info ? info : ''}${ids ? ' [' + ids + ']' : ''}${d.driver ? ' (' + d.driver + ')' : ''}
+                            ${escapeHtml(info ? info : '')}${ids ? ' [' + escapeHtml(ids) + ']' : ''}${d.driver ? ' (' + escapeHtml(d.driver) + ')' : ''}
                         </div>
                     </div>`;
             }).join('');
@@ -176,7 +182,7 @@ async function searchSerial() {
             container.innerHTML = '<p class="empty">未找到串口设备</p>';
         }
     } catch (error) {
-        container.innerHTML = `<p class="empty">搜索失败: ${error.message}</p>`;
+        container.innerHTML = `<p class="empty">搜索失败: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -191,7 +197,7 @@ async function refreshCanIfaces() {
         if (data.ifaces && data.ifaces.length > 0) {
             data.ifaces.forEach(iface => {
                 const state = iface.operstate === 'UP' ? '✅' : '⚠️';
-                select.innerHTML += `<option value="${iface.ifname}">${state} ${iface.ifname} (${iface.operstate})</option>`;
+                select.innerHTML += `<option value="${escapeHtml(iface.ifname)}">${state} ${escapeHtml(iface.ifname)} (${escapeHtml(iface.operstate)})</option>`;
             });
             if (data.ifaces.length === 1) select.selectedIndex = 1;
         } else {
@@ -219,28 +225,28 @@ async function diagnoseCanNetwork() {
         html += `<div>内核CAN支持: <b>${data.kernel_support ? '✅ 支持' : '❌ 不支持'}</b></div>`;
         html += `<div>CAN硬件设备: <b>${data.can_device_exists ? '✅ 已检测到' : '❌ 未检测到'}</b></div>`;
         if (data.can_device_info) {
-            html += `<div style="font-size:11px;color:#666;margin-left:12px;">${data.can_device_info}</div>`;
+            html += `<div style="font-size:11px;color:#666;margin-left:12px;">${escapeHtml(data.can_device_info)}</div>`;
         }
 
         html += `<div>can0接口: <b>${data.can0_exists ? '✅ 存在' : '❌ 不存在'}</b></div>`;
         if (data.can0_state) {
             const stateColor = data.can0_state === 'UP' ? '#4caf50' : '#ff9800';
-            html += `<div style="margin-left:12px;">状态: <span style="color:${stateColor};font-weight:600;">${data.can0_state}</span></div>`;
+            html += `<div style="margin-left:12px;">状态: <span style="color:${stateColor};font-weight:600;">${escapeHtml(data.can0_state)}</span></div>`;
         }
         if (data.can0_bitrate) {
-            html += `<div style="margin-left:12px;font-size:11px;color:#666;">${data.can0_bitrate}</div>`;
+            html += `<div style="margin-left:12px;font-size:11px;color:#666;">${escapeHtml(data.can0_bitrate)}</div>`;
         }
 
         if (data.errors && data.errors.length > 0) {
             html += '<div style="margin-top:8px;color:#d32f2f;">';
-            html += data.errors.map(e => `<div>❌ ${e}</div>`).join('');
+            html += data.errors.map(e => `<div>❌ ${escapeHtml(e)}</div>`).join('');
             html += '</div>';
         }
 
         html += '</div>';
         container.innerHTML = html;
     } catch (error) {
-        container.innerHTML = `<p class="empty">诊断失败: ${error.message}</p>`;
+        container.innerHTML = `<p class="empty">诊断失败: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -282,16 +288,18 @@ async function searchCanUuid() {
                 const appDisplay = d.app === 'Unknown' ? '未知' : d.app;
                 const appColor = d.app === 'Klipper' ? '#4caf50' : d.app === 'Katapult' ? '#ff9800' : d.app === 'Klipper (config)' ? '#1976d2' : '#999';
                 // 从 mcu_model 提取可读型号（如 stm32f407xx → STM32F407）
-                const mcuLabel = d.mcu_model ? ` / ${d.mcu_model.toUpperCase()}` : '';
+                const mcuLabel = d.mcu_model ? ` / ${String(d.mcu_model).toUpperCase()}` : '';
                 const freqLabel = d.mcu_freq ? ` @ ${d.mcu_freq}` : '';
+                const versionLabel = d.mcu_version ? ` / ${d.mcu_version}` : '';
+                const uuid = escapeHtml(d.uuid);
                 return `
                 <div class="id-item">
                     <span class="id-text">
-                        <span style="font-weight:600;">${d.uuid}</span>
-                        <span style="font-size:11px;color:${appColor};margin-left:8px;">[${appDisplay}${mcuLabel}${freqLabel}]</span>
-                        ${d.section ? `<span style="font-size:11px;color:#666;margin-left:6px;">${d.section}</span>` : ''}
+                        <span style="font-weight:600;">${uuid}</span>
+                        <span style="font-size:11px;color:${appColor};margin-left:8px;">[${escapeHtml(appDisplay + mcuLabel + freqLabel + versionLabel)}]</span>
+                        ${d.section ? `<span style="font-size:11px;color:#666;margin-left:6px;">${escapeHtml(d.section)}</span>` : ''}
                     </span>
-                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${d.uuid}')">复制</button>
+                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${escapeJsString(d.uuid)}')">复制</button>
                 </div>
             `}).join('');
             container.innerHTML = html;
@@ -299,11 +307,11 @@ async function searchCanUuid() {
             container.innerHTML = '<p class="empty">未找到CAN设备</p>';
             if (data.error && errDiv) {
                 errDiv.style.display = 'block';
-                errDiv.innerHTML = `<div style="background:#fff3cd;padding:10px;border-radius:6px;border-left:4px solid #ffc107;margin-top:8px;font-size:13px;color:#856404;">⚠️ ${data.error}</div>`;
+                errDiv.innerHTML = `<div style="background:#fff3cd;padding:10px;border-radius:6px;border-left:4px solid #ffc107;margin-top:8px;font-size:13px;color:#856404;">⚠️ ${escapeHtml(data.error)}</div>`;
             }
         }
     } catch (error) {
-        container.innerHTML = `<p class="empty">搜索失败: ${error.message}</p>`;
+        container.innerHTML = `<p class="empty">搜索失败: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -316,12 +324,12 @@ async function searchCamera() {
         const data = await response.json();
         if (data.videos && data.videos.length > 0) {
             container.innerHTML = data.videos.map(d => {
-                const copyVal = d.path.replace(/'/g, "\\'");
+                const copyVal = escapeJsString(d.path);
                 return `
                     <div class="id-item">
                         <span class="id-text">
-                            <span style="font-weight:600;">${d.path}</span>
-                            <span style="font-size:11px;color:#666;margin-left:8px;">${d.name}${d.index ? ' (index:' + d.index + ')' : ''}</span>
+                            <span style="font-weight:600;">${escapeHtml(d.path)}</span>
+                            <span style="font-size:11px;color:#666;margin-left:8px;">${escapeHtml(d.name)}${d.index ? ' (index:' + escapeHtml(d.index) + ')' : ''}</span>
                         </span>
                         <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${copyVal}')">复制</button>
                     </div>`;
@@ -479,7 +487,7 @@ async function loadCanHostConfig() {
 
         body.innerHTML = html;
     } catch (error) {
-        body.innerHTML = `<p class="empty">加载失败: ${error.message}</p>`;
+        body.innerHTML = `<p class="empty">加载失败: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -512,14 +520,14 @@ async function applyCanHostConfig() {
         const data = await res.json();
 
         if (data.success) {
-            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(76,175,80,0.1);color:#4caf50;border:1px solid rgba(76,175,80,0.3);padding:10px;border-radius:6px;font-size:13px;">${data.message}</div>`;
+            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(76,175,80,0.1);color:#4caf50;border:1px solid rgba(76,175,80,0.3);padding:10px;border-radius:6px;font-size:13px;">${escapeHtml(data.message)}</div>`;
             // 刷新状态
             setTimeout(loadCanHostConfig, 1500);
         } else {
-            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">${data.error || '应用失败'}</div>`;
+            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">${escapeHtml(data.error || '应用失败')}</div>`;
         }
     } catch (error) {
-        statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">请求失败: ${error.message}</div>`;
+        statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">请求失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -534,8 +542,8 @@ async function searchLsusb() {
         if (data.devices && data.devices.length > 0) {
             container.innerHTML = data.devices.map(d => `
                 <div class="id-item">
-                    <span class="id-text" style="font-size:12px;">${d.formatted || d.name}</span>
-                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${(d.formatted || d.name).replace(/'/g, "\\'")}')">复制</button>
+                    <span class="id-text" style="font-size:12px;">${escapeHtml(d.formatted || d.name)}</span>
+                    <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${escapeJsString(d.formatted || d.name)}')">复制</button>
                 </div>
             `).join('');
         } else {
@@ -589,6 +597,20 @@ function fallbackCopyToClipboard(text) {
         showError('复制失败，请手动复制');
         console.error('降级复制失败:', err);
     }
+}
+
+function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value == null ? '' : String(value);
+    return div.innerHTML;
+}
+
+function escapeJsString(value) {
+    return String(value == null ? '' : value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
 }
 
 
@@ -1254,21 +1276,26 @@ function renderServiceButtons(services) {
         const statusText = service.active ? '运行中' : '已停止';
         const statusClass = service.active ? 'text-success' : 'text-danger';
         const isSelf = service.self_service === true;
+        const displayName = escapeHtml(service.name || '');
+        const controlName = service.control_name || service.name || '';
+        const controlArg = escapeJsString(controlName);
         
         // firmware-tool 是自身服务，只显示重启按钮
         let buttonsHtml;
         if (isSelf) {
             buttonsHtml = `
                 <div class="btn-group">
-                    <button class="btn btn-sm btn-warning" onclick="controlService('${service.name}', 'restart')">重启</button>
+                    <button class="btn btn-sm btn-warning" onclick="controlService('${controlArg}', 'restart')">重启</button>
                 </div>
             `;
+        } else if (service.controllable === false || !controlName) {
+            buttonsHtml = '<span style="font-size:12px;color:#888;">不可控制</span>';
         } else {
             buttonsHtml = `
                 <div class="btn-group">
-                    <button class="btn btn-sm btn-success" onclick="controlService('${service.name}', 'start')">启动</button>
-                    <button class="btn btn-sm btn-danger" onclick="controlService('${service.name}', 'stop')">停止</button>
-                    <button class="btn btn-sm btn-warning" onclick="controlService('${service.name}', 'restart')">重启</button>
+                    <button class="btn btn-sm btn-success" onclick="controlService('${controlArg}', 'start')">启动</button>
+                    <button class="btn btn-sm btn-danger" onclick="controlService('${controlArg}', 'stop')">停止</button>
+                    <button class="btn btn-sm btn-warning" onclick="controlService('${controlArg}', 'restart')">重启</button>
                 </div>
             `;
         }
@@ -1276,7 +1303,7 @@ function renderServiceButtons(services) {
         const div = document.createElement('div');
         div.className = 'service-item';
         div.innerHTML = `
-            <span>${service.name} 服务 <span class="${statusClass}">(${statusText})</span></span>
+            <span>${displayName} 服务 <span class="${statusClass}">(${statusText})</span></span>
             ${buttonsHtml}
         `;
         container.appendChild(div);
@@ -1325,7 +1352,7 @@ async function checkForUpdates() {
         if (data.has_update) {
             updateAvailable = true;
             updateInfo = data;
-            statusDiv.innerHTML = `<span style="color:#28a745;">发现新版本！</span><br>当前: ${data.current_version} → 最新: ${data.latest_version}<br>更新时间: ${data.update_time}`;
+            statusDiv.innerHTML = `<span style="color:#28a745;">发现新版本！</span><br>当前: ${escapeHtml(data.current_version)} → 最新: ${escapeHtml(data.latest_version)}<br>更新时间: ${escapeHtml(data.update_time)}`;
             updateBtn.style.display = 'inline-block';
         } else {
             updateAvailable = false;

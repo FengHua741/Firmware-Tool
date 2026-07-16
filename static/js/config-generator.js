@@ -1968,21 +1968,21 @@ function populatePrinterModels() {
     if (!sel || !_machineList.length) return;
     sel.innerHTML = '';
     _machineList.forEach(m => {
-        sel.innerHTML += `<option value="${m.id}">${m.name} (${m.drive_count}驱动, ${m.geometry?.type||'?'})</option>`;
+        sel.innerHTML += `<option value="${cgEscapeHtml(m.id)}">${cgEscapeHtml(m.name)} (${cgEscapeHtml(m.drive_count)}驱动, ${cgEscapeHtml(m.geometry?.type || '?')})</option>`;
     });
     sel.innerHTML += `<option value="custom">✏️ 自定义打印机</option>`;
     if (_machineList.length > 0) { _loadFullPreset(_machineList[0].id); }
 }
 async function _loadFullPreset(machineId) {
     try {
-        const r = await fetch(`/api/tools/machines/${machineId}`);
+        const r = await fetch(`/api/tools/machines/${encodeURIComponent(machineId)}`);
         const d = await r.json();
         if (d.success) { _currentPreset = d.preset; }
     } catch (e) { console.error('加载预设详情失败', e); }
 }
 function populateBrands() {
     const sel = document.getElementById('cgBrand'); sel.innerHTML = '';
-    for (const b of Object.keys(_boardsIndex)) sel.innerHTML += `<option value="${b}"${b==='FLY'?' selected':''}>${b}</option>`;
+    for (const b of Object.keys(_boardsIndex)) sel.innerHTML += `<option value="${cgEscapeHtml(b)}"${b==='FLY'?' selected':''}>${cgEscapeHtml(b)}</option>`;
     populateBoards();
 }
 function onBrandChange() {
@@ -2002,11 +2002,11 @@ function populateBoards() {
     const bd = _boardsIndex[brand]; if (!bd) return;
     const bs = document.getElementById('cgBoard');
     bs.innerHTML = '<option value="">-- 选择型号 --</option>';
-    for (const [bid,info] of Object.entries(bd.mainboards)) bs.innerHTML += `<option value="${bid}">${info.name} (${info.drive_count}驱动, ${info.platform})</option>`;
+    for (const [bid,info] of Object.entries(bd.mainboards)) bs.innerHTML += `<option value="${cgEscapeHtml(bid)}">${cgEscapeHtml(info.name)} (${cgEscapeHtml(info.drive_count)}驱动, ${cgEscapeHtml(info.platform)})</option>`;
     const tbs = Object.keys(bd.toolboards);
     if (tbs.length > 0) {
         bs.innerHTML += `<optgroup label="工具板">`;
-        for (const [bid,info] of Object.entries(bd.toolboards)) bs.innerHTML += `<option value="${bid}">${info.name} (${info.drive_count}驱动, ${info.platform})</option>`;
+        for (const [bid,info] of Object.entries(bd.toolboards)) bs.innerHTML += `<option value="${cgEscapeHtml(bid)}">${cgEscapeHtml(info.name)} (${cgEscapeHtml(info.drive_count)}驱动, ${cgEscapeHtml(info.platform)})</option>`;
         bs.innerHTML += `</optgroup>`;
     }
 }
@@ -2020,7 +2020,7 @@ async function onBoardChange() {
     _currentBoardLayout = null;
     _cgSelectedBoardPin = '';
     try {
-        const r = await fetch(`/api/tools/boards/${boardId}/mapping`);
+        const r = await fetch(`/api/tools/boards/${encodeURIComponent(boardId)}/mapping`);
         const d = await r.json();
         if (loadSeq !== _cgBoardLoadSeq) return;
         if (!d.success) { cgShowToast(d.error,'error'); return; }
@@ -2028,7 +2028,7 @@ async function onBoardChange() {
         _currentBoardLayout = d.layout || null;
         _cgSelectedBoardPin = '';
         const info = _currentBoardInfo;
-        document.getElementById('cgBoardInfo').innerHTML = `<span>MCU: ${info.mcu}</span> | <span>${info.drive_count}驱动</span> | <span>${info.heat_count}加热</span> | <span>${info.fan_count}风扇</span>`;
+        document.getElementById('cgBoardInfo').innerHTML = `<span>MCU: ${cgEscapeHtml(info.mcu)}</span> | <span>${cgEscapeHtml(info.drive_count)}驱动</span> | <span>${cgEscapeHtml(info.heat_count)}加热</span> | <span>${cgEscapeHtml(info.fan_count)}风扇</span>`;
         // 加载板卡图片
         const imgContainer = document.getElementById('cgBoardImageContainer');
         const imgEl = document.getElementById('cgBoardImage');
@@ -2062,7 +2062,7 @@ async function onBoardChange() {
 }
 function populateConnections(connections) {
     const sel = document.getElementById('cgConnection'); sel.innerHTML = '';
-    for (const c of connections) { const v=c.includes('CAN')?'can':c.includes('USB')?'usb':'serial'; sel.innerHTML += `<option value="${v}">${c}</option>`; }
+    for (const c of connections) { const v=c.includes('CAN')?'can':c.includes('USB')?'usb':'serial'; sel.innerHTML += `<option value="${cgEscapeHtml(v)}">${cgEscapeHtml(c)}</option>`; }
     onConnectionTypeChange();
 }
 
@@ -2104,7 +2104,7 @@ async function detectMcuDevices() {
         sel.innerHTML = '<option value="">-- 选择检测到的设备 --</option>';
         devices.forEach(dev => {
             const icons = {can:'🔗 CAN', usb:'🔌 USB', serial:'📡 串口'};
-            sel.innerHTML += `<option value="${dev.path}" data-type="${dev.type||'serial'}">${icons[dev.type]||'🔌'}: ${dev.description||dev.path}</option>`;
+            sel.innerHTML += `<option value="${cgEscapeHtml(dev.path)}" data-type="${cgEscapeHtml(dev.type || 'serial')}">${cgEscapeHtml(icons[dev.type] || '🔌')}: ${cgEscapeHtml(dev.description || dev.path)}</option>`;
         });
         serialInput.style.display = 'none';
         container.insertBefore(sel, serialInput.nextSibling);
@@ -2148,7 +2148,7 @@ function showFieldHelp(el) {
     if (existing) existing.remove();
     const popover = document.createElement('div');
     popover.className = 'cg-help-popover';
-    popover.innerHTML = el.dataset.help.replace(/\n/g, '<br>');
+    popover.innerHTML = cgEscapeHtml(el.dataset.help || '').replace(/\n/g, '<br>');
     const rect = el.getBoundingClientRect();
     popover.style.left = Math.min(rect.left, window.innerWidth - 360) + 'px';
     popover.style.top = (rect.bottom + 8) + 'px';
@@ -2209,14 +2209,14 @@ function _wrapCollapsibleSections(container) {
 }
 function renderI18nField(id, termKey, value, extra) {
     const term = TERM_I18N[termKey];
-    if (!term) return `<input type="text" id="${id}" value="${value}"${extra||''}>`;
-    return `<label><span class="cg-field-label">${term.label}</span> <code class="cg-field-param">${termKey}</code><span class="cg-help-icon" data-help="${term.hint.replace(/"/g,'&quot;')}" onclick="showFieldHelp(this)">?</span></label><input type="text" id="${id}" value="${value}" placeholder="${term.def}"${extra||''}>`;
+    if (!term) return `<input type="text" id="${cgEscapeHtml(id)}" value="${cgEscapeHtml(value)}"${extra||''}>`;
+    return `<label><span class="cg-field-label">${cgEscapeHtml(term.label)}</span> <code class="cg-field-param">${cgEscapeHtml(termKey)}</code><span class="cg-help-icon" data-help="${cgEscapeHtml(term.hint)}" onclick="showFieldHelp(this)">?</span></label><input type="text" id="${cgEscapeHtml(id)}" value="${cgEscapeHtml(value)}" placeholder="${cgEscapeHtml(term.def)}"${extra||''}>`;
 }
 // 错误定位与友好提示
 function cgShowFormError(message) {
     const errEl = document.getElementById('errorMessage');
     if (errEl) {
-        errEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' + message;
+        errEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' + cgEscapeHtml(message);
         errEl.style.display = 'block';
     }
 }
@@ -2574,7 +2574,7 @@ function onToolCountChange() {
         if (!_toolboardData[i].role) _toolboardData[i].role = 'custom';
         const tb=_toolboardData[i], div=document.createElement('div');
         div.className='cg-tb-block';
-        div.innerHTML = `<div class="cg-tb-header" onclick="toggleToolboardPanel(${i})"><span><i class="fas fa-microchip"></i> 工具板 ${i+1}: <strong id="cgTBTitle${i}">${tb.name}</strong></span><span class="cg-tb-toggle"><i class="fas fa-chevron-down"></i></span></div>
+        div.innerHTML = `<div class="cg-tb-header" onclick="toggleToolboardPanel(${i})"><span><i class="fas fa-microchip"></i> 工具板 ${i+1}: <strong id="cgTBTitle${i}">${cgEscapeHtml(tb.name)}</strong></span><span class="cg-tb-toggle"><i class="fas fa-chevron-down"></i></span></div>
         <div id="cgTBPanel${i}" class="cg-tb-panel" style="display:none;">
             <div class="cg-row"><label>MCU 名称：</label><input type="text" id="cgTBName${i}" value="${cgEscapeHtml(tb.name)}" style="width:120px;" oninput="_toolboardData[${i}].name=this.value;document.getElementById('cgTBTitle${i}').textContent=this.value;renderToolboardConflictPanel();renderProbeConfig();renderEndstopConfig();renderHeaterConfig();renderFanConfig();">
             <span class="cg-hint">用途在轴分配、限位/探针、温控/风扇等选项卡中选择</span></div>
@@ -2586,7 +2586,7 @@ function onToolCountChange() {
         const cs=document.getElementById(`cgTBConn${i}`); if(cs) cs.value=tb.connType;
     }
     // 填充工具板型号
-    const bd = _boardsIndex[brand]; if(bd) { for(const[bid,info]of Object.entries(bd.toolboards)) { for(let i=0;i<count;i++){const o=document.getElementById(`cgTBBoard${i}`);if(o)o.innerHTML+=`<option value="${bid}">${info.name} (${info.mcu})</option>`;} } }
+    const bd = _boardsIndex[brand]; if(bd) { for(const[bid,info]of Object.entries(bd.toolboards)) { for(let i=0;i<count;i++){const o=document.getElementById(`cgTBBoard${i}`);if(o)o.innerHTML+=`<option value="${cgEscapeHtml(bid)}">${cgEscapeHtml(info.name)} (${cgEscapeHtml(info.mcu)})</option>`;} } }
     _toolboardData.forEach((tb,i)=>{if(tb.boardId){const s=document.getElementById(`cgTBBoard${i}`);if(s)s.value=tb.boardId;}});
     renderToolboardConflictPanel();
     if (_currentMapping) { renderDriverAssignment(); renderEndstopConfig(); renderProbeConfig(); renderHeaterConfig(); renderFanConfig(); }
@@ -2598,12 +2598,12 @@ async function onToolBoardSelect(i) {
     const info=document.getElementById(`cgTBInfo${i}`);
     if(!boardId){_toolboardData[i].mapping=null;renderToolboardConflictPanel();if(_currentMapping){renderDriverAssignment();renderEndstopConfig();renderProbeConfig();renderHeaterConfig();renderFanConfig();}return;}
     try {
-        const r=await fetch(`/api/tools/boards/${boardId}/mapping`), d=await r.json();
+        const r=await fetch(`/api/tools/boards/${encodeURIComponent(boardId)}/mapping`), d=await r.json();
         if(!d.success){cgShowToast(d.error,'error');return;}
         _toolboardData[i].mapping=d.mapping; _toolboardData[i].boardInfo=d.board_info;
         const bi=d.board_info; info.textContent=`${bi.drive_count}驱动, ${bi.heat_count}加热, ${bi.fan_count}风扇`;
         const cs=document.getElementById(`cgTBConn${i}`);
-        if(cs&&bi.connections){cs.innerHTML='';bi.connections.forEach(c=>{const v=c.includes('CAN')?'can':c.includes('USB')?'usb':'serial';cs.innerHTML+=`<option value="${v}">${c}</option>`;});cs.value=_toolboardData[i].connType;}
+        if(cs&&bi.connections){cs.innerHTML='';bi.connections.forEach(c=>{const v=c.includes('CAN')?'can':c.includes('USB')?'usb':'serial';cs.innerHTML+=`<option value="${cgEscapeHtml(v)}">${cgEscapeHtml(c)}</option>`;});cs.value=_toolboardData[i].connType;}
         const defaultedExtruder = cgApplyToolboardExtruderDefaults(i);
         renderToolboardConflictPanel();
         if (_currentMapping) {
@@ -2858,7 +2858,7 @@ function addExtraHeater() {
     h+=`<div class="cg-func-item"><label>名称：</label><input type="text" id="cgExtraName_${idx}" value="extra_heater_${idx}" style="width:100%;"></div>`;
     h+=`<div class="cg-func-item"><label>加热引脚：</label><select id="cgExtraHeatPin_${idx}" onchange="renderToolboardConflictPanel()">${heatOpts}</select></div>`;
     h+=`<div class="cg-func-item"><label>热敏引脚：</label><select id="cgExtraTempPin_${idx}" onchange="renderToolboardConflictPanel()">${tempOpts}</select></div>`;
-    h+=`<div class="cg-func-item"><label>传感器类型：</label><select id="cgExtraST_${idx}">${SENSOR_TYPES.map(s=>`<option>${s}</option>`).join('')}</select><br><small style="color:#e65100;font-size:11px;">⚠️ PT100 需要 MAX31865 放大器，PT1000 建议搭配放大器使用</small></div>`;
+    h+=`<div class="cg-func-item"><label>传感器类型：</label><select id="cgExtraST_${idx}">${SENSOR_TYPES.map(s=>`<option>${cgEscapeHtml(s)}</option>`).join('')}</select><br><small style="color:#e65100;font-size:11px;">⚠️ PT100 需要 MAX31865 放大器，PT1000 建议搭配放大器使用</small></div>`;
     h+=`<div class="cg-func-item"><label>max_temp：</label><input type="number" id="cgExtraMaxT_${idx}" value="120" class="cg-xs"></div>`;
     h+=`<div class="cg-func-item" id="cgExtraMinTempRow_${idx}"><label>min_temp：</label><input type="number" id="cgExtraMinTemp_${idx}" value="-235" class="cg-xs"></div>`;
     h+=`<div class="cg-func-item" id="cgExtraMaxPowerRow_${idx}"><label>max_power：</label><input type="number" step="0.1" id="cgExtraMaxPower_${idx}" value="1.0" class="cg-xs"></div>`;
