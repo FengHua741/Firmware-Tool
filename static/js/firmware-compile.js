@@ -417,8 +417,11 @@ function onCompileConnectionChange() {
             const dataComm = escapeHtml(JSON.stringify(opt)).replace(/'/g, '&apos;');
             detailSelect.innerHTML += `<option value="${escapeHtml(opt.config_symbol)}" data-comm='${dataComm}'>${escapeHtml(opt.display)}</option>`;
         });
+        if (commType === 'can') {
+            _selectCanPinsOption(detailSelect, options, 'config_symbol');
+        }
         // 只有1个选项时自动选中
-        if (options.length === 1) {
+        if (!detailSelect.value && options.length === 1) {
             detailSelect.value = options[0].config_symbol;
         }
     }
@@ -461,6 +464,24 @@ function _showBridgeCanPinSelector(connGroup) {
     _bridgeCanOptions.forEach(opt => {
         pinSelect.innerHTML += `<option value="${escapeHtml(opt.config)}">${escapeHtml(opt.display)}</option>`;
     });
+    _selectCanPinsOption(pinSelect, _bridgeCanOptions, 'config');
+}
+
+function _selectCanPinsOption(select, options, valueKey) {
+    if (!select || !Array.isArray(options)) return false;
+    const preferred = options.find(opt => {
+        const text = [
+            opt.pins,
+            opt.display,
+            opt[valueKey],
+            opt.config,
+            opt.config_symbol,
+        ].map(v => String(v || '').toUpperCase()).join(' ');
+        return text.includes('PB8/PB9') || text.includes('PB8_PB9');
+    });
+    if (!preferred) return false;
+    select.value = preferred[valueKey] || preferred.config || preferred.config_symbol || '';
+    return Boolean(select.value);
 }
 
 // 显示RP2040 CAN GPIO引脚选择器
