@@ -5,6 +5,7 @@
 from flask import Blueprint, jsonify, request, send_file, Response
 import subprocess
 import os
+import posixpath
 import re
 import json
 import time
@@ -28,6 +29,8 @@ from kconfig_can_parser import parse_can_options
 
 firmware_bp = Blueprint('firmware', __name__)
 MANIFEST_FILENAME = 'firmware-tool-manifest.json'
+DEFAULT_CANBUS_FREQUENCY = '1000000'
+CAN_IFACE_RE = re.compile(r'^can[\w.-]*$')
 
 
 def load_klipper_rules():
@@ -84,6 +87,25 @@ def _truthy(value):
     return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
 
 
+def _is_valid_can_iface(iface):
+    return bool(iface and CAN_IFACE_RE.match(str(iface)))
+
+
+def _normalize_canbus_frequency(value):
+    raw = str(value or '').strip().lower()
+    if not raw:
+        return DEFAULT_CANBUS_FREQUENCY
+    match = re.match(r'^(\d+(?:\.\d+)?)\s*([km])?$', raw)
+    if not match:
+        raise ValueError(f'CAN 速率格式错误: {value}')
+    number = float(match.group(1))
+    multiplier = 1000000 if match.group(2) == 'm' else 1000 if match.group(2) == 'k' else 1
+    frequency = int(round(number * multiplier))
+    if frequency <= 0:
+        raise ValueError(f'CAN 速率必须大于 0: {value}')
+    return str(frequency)
+
+
 def _device_state(device):
     dtype = (device.get('type') or '').lower()
     did = (device.get('id') or '').lower()
@@ -121,6 +143,59 @@ def _read_text_file(path):
         return ''
     with open(path, 'r', encoding='utf-8') as f:
         return f.read()
+
+
+def _normalize_fs_path(path):
+    path = str(path or '').strip()
+    if is_ssh_mode():
+        return posixpath.normpath(path)
+    return os.path.realpath(os.path.expanduser(path))
+
+
+def _path_under(path, roots):
+    normalized = _normalize_fs_path(path)
+    for root in roots:
+        normalized_root = _normalize_fs_path(root)
+        try:
+            if is_ssh_mode():
+                if normalized == normalized_root or normalized.startswith(normalized_root.rstrip('/') + '/'):
+                    return True
+            elif os.path.commonpath([normalized, normalized_root]) == normalized_root:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _allowed_firmware_roots(klipper_path=None):
+    klipper_path = klipper_path or expand_klipper_path(config.get('klipper_path', '~/klipper'))
+    roots = [
+        os.path.join(klipper_path, 'out'),
+        '/data/klipper/out',
+        os.path.join(BASE_DIR, 'board_configs'),
+        os.path.join(BASE_DIR, 'out'),
+    ]
+    return [root for root in roots if root]
+
+
+def _allowed_browse_roots(klipper_path=None):
+    klipper_path = klipper_path or expand_klipper_path(config.get('klipper_path', '~/klipper'))
+    roots = [klipper_path, os.path.join(klipper_path, 'out'), os.path.join(BASE_DIR, 'board_configs')]
+    try:
+        _, home_dir = get_klipper_owner(klipper_path)
+        if home_dir:
+            roots.append(home_dir)
+    except Exception:
+        pass
+    for root in ('/data', '/tmp'):
+        roots.append(root)
+    return [root for root in roots if root]
+
+
+def _is_safe_klipper_tree(klipper_path):
+    if not klipper_path or klipper_path in ('/', '/root', '/home', '/data', '/tmp'):
+        return False
+    return path_exists(os.path.join(klipper_path, 'Makefile')) and path_exists(os.path.join(klipper_path, 'src', 'Kconfig'))
 
 
 def _decode_config_value(value):
@@ -275,6 +350,8 @@ def _resolve_current_config_params(kconfig_klipper_path, config_values):
         params['rp2040_can_rx_gpio'] = config_values.get('RPXXXX_CANBUS_GPIO_RX')
     if 'RPXXXX_CANBUS_GPIO_TX' in config_values:
         params['rp2040_can_tx_gpio'] = config_values.get('RPXXXX_CANBUS_GPIO_TX')
+    if 'CANBUS_FREQUENCY' in config_values:
+        params['canbus_frequency'] = config_values.get('CANBUS_FREQUENCY')
 
     return params, warnings
 
@@ -410,6 +487,7 @@ def _create_manifest(klipper_path, firmware_path, firmware_size, mcu_info, reque
             'communication': compile_values.get('communication', ''),
             'comm_type': compile_values.get('comm_type', ''),
             'comm_config_symbol': compile_values.get('comm_config_symbol', ''),
+            'canbus_frequency': compile_values.get('canbus_frequency', ''),
             'bridge_can_config': compile_values.get('bridge_can_config', ''),
         },
         'firmware': {
@@ -740,7 +818,7 @@ def _resolve_bridge_can_option(platform_data, processor, bridge_can_config):
 def _build_klipper_config_lines(
         kconfig_klipper_path, mcu_arch, processor, crystal, bootloader_offset,
         communication, comm_type, comm_config_symbol, bridge_can_config,
-        rp2040_can_rx_gpio, rp2040_can_tx_gpio):
+        rp2040_can_rx_gpio, rp2040_can_tx_gpio, canbus_frequency):
     """从当前 Klipper Kconfig 解析结果生成 .config 行。"""
     parser = KlipperKconfigParser(kconfig_klipper_path)
     parser.parse_all_platforms()
@@ -803,7 +881,9 @@ def _build_klipper_config_lines(
     resolved_comm_type = comm_type or (comm_option or {}).get('comm_type') or _infer_comm_type(communication)
 
     if resolved_comm_type in ('can', 'usbcanbridge'):
-        config_lines.append('CONFIG_CANBUS_FREQUENCY=1000000')
+        resolved_canbus_frequency = _normalize_canbus_frequency(canbus_frequency)
+        config_lines.append(f'CONFIG_CANBUS_FREQUENCY={resolved_canbus_frequency}')
+        logs.append(f"CAN速率: {resolved_canbus_frequency}")
 
     if resolved_comm_type == 'usbcanbridge':
         bridge_option = _resolve_bridge_can_option(platform_data, processor_upper, bridge_can_config)
@@ -1032,6 +1112,7 @@ def compile_firmware():
             crystal = config_data.get('crystal', config_data.get('晶振', '8000000'))
             rp2040_can_rx_gpio = str(config_data.get('can_gpio', {}).get('rx', '4'))
             rp2040_can_tx_gpio = str(config_data.get('can_gpio', {}).get('tx', '5'))
+            canbus_frequency = config_data.get('canbus_frequency', config_data.get('can_bitrate', DEFAULT_CANBUS_FREQUENCY))
             comm_type = ''
             comm_config_symbol = ''
             bridge_can_config = ''
@@ -1047,16 +1128,20 @@ def compile_firmware():
             crystal = data.get('crystal', '8000000')
             rp2040_can_rx_gpio = data.get('rp2040_can_rx_gpio', '4')
             rp2040_can_tx_gpio = data.get('rp2040_can_tx_gpio', '5')
+            canbus_frequency = data.get('canbus_frequency', DEFAULT_CANBUS_FREQUENCY)
 
         if not path_exists(klipper_path):
             yield f'data: {json.dumps({"error": f"Klipper目录不存在: {klipper_path}"})}\n\n'
+            return
+        if not _is_safe_klipper_tree(klipper_path):
+            yield f'data: {json.dumps({"error": f"Klipper目录不合法或不完整，已停止清理和编译: {klipper_path}"})}\n\n'
             return
         
         try:
             config_lines, config_logs, mcu_info = _build_klipper_config_lines(
                 kconfig_klipper_path, mcu_arch, processor, crystal, bootloader_offset,
                 communication, comm_type, comm_config_symbol, bridge_can_config,
-                rp2040_can_rx_gpio, rp2040_can_tx_gpio
+                rp2040_can_rx_gpio, rp2040_can_tx_gpio, canbus_frequency
             )
         except ValueError as e:
             yield f'data: {json.dumps({"error": str(e)})}\n\n'
@@ -1197,6 +1282,7 @@ def compile_firmware():
                 'communication': communication,
                 'comm_type': comm_type or _infer_comm_type(communication),
                 'comm_config_symbol': comm_config_symbol,
+                'canbus_frequency': _normalize_canbus_frequency(canbus_frequency),
                 'bridge_can_config': bridge_can_config,
             }
             manifest = _create_manifest(
@@ -1261,16 +1347,7 @@ def download_firmware():
         
         firmware_path = expand_klipper_path(firmware_path)
         
-        klipper_out = os.path.join(expand_klipper_path(config.get('klipper_path', '~/klipper')), 'out')
-        allowed_paths = [
-            klipper_out,
-            '/data/klipper/out',
-            os.path.join(BASE_DIR, 'board_configs'),
-            os.path.join(BASE_DIR, 'out')
-        ]
-        
-        is_allowed = any(firmware_path.startswith(p) for p in allowed_paths)
-        if not is_allowed:
+        if not _path_under(firmware_path, _allowed_firmware_roots(klipper_path)):
             return jsonify({'error': '非法路径'}), 403
         
         if not path_exists(firmware_path):
@@ -1466,7 +1543,7 @@ def detect_devices():
 def scan_can_devices():
     """扫描CAN设备 - 使用统一扫描函数（支持 ?iface=can1 参数）"""
     iface = request.args.get('iface', 'can0')
-    if not iface.startswith('can'):
+    if not _is_valid_can_iface(iface):
         return jsonify({'error': f'无效的CAN接口: {iface}'}), 400
     devices, error = _scan_can_uuids(iface)
     return jsonify({'devices': devices, 'error': error})
@@ -1493,7 +1570,7 @@ def flash_firmware():
             firmware_path = expand_klipper_path(firmware_path)
         katapult_serial = data.get('katapult_serial', '')
         can_iface = data.get('can_iface', 'can0')
-        if not can_iface.startswith('can'):
+        if not _is_valid_can_iface(can_iface):
             can_iface = 'can0'
         
         if not firmware_path:
@@ -1518,6 +1595,9 @@ def flash_firmware():
         
         if not path_exists(firmware_path):
             yield f'data: {json.dumps({"error": f"固件文件不存在: {firmware_path}"})}\n\n'
+            return
+        if not _path_under(firmware_path, _allowed_firmware_roots(klipper_path)):
+            yield f'data: {json.dumps({"error": "固件路径不在允许目录内"})}\n\n'
             return
         
         if is_ssh_mode() and os.path.exists(firmware_path):
@@ -1606,10 +1686,10 @@ def flash_firmware():
                     fast_flashtool = os.path.join(home_dir, 'klipper', 'lib', 'katapult', 'flashtool.py')
                     fast_flash_can = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
                     if path_exists(fast_flashtool):
-                        cmd = f'{python_bin} {fast_flashtool} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                        cmd = f'{shlex.quote(python_bin)} {shlex.quote(fast_flashtool)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                         logging.info(f'FAST-SSH 新版烧录命令 (katapult/flashtool.py, {can_iface}): {cmd}')
                     elif path_exists(fast_flash_can):
-                        cmd = f'{python_bin} {fast_flash_can} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                        cmd = f'{shlex.quote(python_bin)} {shlex.quote(fast_flash_can)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                         logging.info(f'FAST-SSH 旧版烧录命令 (canboot/flash_can.py, {can_iface}): {cmd}')
                     else:
                         _err_msg = f"未找到烧录工具。请确认 Klipper 已安装。\n查找路径:\n  {fast_flashtool}\n  {fast_flash_can}"
@@ -1617,7 +1697,7 @@ def flash_firmware():
                         return
                     result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
                 else:
-                    reset_cmd = f'{python_bin} {flashtool_script} -i {can_iface} -r -u {shlex.quote(can_uuid)}'
+                    reset_cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -i {shlex.quote(can_iface)} -r -u {shlex.quote(can_uuid)}'
                     logging.info(f'CAN 重置命令：{reset_cmd}')
                     run_cmd(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
                     logging.info('等待设备重新枚举...')
@@ -1640,25 +1720,25 @@ def flash_firmware():
                     if katapult_device:
                         new_device = katapult_device
                         logging.info(f'找到设备：{new_device}')
-                        cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(new_device)} -f {shlex.quote(firmware_path)}'
+                        cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -d {shlex.quote(new_device)} -f {shlex.quote(firmware_path)}'
                         logging.info(f'USB 烧录命令：{cmd}')
                         result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
                     else:
                         logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
                         flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
                         if path_exists(flash_can_script):
-                            cmd = f'{python_bin} {flash_can_script} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                            cmd = f'{shlex.quote(python_bin)} {shlex.quote(flash_can_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                             logging.info(f'CAN 烧录命令 ({can_iface}): {cmd}')
                             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
                         else:
                             logging.warning(f'flash_can.py 不存在: {flash_can_script}，回退到 flashtool.py CAN 模式')
-                            cmd = f'{python_bin} {flashtool_script} -i {can_iface} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                            cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                             logging.info(f'flashtool CAN 烧录命令 ({can_iface}): {cmd}')
                             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
             else:
                 usb_device = katapult_serial if katapult_serial else device
                 logging.info(f'USB 烧录命令：device={usb_device}')
-                cmd = f'{python_bin} {flashtool_script} -d {shlex.quote(usb_device)} -f {shlex.quote(firmware_path)}'
+                cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -d {shlex.quote(usb_device)} -f {shlex.quote(firmware_path)}'
                 logging.info(f'USB 烧录命令：{cmd}')
                 result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
                     
@@ -1710,6 +1790,10 @@ def install_host_firmware():
             yield f'data: {json.dumps({"error": "固件路径不能为空"})}\n\n'
             return
         firmware_path = expand_klipper_path(firmware_path)
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
+        if not _path_under(firmware_path, _allowed_firmware_roots(klipper_path)):
+            yield f'data: {json.dumps({"error": "固件路径不在允许目录内"})}\n\n'
+            return
         if not path_exists(firmware_path):
             yield f'data: {json.dumps({"error": f"固件文件不存在: {firmware_path}"})}\n\n'
             return
@@ -1729,7 +1813,6 @@ def install_host_firmware():
             yield f'data: {json.dumps({"success": True, "message": f"固件烧录成功: {firmware_path}", "flash_output": output, "restart_output": restart_output, "method": "fly-flash"})}\n\n'
             return
         
-        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         target_path = os.path.join(klipper_path, 'out', 'klipper.bin')
         if is_ssh_mode():
             run_cmd(f'mkdir -p {shlex.quote(os.path.dirname(target_path))}', shell=True, capture_output=True)
@@ -1844,25 +1927,35 @@ def remote_browse():
                     path = path.replace('~', home, 1)
             else:
                 path = os.path.expanduser(path)
+
+        if not _path_under(path, _allowed_browse_roots()):
+            return jsonify({'error': '非法路径'}), 403
         
         entries = []
         if is_ssh_mode():
             manager = SSHManager.get_instance()
+            script = (
+                "import json, os, sys\n"
+                "base = sys.argv[1]\n"
+                "items = []\n"
+                "for name in os.listdir(base):\n"
+                "    if name.startswith('.'):\n"
+                "        continue\n"
+                "    full = os.path.join(base, name)\n"
+                "    try:\n"
+                "        is_dir = os.path.isdir(full)\n"
+                "        size = 0 if is_dir else os.path.getsize(full)\n"
+                "        items.append({'name': name, 'is_dir': is_dir, 'size': size, 'path': full})\n"
+                "    except OSError:\n"
+                "        pass\n"
+                "print(json.dumps(items, ensure_ascii=False))\n"
+            )
             result = manager.exec_command(
-                f'ls -la --time-style=long-iso {shlex.quote(path)} 2>/dev/null | tail -n +2',
+                f'python3 -c {shlex.quote(script)} {shlex.quote(path)}',
                 timeout=10
             )
             if result.returncode == 0 and result.stdout.strip():
-                for line in result.stdout.strip().split('\n'):
-                    parts = line.split()
-                    if len(parts) >= 8:
-                        perms = parts[0]
-                        size = parts[4]
-                        name = parts[7]
-                        if name in ('.', '..') or name.startswith('.'):
-                            continue
-                        is_dir = perms.startswith('d')
-                        entries.append({'name': name, 'is_dir': is_dir, 'size': int(size) if not is_dir else 0, 'path': os.path.join(path, name)})
+                entries = json.loads(result.stdout)
         else:
             abs_path = os.path.abspath(path)
             if os.path.isdir(abs_path):
@@ -1949,6 +2042,8 @@ def flash_bl_firmware():
         
         if not bl_firmware_path or not os.path.exists(bl_firmware_path):
             return jsonify({'error': f'BL固件文件不存在: {bl_firmware_path}'}), 400
+        if not _path_under(bl_firmware_path, [os.path.join(BASE_DIR, 'board_configs')]):
+            return jsonify({'error': 'BL固件路径不在允许目录内'}), 403
 
         if flash_mode in ('DFU', 'st-flash', 'openocd') and not _valid_flash_address(dfu_address):
             return jsonify({'error': f'烧录地址无效: {dfu_address}'}), 400

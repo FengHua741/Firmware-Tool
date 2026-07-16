@@ -15,6 +15,20 @@ function klipperParserProcessPinValue(value) {
     return { value: cleanValue, cleanedValue: cleanedValue, type: 'standard' };
 }
 
+function kpEscapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value == null ? '' : String(value);
+    return div.innerHTML;
+}
+
+function kpEscapeJsString(value) {
+    return String(value == null ? '' : value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
+}
+
 function klipperParserParseConfig(config) {
     const lines = String(config || '').split('\n');
     let currentSection = '';
@@ -481,7 +495,7 @@ async function loadRemoteConfigList() {
         const data = await resp.json();
 
         if (!data.success) {
-            status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> ${data.error}</span>`;
+            status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> ${kpEscapeHtml(data.error)}</span>`;
             return;
         }
 
@@ -503,7 +517,7 @@ async function loadRemoteConfigList() {
         if (dirs.length > 0) {
             html += '<div style="padding:6px 8px; font-size:12px; color:var(--text-secondary); border-bottom:1px solid var(--border-color);">📁 子目录</div>';
             dirs.forEach(d => {
-                html += `<div class="file-item"><div class="file-name">📁 ${d.name}</div><div class="file-size">目录</div></div>`;
+                html += `<div class="file-item"><div class="file-name">📁 ${kpEscapeHtml(d.name)}</div><div class="file-size">目录</div></div>`;
             });
         }
         if (cfgFiles.length > 0) {
@@ -511,7 +525,7 @@ async function loadRemoteConfigList() {
             cfgFiles.forEach(f => {
                 const sizeStr = f.size ? `${(f.size / 1024).toFixed(1)} KB` : '';
                 const isPrinterCfg = f.name === 'printer.cfg';
-                html += `<div class="file-item" style="cursor:pointer;${isPrinterCfg ? ' background:#e8f4ff;' : ''}" onclick="loadRemoteConfig('${f.path.replace(/'/g, "\\'")}')" title="点击加载"><div class="file-name"><i class="fas fa-file-code" style="color:var(--primary-color); margin-right:6px;"></i>${f.name}${isPrinterCfg ? ' <span style="color:var(--success-color);font-size:11px;">(主配置)</span>' : ''}</div><div class="file-size">${sizeStr} <i class="fas fa-download" style="margin-left:6px; color:var(--primary-color);"></i></div></div>`;
+                html += `<div class="file-item" style="cursor:pointer;${isPrinterCfg ? ' background:#e8f4ff;' : ''}" onclick="loadRemoteConfig('${kpEscapeJsString(f.path)}')" title="点击加载"><div class="file-name"><i class="fas fa-file-code" style="color:var(--primary-color); margin-right:6px;"></i>${kpEscapeHtml(f.name)}${isPrinterCfg ? ' <span style="color:var(--success-color);font-size:11px;">(主配置)</span>' : ''}</div><div class="file-size">${kpEscapeHtml(sizeStr)} <i class="fas fa-download" style="margin-left:6px; color:var(--primary-color);"></i></div></div>`;
             });
         }
 
@@ -527,7 +541,7 @@ async function loadRemoteConfigList() {
             status.innerHTML = `<span style="color:var(--warning-color)"><i class="fas fa-exclamation-triangle"></i> 未找到 printer.cfg，请手动选择配置文件 (来源: ${sourceLabel})</span>`;
         }
     } catch (err) {
-        status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 请求失败: ${err.message}</span>`;
+        status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 请求失败: ${kpEscapeHtml(err.message)}</span>`;
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-server"></i> 从被控机器加载';
@@ -661,7 +675,7 @@ async function loadPrinterCfgWithIncludes(printerCfgPath, sourceLabel) {
         const mainData = await mainResp.json();
 
         if (!mainData.success) {
-            status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 加载 printer.cfg 失败: ${mainData.error}</span>`;
+            status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 加载 printer.cfg 失败: ${kpEscapeHtml(mainData.error)}</span>`;
             return;
         }
 
@@ -682,7 +696,7 @@ async function loadPrinterCfgWithIncludes(printerCfgPath, sourceLabel) {
             const includeContent = await recursiveLoadIncludes(
                 includePatterns, cfgDir, loadedFiles, 0, 5,
                 (msg) => {
-                    status.innerHTML = `<span style="color:var(--primary-color)"><i class="fas fa-spinner fa-spin"></i> ${msg}</span>`;
+                    status.innerHTML = `<span style="color:var(--primary-color)"><i class="fas fa-spinner fa-spin"></i> ${kpEscapeHtml(msg)}</span>`;
                 }
             );
             mergedContent += includeContent;
@@ -710,7 +724,7 @@ async function loadPrinterCfgWithIncludes(printerCfgPath, sourceLabel) {
 
         status.innerHTML = `<span style="color:var(--success-color)"><i class="fas fa-check-circle"></i> 已加载 printer.cfg 及所有 include 文件 (来源: ${sourceLabel})</span>`;
     } catch (err) {
-        status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 加载失败: ${err.message}</span>`;
+        status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 加载失败: ${kpEscapeHtml(err.message)}</span>`;
     }
 }
 
@@ -730,7 +744,7 @@ async function loadRemoteConfig(filePath) {
         const data = await resp.json();
 
         if (!data.success) {
-            status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> ${data.error}</span>`;
+            status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> ${kpEscapeHtml(data.error)}</span>`;
             return;
         }
 
@@ -739,9 +753,9 @@ async function loadRemoteConfig(filePath) {
         const parseBtn = document.getElementById('parseBtn');
         if (parseBtn) parseBtn.click();
 
-        status.innerHTML = `<span style="color:var(--success-color)"><i class="fas fa-check-circle"></i> 已加载: ${data.filename} (来源: ${data.source})</span>`;
+        status.innerHTML = `<span style="color:var(--success-color)"><i class="fas fa-check-circle"></i> 已加载: ${kpEscapeHtml(data.filename)} (来源: ${kpEscapeHtml(data.source)})</span>`;
     } catch (err) {
-        status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 读取失败: ${err.message}</span>`;
+        status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 读取失败: ${kpEscapeHtml(err.message)}</span>`;
     }
 }
 

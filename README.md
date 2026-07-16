@@ -209,6 +209,7 @@ sudo journalctl -u firmware-tool -f
 Firmware-Tool/
 ├── src/                          # 后端源码（Flask 蓝图模块）
 │   ├── app.py                    # 主入口 - 应用初始化与蓝图注册
+│   ├── canbus_query.py           # 增强 CAN UUID 查询脚本，本地模式优先用于 CAN 扫描
 │   ├── shared.py                 # 共享资源 - 全局常量、配置、工具函数
 │   ├── routes_system.py          # 系统管理蓝图 - 资源监控、设备检测、服务管理
 │   ├── routes_firmware.py        # 固件蓝图 - 编译、烧录、下载
@@ -247,7 +248,7 @@ Firmware-Tool/
 | `/api/system/serial` | GET | 串口设备列表 |
 | `/api/system/lsusb` | GET | USB 设备列表 |
 | `/api/system/can-iface` | GET | CAN 接口列表 |
-| `/api/system/can-uuid` | POST | CAN 设备 UUID 扫描 |
+| `/api/system/can-uuid` | POST | CAN 设备 UUID 扫描；Klipper 节点可返回 MCU 型号与固件版本 |
 | `/api/system/video` | GET | 摄像头设备 |
 | `/api/firmware/current-config` | GET | 读取 Klipper `.config` 并返回可回填的编译参数 |
 | `/api/firmware/compile` | POST | 编译固件（SSE 流式） |
@@ -269,6 +270,12 @@ Firmware-Tool/
 | `/api/settings/config` | GET/POST | 系统配置 |
 | `/api/system/can-config` | GET/POST | CAN 网络配置 |
 | `/api/system/versions` | GET | 系统版本信息 |
+
+### CAN UUID 扫描
+
+`src/canbus_query.py` 由 `/api/system/can-uuid` 在本地模式优先调用；SSH/FAST-SSH 模式会临时上传到远端 `/tmp/firmware-tool-canbus_query.py` 后执行。脚本通过 Python 直接运行，无单独构建步骤。
+
+MCU 型号和固件版本来自 Klipper 节点的 identify 字典。CanBoot/Katapult 节点通常只能返回 UUID 与应用类型。
 
 ## 技术栈
 

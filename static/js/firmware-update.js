@@ -5,6 +5,20 @@ let selectedUpdateConfigs = new Set(); // 选中的配置 ID
 let updateBoardConfigs = []; // 主板配置列表（用于选择关联）
 let currentBoardConfig = null; // 当前选中的主板配置
 
+function fuEscapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value == null ? '' : String(value);
+    return div.innerHTML;
+}
+
+function fuEscapeJsString(value) {
+    return String(value == null ? '' : value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
+}
+
 // 初始化固件更新页面
 async function initFirmwareUpdatePage() {
     console.log('初始化固件更新页面...');
@@ -206,25 +220,25 @@ function renderUpdateableConfigs() {
         };
         
         html += `
-            <div class="config-card ${isSelected ? 'selected' : ''}" data-id="${config.id}">
+            <div class="config-card ${isSelected ? 'selected' : ''}" data-id="${fuEscapeHtml(config.id)}">
                 <input type="checkbox" ${isSelected ? 'checked' : ''} 
-                       onchange="toggleUpdateSelection('${config.id}')">
+                       onchange="toggleUpdateSelection('${fuEscapeJsString(config.id)}')">
                 <div class="info">
-                    <div class="name">${config.id}</div>
+                    <div class="name">${fuEscapeHtml(config.id)}</div>
                     <div class="details">
-                        ${updateEnabled ? '<span style="color:#28a745;">' + (modeShortNames[mode] || mode) + '</span>' : '<span style="color:#6c757d;">已禁用</span>'}
-                        ${deviceId ? '| ' + deviceId.substring(0, 12) + '...' : ''}
-                        ${config.board_config_id ? '| 关联: ' + config.board_config_id : ''}
+                        ${updateEnabled ? '<span style="color:#28a745;">' + fuEscapeHtml(modeShortNames[mode] || mode) + '</span>' : '<span style="color:#6c757d;">已禁用</span>'}
+                        ${deviceId ? '| ' + fuEscapeHtml(deviceId.substring(0, 12)) + '...' : ''}
+                        ${config.board_config_id ? '| 关联: ' + fuEscapeHtml(config.board_config_id) : ''}
                     </div>
                 </div>
                 <div class="status">
                     <span class="status-badge ${updateEnabled ? 'enabled' : 'disabled'}">
                         ${updateEnabled ? '已启用' : '未启用'}
                     </span>
-                    <button class="btn btn-sm btn-secondary" onclick="openUpdateSettings('${config.id}')">
+                    <button class="btn btn-sm btn-secondary" onclick="openUpdateSettings('${fuEscapeJsString(config.id)}')">
                         ⚙️ 设置
                     </button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteFirmwareUpdateConfig('${config._manufacturer}', '${config.id}')">
+                    <button class="btn btn-sm btn-danger" onclick="deleteFirmwareUpdateConfig('${fuEscapeJsString(config._manufacturer)}', '${fuEscapeJsString(config.id)}')">
                         🗑️
                     </button>
                 </div>
@@ -398,8 +412,8 @@ async function openUpdateSettings(configId) {
     if (config.board_config) {
         linkedInfoDiv.innerHTML = `
             <div style="background:#e3f2fd;padding:10px;border-radius:8px;margin-bottom:15px;">
-                <strong>关联主板配置:</strong> ${config.board_config.name}<br>
-                <small>${config.board_config.platform} ${config.board_config.mcu} | ${config.board_config.type}</small>
+                <strong>关联主板配置:</strong> ${fuEscapeHtml(config.board_config.name)}<br>
+                <small>${fuEscapeHtml(config.board_config.platform)} ${fuEscapeHtml(config.board_config.mcu)} | ${fuEscapeHtml(config.board_config.type)}</small>
             </div>
         `;
     } else if (config.board_config_id) {
@@ -412,15 +426,15 @@ async function openUpdateSettings(configId) {
             if (boardConfig && !boardConfig.error) {
                 linkedInfoDiv.innerHTML = `
                     <div style="background:#e3f2fd;padding:10px;border-radius:8px;margin-bottom:15px;">
-                        <strong>关联主板配置:</strong> ${boardConfig.name || config.board_config_id}<br>
-                        <small>${boardConfig.platform || ''} ${boardConfig.mcu || ''} | ${boardConfig.type || ''}</small>
+                        <strong>关联主板配置:</strong> ${fuEscapeHtml(boardConfig.name || config.board_config_id)}<br>
+                        <small>${fuEscapeHtml(boardConfig.platform || '')} ${fuEscapeHtml(boardConfig.mcu || '')} | ${fuEscapeHtml(boardConfig.type || '')}</small>
                     </div>
                 `;
             } else {
-                linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#888;">关联配置: ${config.board_config_id}</div>`;
+                linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#888;">关联配置: ${fuEscapeHtml(config.board_config_id)}</div>`;
             }
         } catch (e) {
-            linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#888;">关联配置: ${config.board_config_id}</div>`;
+            linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#888;">关联配置: ${fuEscapeHtml(config.board_config_id)}</div>`;
         }
     } else {
         linkedInfoDiv.innerHTML = '';
@@ -841,7 +855,8 @@ function addBatchResult(name, status, message) {
     const resultsDiv = document.getElementById('batchUpdateResults');
     
     // 查找是否已有该配置的结果，有则更新
-    const existingItem = resultsDiv.querySelector(`[data-name="${name}"]`);
+    const existingItem = Array.from(resultsDiv.querySelectorAll('.update-result-item'))
+        .find(el => el.dataset.name === String(name));
     if (existingItem) {
         existingItem.className = 'update-result-item';
         existingItem.innerHTML = `
@@ -849,8 +864,8 @@ function addBatchResult(name, status, message) {
                 ${status === 'success' ? '✓' : status === 'error' ? '✗' : status === 'running' ? '◐' : '○'}
             </div>
             <div class="info" style="flex:1;">
-                <div style="font-weight:500;">${name}</div>
-                <div style="font-size:13px;color:#6c757d;">${message}</div>
+                <div style="font-weight:500;">${fuEscapeHtml(name)}</div>
+                <div style="font-size:13px;color:#6c757d;">${fuEscapeHtml(message)}</div>
             </div>
         `;
         return;
@@ -865,8 +880,8 @@ function addBatchResult(name, status, message) {
             ${status === 'success' ? '✓' : status === 'error' ? '✗' : status === 'running' ? '◐' : '○'}
         </div>
         <div class="info" style="flex:1;">
-            <div style="font-weight:500;">${name}</div>
-            <div style="font-size:13px;color:#6c757d;">${message}</div>
+            <div style="font-weight:500;">${fuEscapeHtml(name)}</div>
+            <div style="font-size:13px;color:#6c757d;">${fuEscapeHtml(message)}</div>
         </div>
     `;
     

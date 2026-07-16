@@ -332,9 +332,9 @@ function renderEditor() {
         <div class="cm-editor-inner">
             <!-- 元信息栏 -->
             <div class="cm-meta-bar">
-                <span class="cm-meta-item">类型: ${TYPE_LABELS[data.type] || data.type || '-'}</span>
-                <span class="cm-meta-item">MCU: ${data.mcu || '-'}</span>
-                <span class="cm-meta-item">平台: ${data.platform || '-'}</span>
+                <span class="cm-meta-item">类型: ${escapeHtml(TYPE_LABELS[data.type] || data.type || '-')}</span>
+                <span class="cm-meta-item">MCU: ${escapeHtml(data.mcu || '-')}</span>
+                <span class="cm-meta-item">平台: ${escapeHtml(data.platform || '-')}</span>
                 ${isPreset ? '<span class="cm-meta-badge preset">系统预设</span>' : '<span class="cm-meta-badge user">用户配置</span>'}
             </div>
 

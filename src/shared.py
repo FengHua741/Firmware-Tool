@@ -11,6 +11,7 @@ import os
 import shlex
 import re
 import json
+import secrets
 import time
 import psutil
 import glob
@@ -96,6 +97,7 @@ DEFAULT_CONFIG = {
     # 安全开关默认保持兼容；需要收紧时可在 config.json 或环境变量中启用
     'allowed_origins': [],
     'api_token': '',
+    'require_csrf': True,
 }
 
 def load_config():
@@ -124,7 +126,12 @@ def save_config(config):
         return False
 
 config = load_config()
+if 'fast_ssh_password' in config:
+    config.pop('fast_ssh_password', None)
+    save_config(config)
 PORT = config.get('port', 9999)
+CSRF_COOKIE_NAME = 'firmware_tool_csrf'
+CSRF_HEADER_NAME = 'X-CSRF-Token'
 
 
 def _configured_cors_origins():
@@ -141,16 +148,42 @@ CORS(app, origins=_configured_cors_origins())
 
 @app.before_request
 def require_api_token():
-    """可选 API Token 校验；默认关闭以兼容现有前端。"""
-    token = os.environ.get('FIRMWARE_TOOL_API_TOKEN') or config.get('api_token') or ''
-    if not token:
-        return None
+    """API Token 或同源 CSRF 校验。"""
     if request.method == 'OPTIONS' or request.path == '/' or request.path.startswith('/static/'):
         return None
+    if not request.path.startswith('/api/'):
+        return None
+
+    token = os.environ.get('FIRMWARE_TOOL_API_TOKEN') or config.get('api_token') or ''
     supplied = request.headers.get('X-API-Token') or request.args.get('token') or ''
-    if supplied != token:
-        return jsonify({'success': False, 'error': '未授权'}), 401
+    if token and supplied == token:
+        return None
+
+    require_csrf = config.get('require_csrf', True)
+    if not require_csrf and not token:
+        return None
+
+    csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME, '')
+    csrf_header = request.headers.get(CSRF_HEADER_NAME, '')
+    if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+        return jsonify({'success': False, 'error': '未授权或页面令牌已过期，请刷新页面'}), 401
     return None
+
+
+def new_csrf_token():
+    return secrets.token_urlsafe(32)
+
+
+def public_config(raw_config=None):
+    """返回可给前端使用的配置，避免泄露凭据和内部安全字段。"""
+    source = raw_config or config
+    hidden_keys = {
+        'api_token',
+        'fast_ssh_password',
+        'ssh_password',
+        'sudo_password',
+    }
+    return {k: v for k, v in source.items() if k not in hidden_keys}
 
 # FAST-SSH 模式保障：启动时自动设置凭据
 if config.get('connection_mode') == 'fast-ssh':
@@ -160,10 +193,9 @@ if config.get('connection_mode') == 'fast-ssh':
     config['sudo_mode'] = 'password'
     _save_cred('ssh_password', _fast_pwd)
     _save_cred('sudo_password', _fast_pwd)
-    # 首次使用时将凭据持久化到 config.json（避免源码泄露）
+    # 首次使用时只持久化用户名，密码存入凭据仓库。
     if not config.get('fast_ssh_user'):
         config['fast_ssh_user'] = _fast_user
-        config['fast_ssh_password'] = _fast_pwd
 
 # ==================== 工具函数 ====================
 

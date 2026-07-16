@@ -3,6 +3,7 @@
 """
 
 import os
+import posixpath
 import re
 import json
 import shlex
@@ -45,6 +46,40 @@ def get_klipper_config_dir():
         base,
     ]
     return candidates
+
+
+def _normalize_path_for_mode(path):
+    path = str(path or '').strip()
+    if is_ssh_mode():
+        if path.startswith('~'):
+            ssh_user = config.get('ssh_user', '')
+            home = f'/home/{ssh_user}' if ssh_user and ssh_user != 'root' else '/root'
+            path = home + path[1:]
+        return posixpath.normpath(path)
+    return os.path.realpath(os.path.expanduser(path))
+
+
+def _path_under(path, roots):
+    norm_path = _normalize_path_for_mode(path)
+    for root in roots:
+        norm_root = _normalize_path_for_mode(root)
+        try:
+            if is_ssh_mode():
+                if norm_path == norm_root or norm_path.startswith(norm_root.rstrip('/') + '/'):
+                    return True
+            elif os.path.commonpath([norm_path, norm_root]) == norm_root:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _validate_config_file_path(file_path):
+    if not file_path or '..' in file_path:
+        return False
+    if not file_path.lower().endswith(('.cfg', '.conf', '.txt', '.cfg.mainsail', '.cfg.fluidd')):
+        return False
+    return _path_under(file_path, get_klipper_config_dir())
 
 
 def _parse_cfg_sections(content):
@@ -214,6 +249,8 @@ def list_wildcard_files():
     if is_ssh_mode():
         dir_part = os.path.dirname(pattern)
         expanded_dir = os.path.expanduser(dir_part) if dir_part else '.'
+        if not _path_under(expanded_dir, get_klipper_config_dir()):
+            return jsonify({'success': False, 'error': '非法路径'})
         file_pattern = os.path.basename(pattern)
         cmd = f'find {shlex.quote(expanded_dir)} -maxdepth 1 -type f -name {shlex.quote(file_pattern)} 2>/dev/null | head -20'
         result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=10)
@@ -227,6 +264,8 @@ def list_wildcard_files():
     else:
         expanded = os.path.expanduser(pattern)
         dir_part = os.path.dirname(expanded)
+        if not _path_under(dir_part, get_klipper_config_dir()):
+            return jsonify({'success': False, 'error': '非法路径'})
         file_pattern = os.path.basename(expanded)
         matched = []
         if os.path.isdir(dir_part):
@@ -290,6 +329,8 @@ def read_config_content():
             return jsonify({'success': False, 'error': str(e)})
 
     # 方案2: SSH/本地读取
+    if not _validate_config_file_path(file_path):
+        return jsonify({'success': False, 'error': '非法路径'})
     if is_ssh_mode():
         cmd = f'cat {shlex.quote(file_path)} 2>&1'
         result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=10)

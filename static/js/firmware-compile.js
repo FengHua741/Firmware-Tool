@@ -11,6 +11,13 @@ let _commAllOptions = [];     // 所有通信选项（带compatible_processors�
 let _bridgeCanOptions = [];   // STM32 桥接CAN引脚选项
 let _rp2040CanGpio = null;    // RP2040 CAN GPIO 配置
 
+const CAN_BITRATE_DEFAULT = '1000000';
+const CAN_BITRATE_LABELS = {
+    '1000000': '1M',
+    '500000': '500K',
+    '250000': '250K',
+};
+
 // 初始化固件编译页面
 async function initFirmwarePage() {
     console.log('初始化固件编译页面...');
@@ -33,7 +40,7 @@ async function refreshFlashCanIfaces() {
         let ifaceCount = 0;
         if (data.ifaces && data.ifaces.length > 0) {
             data.ifaces.forEach(iface => {
-                select.innerHTML += `<option value="${iface.ifname}">${iface.ifname}</option>`;
+                select.innerHTML += `<option value="${escapeHtml(iface.ifname)}">${escapeHtml(iface.ifname)}</option>`;
                 ifaceCount++;
             });
         }
@@ -80,7 +87,7 @@ async function loadCompilePresetManufacturers() {
         if (data.manufacturers) {
             data.manufacturers.forEach(mfr => {
                 if (mfr !== '自定义') {
-                    select.innerHTML += `<option value="${mfr}">${mfr}</option>`;
+                    select.innerHTML += `<option value="${escapeHtml(mfr)}">${escapeHtml(mfr)}</option>`;
                 }
             });
         }
@@ -121,7 +128,7 @@ function loadCompileMcuPlatforms(autoDefault = true) {
     select.innerHTML = '<option value="">-- 选择平台 --</option>';
     
     for (const platform in compileMcuDatabase) {
-        select.innerHTML += `<option value="${platform}">${platform}</option>`;
+        select.innerHTML += `<option value="${escapeHtml(platform)}">${escapeHtml(platform)}</option>`;
     }
     // 默认选中 STM32
     if (autoDefault && compileMcuDatabase['STM32']) {
@@ -148,7 +155,7 @@ async function onCompileMcuPlatformChange() {
         
         if (data.success) {
             data.mcus.forEach(mcu => {
-                modelSelect.innerHTML += `<option value="${mcu.id}">${mcu.name}</option>`;
+                modelSelect.innerHTML += `<option value="${escapeHtml(mcu.id)}">${escapeHtml(mcu.name)}</option>`;
             });
             modelSelect.disabled = false;
         }
@@ -194,7 +201,7 @@ async function displayCompileMcuDetails(data) {
     crystalSelect.innerHTML = '';
     mcu.crystals.forEach(freq => {
         const label = formatCompileFrequency(freq);
-        crystalSelect.innerHTML += `<option value="${freq}">${label}</option>`;
+        crystalSelect.innerHTML += `<option value="${escapeHtml(freq)}">${escapeHtml(label)}</option>`;
     });
     if (mcu.id === 'rp2040' || mcu.id === 'rp2350' || mcu.crystals.length <= 1) {
         crystalGroup.style.display = 'none';
@@ -207,7 +214,7 @@ async function displayCompileMcuDetails(data) {
     blSelect.innerHTML = '';
     mcu.bl_offsets.forEach(offset => {
         const label = formatCompileBlOffset(offset, mcu.id);
-        blSelect.innerHTML += `<option value="${offset}">${label}</option>`;
+        blSelect.innerHTML += `<option value="${escapeHtml(offset)}">${escapeHtml(label)}</option>`;
     });
     
     // 连接方式 - 两级选择（从Kconfig动态获取）
@@ -344,7 +351,7 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
         const typeLabels = { 'usb': 'USB', 'serial': 'Serial/UART', 'can': 'CAN', 'usbcanbridge': 'USB转CAN桥接' };
         connSelect.innerHTML = '<option value="">-- 选择通信类型 --</option>';
         for (const type in _commGroupedOptions) {
-            connSelect.innerHTML += `<option value="${type}">${typeLabels[type] || type}</option>`;
+            connSelect.innerHTML += `<option value="${escapeHtml(type)}">${escapeHtml(typeLabels[type] || type)}</option>`;
         }
         // 默认选中 USB（如果可用，但从预设加载时跳过，由 _autoSelectPresetConnection 处理）
         if (_commGroupedOptions['usb'] && !window._fromPreset) {
@@ -378,6 +385,8 @@ function onCompileConnectionChange() {
     if (subContainer) subContainer.remove();
     let pinContainer = document.getElementById('compileCanPinSub');
     if (pinContainer) pinContainer.remove();
+    let bitrateContainer = document.getElementById('compileCanBitrateSub');
+    if (bitrateContainer) bitrateContainer.remove();
     
     if (!commType || !_commGroupedOptions[commType]) return;
     
@@ -399,16 +408,20 @@ function onCompileConnectionChange() {
         else if (commType === 'usbcanbridge') label = 'USB接口';
         else if (commType === 'usb') label = 'USB接口';
         
-        subContainer.innerHTML = `<label>${label}</label><select id="compileConnectionDetail" class="form-control" onchange="onCompileConnectionDetailChange()"></select>`;
+        subContainer.innerHTML = `<label>${escapeHtml(label)}</label><select id="compileConnectionDetail" class="form-control" onchange="onCompileConnectionDetailChange()"></select>`;
         connGroup.parentNode.insertBefore(subContainer, connGroup.nextSibling);
         
         const detailSelect = document.getElementById('compileConnectionDetail');
-        detailSelect.innerHTML = `<option value="">-- 选择${label} --</option>`;
+        detailSelect.innerHTML = `<option value="">-- 选择${escapeHtml(label)} --</option>`;
         options.forEach(opt => {
-            detailSelect.innerHTML += `<option value="${opt.config_symbol}" data-comm='${JSON.stringify(opt).replace(/'/g, '&apos;')}'>${opt.display}</option>`;
+            const dataComm = escapeHtml(JSON.stringify(opt)).replace(/'/g, '&apos;');
+            detailSelect.innerHTML += `<option value="${escapeHtml(opt.config_symbol)}" data-comm='${dataComm}'>${escapeHtml(opt.display)}</option>`;
         });
+        if (commType === 'can') {
+            _selectCanPinsOption(detailSelect, options, 'config_symbol');
+        }
         // 只有1个选项时自动选中
-        if (options.length === 1) {
+        if (!detailSelect.value && options.length === 1) {
             detailSelect.value = options[0].config_symbol;
         }
     }
@@ -422,6 +435,17 @@ function onCompileConnectionChange() {
     if (_rp2040CanGpio && (commType === 'can' || commType === 'usbcanbridge')) {
         _showRp2040CanGpioSelector(connGroup);
     }
+
+    if (commType === 'can' || commType === 'usbcanbridge') {
+        _showCanBitrateSelector(connGroup);
+    }
+}
+
+function _insertAfterCompileConnectionOptions(connGroup, container) {
+    const insertAfter = document.getElementById('compileCanPinSub') ||
+        document.getElementById('compileConnectionSub') ||
+        connGroup;
+    insertAfter.parentNode.insertBefore(container, insertAfter.nextSibling);
 }
 
 // 显示STM32桥接CAN引脚选择器
@@ -433,16 +457,31 @@ function _showBridgeCanPinSelector(connGroup) {
     
     pinContainer.innerHTML = `<label>CAN总线引脚</label><select id="compileBridgeCanPin" class="form-control"></select>`;
     
-    // 插入到最后一个子选项之后
-    const lastSub = document.getElementById('compileConnectionSub');
-    const insertAfter = lastSub || connGroup;
-    insertAfter.parentNode.insertBefore(pinContainer, insertAfter.nextSibling);
+    _insertAfterCompileConnectionOptions(connGroup, pinContainer);
     
     const pinSelect = document.getElementById('compileBridgeCanPin');
     pinSelect.innerHTML = '<option value="">-- 选择CAN引脚 --</option>';
     _bridgeCanOptions.forEach(opt => {
-        pinSelect.innerHTML += `<option value="${opt.config}">${opt.display}</option>`;
+        pinSelect.innerHTML += `<option value="${escapeHtml(opt.config)}">${escapeHtml(opt.display)}</option>`;
     });
+    _selectCanPinsOption(pinSelect, _bridgeCanOptions, 'config');
+}
+
+function _selectCanPinsOption(select, options, valueKey) {
+    if (!select || !Array.isArray(options)) return false;
+    const preferred = options.find(opt => {
+        const text = [
+            opt.pins,
+            opt.display,
+            opt[valueKey],
+            opt.config,
+            opt.config_symbol,
+        ].map(v => String(v || '').toUpperCase()).join(' ');
+        return text.includes('PB8/PB9') || text.includes('PB8_PB9');
+    });
+    if (!preferred) return false;
+    select.value = preferred[valueKey] || preferred.config || preferred.config_symbol || '';
+    return Boolean(select.value);
 }
 
 // 显示RP2040 CAN GPIO引脚选择器
@@ -475,6 +514,71 @@ function _showRp2040CanGpioSelector(connGroup) {
     lastSub.parentNode.insertBefore(pinContainer, lastSub.nextSibling);
 }
 
+function _showCanBitrateSelector(connGroup) {
+    const bitrateContainer = document.createElement('div');
+    bitrateContainer.id = 'compileCanBitrateSub';
+    bitrateContainer.className = 'form-group';
+    bitrateContainer.style.marginTop = '10px';
+    bitrateContainer.innerHTML = `
+        <label>CAN 速率</label>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <select id="compileCanBitrate" class="form-control form-select" style="max-width:160px;" onchange="onCompileCanBitrateChange()">
+                <option value="1000000" selected>1M</option>
+                <option value="500000">500K</option>
+                <option value="250000">250K</option>
+                <option value="custom">自定义</option>
+            </select>
+            <input type="number" id="compileCanBitrateCustom" class="form-control" style="display:none;max-width:180px;" min="10000" max="5000000" step="10000" placeholder="例如 800000">
+        </div>
+    `;
+    _insertAfterCompileConnectionOptions(connGroup, bitrateContainer);
+}
+
+function onCompileCanBitrateChange() {
+    const select = document.getElementById('compileCanBitrate');
+    const customInput = document.getElementById('compileCanBitrateCustom');
+    if (!select || !customInput) return;
+    customInput.style.display = select.value === 'custom' ? '' : 'none';
+    if (select.value === 'custom' && !customInput.value) {
+        customInput.value = CAN_BITRATE_DEFAULT;
+    }
+}
+
+function _normalizeCanBitrate(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return '';
+    const match = raw.match(/^(\d+(?:\.\d+)?)\s*([km])?$/);
+    if (!match) return raw;
+    const number = Number(match[1]);
+    if (!Number.isFinite(number) || number <= 0) return raw;
+    const multiplier = match[2] === 'm' ? 1000000 : match[2] === 'k' ? 1000 : 1;
+    return String(Math.round(number * multiplier));
+}
+
+function _getSelectedCanBitrate() {
+    const select = document.getElementById('compileCanBitrate');
+    if (!select) return CAN_BITRATE_DEFAULT;
+    if (select.value !== 'custom') return select.value || CAN_BITRATE_DEFAULT;
+    return _normalizeCanBitrate(document.getElementById('compileCanBitrateCustom')?.value) || CAN_BITRATE_DEFAULT;
+}
+
+function _setSelectedCanBitrate(value) {
+    const bitrate = _normalizeCanBitrate(value) || CAN_BITRATE_DEFAULT;
+    const select = document.getElementById('compileCanBitrate');
+    const customInput = document.getElementById('compileCanBitrateCustom');
+    if (!select) return;
+    if (CAN_BITRATE_LABELS[bitrate]) {
+        select.value = bitrate;
+        if (customInput) customInput.style.display = 'none';
+        return;
+    }
+    select.value = 'custom';
+    if (customInput) {
+        customInput.value = bitrate;
+        customInput.style.display = '';
+    }
+}
+
 function onCompileConnectionDetailChange() {
     // 编译时读取 detailSelect.value（见 compileFirmware 方法）
 }
@@ -493,7 +597,7 @@ async function onCompilePresetManufacturerChange() {
     if (!manufacturer) return;
     
     try {
-        const response = await fetch(`/api/config/list/${manufacturer}`);
+        const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
         const data = await response.json();
         
         if (data.configs) {
@@ -501,7 +605,7 @@ async function onCompilePresetManufacturerChange() {
             types.forEach(type => {
                 const label = type === 'mainboard' ? '主板' : 
                              type === 'toolboard' ? '工具板' : '扩展板';
-                typeSelect.innerHTML += `<option value="${type}">${label}</option>`;
+                typeSelect.innerHTML += `<option value="${escapeHtml(type)}">${escapeHtml(label)}</option>`;
             });
             typeSelect.disabled = false;
             // 默认选中主板
@@ -527,13 +631,14 @@ async function onCompilePresetTypeChange() {
     if (!type) return;
     
     try {
-        const response = await fetch(`/api/config/list/${manufacturer}`);
+        const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
         const data = await response.json();
         
         if (data.configs) {
             const configs = data.configs.filter(c => c.type === type);
             configs.forEach(config => {
-                modelSelect.innerHTML += `<option value="${config.id}" data-config='${JSON.stringify(config).replace(/'/g, '&apos;')}'>${config.name}</option>`;
+                const dataConfig = escapeHtml(JSON.stringify(config)).replace(/'/g, '&apos;');
+                modelSelect.innerHTML += `<option value="${escapeHtml(config.id)}" data-config='${dataConfig}'>${escapeHtml(config.name)}</option>`;
             });
             modelSelect.disabled = false;
         }
@@ -856,6 +961,9 @@ async function loadCurrentCompileConfig() {
         if (current.bridge_can_config) {
             _selectCompileSymbol(document.getElementById('compileBridgeCanPin'), current.bridge_can_config);
         }
+        if (current.canbus_frequency) {
+            _setSelectedCanBitrate(current.canbus_frequency);
+        }
         if (current.rp2040_can_rx_gpio !== undefined) {
             const rxInput = document.getElementById('compileRp2040CanRx');
             if (rxInput) rxInput.value = current.rp2040_can_rx_gpio;
@@ -960,6 +1068,10 @@ async function compileFirmware() {
             if (bridgePinSelect && bridgePinSelect.value) {
                 compileParams.bridge_can_config = bridgePinSelect.value;
             }
+        }
+
+        if (commType === 'can' || commType === 'usbcanbridge') {
+            compileParams.canbus_frequency = _getSelectedCanBitrate();
         }
         
         // RP2040 CAN/桥接：传递GPIO引脚
@@ -1121,7 +1233,7 @@ async function refreshDeviceIds() {
                     
                     // 简化显示：类型 + 设备名
                     const shortName = device.name.length > 40 ? device.name.substring(0, 40) + '...' : device.name;
-                    select.innerHTML += `<option value="${device.id}">${icon} [${typeLabel}] ${shortName}</option>`;
+                    select.innerHTML += `<option value="${escapeHtml(device.id)}">${icon} [${escapeHtml(typeLabel)}] ${escapeHtml(shortName)}</option>`;
                     usbCount++;
                 });
                 } // end if filteredDevices.length > 0
@@ -1135,7 +1247,7 @@ async function refreshDeviceIds() {
             // 只在有CAN设备时才显示CAN分组标题和设备
             if (canData.uuids && canData.uuids.length > 0) {
                 // 添加CAN分组标题（禁用选项）
-                select.innerHTML += `<option disabled>━━━━━━━━ CAN 设备 (${canIface}) ━━━━━━━━</option>`;
+                select.innerHTML += `<option disabled>━━━━━━━━ CAN 设备 (${escapeHtml(canIface)}) ━━━━━━━━</option>`;
                 
                 canData.uuids.forEach(d => {
                     // 根据应用类型和来源构建标签
@@ -1163,8 +1275,12 @@ async function refreshDeviceIds() {
                     }
                     // 第二部分：MCU 型号和频率
                     if (d.mcu_model) {
-                        const mcuDisplay = d.mcu_freq ? `${d.mcu_model} @ ${d.mcu_freq}` : d.mcu_model;
+                        const mcuName = String(d.mcu_model).toUpperCase();
+                        const mcuDisplay = d.mcu_freq ? `${mcuName} @ ${d.mcu_freq}` : mcuName;
                         parts.push(mcuDisplay);
+                    }
+                    if (d.mcu_version) {
+                        parts.push(d.mcu_version);
                     }
                     const bracketInfo = parts.length > 0 ? ` [${parts.join(' / ')}]` : '';
                     
@@ -1172,7 +1288,7 @@ async function refreshDeviceIds() {
                     const sectionInfo = d.section ? ` [${d.section}]` : '';
                     
                     const label = `${d.uuid}${bracketInfo}${sectionInfo}`;
-                    select.innerHTML += `<option value="${d.uuid}">${icon} ${label}</option>`;
+                    select.innerHTML += `<option value="${escapeHtml(d.uuid)}">${escapeHtml(icon)} ${escapeHtml(label)}</option>`;
                     canCount++;
                 });
             }
@@ -1180,7 +1296,7 @@ async function refreshDeviceIds() {
             // 显示来源提示
             if (canData.source === 'printer_cfg' && canData.skipped > 0 && canErrDiv) {
                 canErrDiv.style.display = 'block';
-                canErrDiv.innerHTML = `<div style="margin-top:6px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">${canData.skipped} 个配置文件中的设备未连接，已自动过滤</div>`;
+                canErrDiv.innerHTML = `<div style="margin-top:6px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">${escapeHtml(canData.skipped)} 个配置文件中的设备未连接，已自动过滤</div>`;
             }
         }
 
@@ -1624,7 +1740,7 @@ async function loadHostBrowserDir(path) {
         const data = await resp.json();
         
         if (data.error) {
-            listEl.innerHTML = `<div class="browser-empty">${data.error}</div>`;
+            listEl.innerHTML = `<div class="browser-empty">${escapeHtml(data.error)}</div>`;
             return;
         }
         
@@ -1642,7 +1758,7 @@ async function loadHostBrowserDir(path) {
             const icon = entry.is_dir ? '&#x1F4C1;' : '&#x1F4C4;';
             const sizeStr = entry.is_dir ? '' : formatFileSize(entry.size);
             const dirClass = entry.is_dir ? ' is-dir' : '';
-            const escapedPath = entry.path.replace(/'/g, "\\'");
+            const escapedPath = escapeJsString(entry.path);
             html += `<div class="browser-item${dirClass}" onclick="onHostBrowserClick(this, '${escapedPath}', ${entry.is_dir})">
                 <span class="item-icon">${icon}</span>
                 <span class="item-name">${escapeHtml(entry.name)}</span>
@@ -1651,7 +1767,7 @@ async function loadHostBrowserDir(path) {
         }
         listEl.innerHTML = html;
     } catch (err) {
-        listEl.innerHTML = `<div class="browser-empty">浏览失败: ${err.message}</div>`;
+        listEl.innerHTML = `<div class="browser-empty">浏览失败: ${escapeHtml(err.message)}</div>`;
     }
 }
 
@@ -1879,8 +1995,8 @@ async function flashBootloader() {
             resultDiv.querySelector('.result-box').innerHTML = `
                 <div class="status-error">
                     <p>❌ BL 烧录失败</p>
-                    <pre>${result.error || '未知错误'}</pre>
-                    ${result.output ? '<details><summary>详细输出</summary><pre>' + result.output + '</pre></details>' : ''}
+                    <pre>${escapeHtml(result.error || '未知错误')}</pre>
+                    ${result.output ? '<details><summary>详细输出</summary><pre>' + escapeHtml(result.output) + '</pre></details>' : ''}
                 </div>
             `;
             showError('BL 烧录失败: ' + (result.error || '未知错误'));
@@ -1890,7 +2006,7 @@ async function flashBootloader() {
         resultDiv.querySelector('.result-box').innerHTML = `
             <div class="status-error">
                 <p>❌ BL 烧录请求失败</p>
-                <pre>${error.message}</pre>
+                <pre>${escapeHtml(error.message)}</pre>
             </div>
         `;
         showError('BL 烧录请求失败: ' + error.message);
@@ -1921,6 +2037,8 @@ function resetCompileForm() {
     if (subContainer) subContainer.remove();
     let pinContainer = document.getElementById('compileCanPinSub');
     if (pinContainer) pinContainer.remove();
+    let bitrateContainer = document.getElementById('compileCanBitrateSub');
+    if (bitrateContainer) bitrateContainer.remove();
     _commGroupedOptions = {};
     _commAllOptions = [];
     _bridgeCanOptions = [];
@@ -1992,16 +2110,16 @@ async function checkDependencies() {
         const resp = await fetch('/api/firmware/dependencies');
         const data = await resp.json();
         if (data.error) {
-            statusEl.innerHTML = `<p style="color:red">检测失败: ${data.error}</p>`;
+            statusEl.innerHTML = `<p style="color:red">检测失败: ${escapeHtml(data.error)}</p>`;
             return;
         }
         const rows = data.dependencies.map(dep => {
             const icon = dep.installed ? '&#10003;' : '&#10007;';
             const color = dep.installed ? '#4caf50' : '#f44336';
-            const ver = dep.installed ? `<span style="color:#888;font-size:12px">${dep.version}</span>` : `<span style="color:#f44336">未安装 (${dep.pkg})</span>`;
+            const ver = dep.installed ? `<span style="color:#888;font-size:12px">${escapeHtml(dep.version)}</span>` : `<span style="color:#f44336">未安装 (${escapeHtml(dep.pkg)})</span>`;
             return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
                       <span style="color:${color};font-weight:bold;font-size:16px">${icon}</span>
-                      <span style="font-family:monospace">${dep.name}</span>
+                      <span style="font-family:monospace">${escapeHtml(dep.name)}</span>
                       ${ver}
                     </div>`;
         }).join('');
@@ -2010,7 +2128,7 @@ async function checkDependencies() {
             : '<p style="color:#f44336">存在缺失依赖，请点击"安装依赖"</p>';
         statusEl.innerHTML = summary + rows;
     } catch (e) {
-        statusEl.innerHTML = `<p style="color:red">请求失败: ${e.message}</p>`;
+        statusEl.innerHTML = `<p style="color:red">请求失败: ${escapeHtml(e.message)}</p>`;
     }
 }
 

@@ -670,24 +670,20 @@ class SSHManager:
 
 # ==================== 统一命令执行函数 ====================
 
-# FAST-SSH 模式凭据 — 从配置文件或环境变量读取，不在源码中硬编码
+# FAST-SSH 模式凭据 — 环境变量优先，默认值用于兼容既有 FAST 设备。
 FAST_SSH_USER = os.environ.get('FAST_SSH_USER', '')
 FAST_SSH_PASSWORD = os.environ.get('FAST_SSH_PASSWORD', '')
 
 
 def get_fast_ssh_credentials():
-    """获取 FAST-SSH 凭据，优先级：环境变量 > config.json > 内置默认值"""
+    """获取 FAST-SSH 凭据，优先级：环境变量 > 用户名配置 > 兼容默认值。"""
     user = os.environ.get('FAST_SSH_USER', '')
     password = os.environ.get('FAST_SSH_PASSWORD', '')
     if user and password:
         return user, password
     cfg = _load_config_file()
-    user = cfg.get('fast_ssh_user', '')
-    password = cfg.get('fast_ssh_password', '')
-    if user and password:
-        return user, password
-    # 首次使用无配置时，返回默认值并自动持久化到 config.json
-    return 'root', 'mellow'
+    user = cfg.get('fast_ssh_user', '') or 'root'
+    return user, 'mellow'
 
 
 def is_ssh_mode():

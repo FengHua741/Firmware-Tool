@@ -14,7 +14,7 @@ from shared import (
     CAN_NETWORK_DIR, CAN_INTERFACES_DIR, CAN_BITRATES, BITRATE_VALUES,
     run_cmd, is_ssh_mode,
     expand_klipper_path, sudo_write_file, sudo_mkdir,
-    SSHManager, get_fast_ssh_credentials,
+    SSHManager, get_fast_ssh_credentials, public_config,
 )
 from routes_system import _ssh_connection_status, _update_ssh_disconnect_status, _normalize_service_name
 
@@ -28,7 +28,7 @@ def handle_config():
     from shared import config as _config, save_config, PORT
     
     if request.method == 'GET':
-        return jsonify(_config)
+        return jsonify(public_config(_config))
     else:
         data = request.json
         for key in ['klipper_path', 'katapult_path', 'json_repo_url', 'port', 'moonraker_host', 'moonraker_port',
@@ -55,7 +55,7 @@ def handle_config():
             save_credential('sudo_password', _fast_pwd)
             if not _config.get('fast_ssh_user'):
                 _config['fast_ssh_user'] = _fast_user
-                _config['fast_ssh_password'] = _fast_pwd
+            _config.pop('fast_ssh_password', None)
         
         if new_mode == 'local' and old_mode in ('ssh', 'fast-ssh'):
             try:
@@ -65,17 +65,14 @@ def handle_config():
             except Exception as e:
                 logger.warning(f"断开 SSH 连接时出错: {e}")
         
-        global _remote_flyos_version, _remote_board_name
-        _remote_flyos_version = None
-        _remote_board_name = None
+        import routes_system
+        routes_system._remote_flyos_version = None
+        routes_system._remote_board_name = None
         
         if save_config(_config):
-            return jsonify({'success': True, 'message': '配置已保存', 'config': _config})
+            return jsonify({'success': True, 'message': '配置已保存', 'config': public_config(_config)})
         else:
             return jsonify({'error': '保存配置失败'}), 500
-
-_remote_flyos_version = None
-_remote_board_name = None
 
 
 # ==================== SSH 远程连接 API ====================
