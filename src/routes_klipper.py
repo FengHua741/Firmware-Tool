@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify
 import os
 import threading
 
-from shared import app, config, logger, expand_klipper_path
+from shared import config, logger, expand_klipper_path
 from klipper_kconfig_parser import KlipperKconfigParser
 from kconfig_can_parser import parse_can_options
 

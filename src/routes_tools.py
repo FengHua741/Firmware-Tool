@@ -8,6 +8,8 @@ import re
 import json
 import shlex
 import fnmatch
+import glob
+import subprocess
 import urllib.parse
 import requests
 from flask import Blueprint, jsonify, request, send_from_directory
@@ -92,7 +94,6 @@ def _path_under(path, roots):
             continue
     return False
 
-
 def _validate_config_file_path(file_path):
     if not file_path or '..' in file_path:
         return False
@@ -119,7 +120,7 @@ def _parse_cfg_sections(content):
     return sections
 
 
-def _static_validate_klipper_config(content):
+def _static_validate_klipper_config(content, board_id=None):
     sections = _parse_cfg_sections(content)
     section_map = {sec['name']: sec for sec in sections}
     seen = {}
@@ -160,7 +161,85 @@ def _static_validate_klipper_config(content):
     if 'mcu' not in section_map:
         warnings.append('未发现 [mcu] 主控 section')
 
-    return {'ok': not errors, 'errors': errors, 'warnings': warnings, 'method': 'static'}
+    result = {'ok': not errors, 'errors': errors, 'warnings': warnings, 'method': 'static'}
+
+    if board_id:
+        board_conflicts = _check_board_mapping_conflicts(pin_usage, board_id)
+        result['board_conflicts'] = board_conflicts
+        if board_conflicts:
+            for bc in board_conflicts:
+                warnings.append(f'引脚 {bc["pin"]} 在板卡映射中默认为 {bc["default_for"]}，但当前配置为 {bc["assigned_to"]}')
+
+    return result
+
+
+def _check_board_mapping_conflicts(pin_usage, board_id):
+    """检查引脚分配与板卡默认映射的冲突"""
+    if not _safe_data_id(board_id):
+        return []
+
+    index = _load_boards_index()
+    board_info = None
+    mapping_dir = None
+    for brand, data in index.items():
+        for btype in ['mainboards', 'toolboards']:
+            if board_id in data.get(btype, {}):
+                board_info = data[btype][board_id]
+                mapping_dir = board_info.get('mapping_dir', '')
+                break
+        if board_info:
+            break
+
+    if not board_info or not mapping_dir:
+        return []
+
+    mapping_file = os.path.join(BOARDS_BASE_DIR, mapping_dir, 'klipper_Mapping.json')
+    if not _path_under_local(mapping_file, BOARDS_BASE_DIR) or not os.path.isfile(mapping_file):
+        return []
+
+    try:
+        with open(mapping_file, 'r', encoding='utf-8') as f:
+            mapping = json.load(f)
+    except Exception:
+        return []
+
+    default_pins = {}
+    function_labels = {
+        'Drives': '电机', 'BED_OUT': '热床', 'bed': '热床',
+        'heat': '加热器', 'temp': '热敏', 'fan': '风扇',
+        'stop': '限位', 'probe': '探针', 'servo': '舵机',
+        'rgb': 'RGB', 'bltouch': 'BLTouch', 'ADXL': 'ADXL',
+    }
+
+    for key, value in mapping.items():
+        if isinstance(value, dict):
+            for sub_key, sub_pin in value.items():
+                if isinstance(sub_pin, str) and re.match(r'^[A-Ga-g]\d{1,2}$', sub_pin.strip()):
+                    default_pins[sub_pin.strip().upper()] = f'{key}.{sub_key}'
+        elif isinstance(value, str) and re.match(r'^[A-Ga-g]\d{1,2}$', value.strip()):
+            label = key
+            for prefix, lbl in function_labels.items():
+                if key.lower().startswith(prefix.lower()):
+                    label = f'{key} ({lbl})'
+                    break
+            default_pins[value.strip().upper()] = label
+
+    conflicts = []
+    for pin_raw, owners in pin_usage.items():
+        pin_upper = pin_raw.split(':')[-1].upper() if ':' in pin_raw else pin_raw.upper()
+        if pin_upper in default_pins:
+            assigned_to = ', '.join(sorted(set(owners)))
+            expected = default_pins[pin_upper]
+            is_correct = any(expected.startswith(owner.split('] ')[0].replace('[', '')) for owner in owners if '] ' in owner)
+            if not is_correct:
+                conflicts.append({
+                    'pin': pin_upper,
+                    'assigned_to': assigned_to,
+                    'default_for': expected,
+                    'board_id': board_id,
+                })
+
+    return conflicts
 
 
 @tools_bp.route('/api/tools/config-files', methods=['GET'])
@@ -328,7 +407,8 @@ def validate_klipper_config():
         return jsonify({'success': False, 'error': '配置内容为空'})
     if len(content.encode('utf-8', errors='ignore')) > MAX_CONFIG_CONTENT_BYTES:
         return jsonify({'success': False, 'error': '配置内容过大'}), 413
-    result = _static_validate_klipper_config(content)
+    board_id = data.get('board_id', '').strip() or None
+    result = _static_validate_klipper_config(content, board_id=board_id)
     return jsonify({'success': True, **result})
 
 
@@ -773,7 +853,6 @@ def detect_mcu_devices():
                     })
     else:
         # 本地扫描
-        import glob
         # 扫描串口设备
         serial_patterns = [
             '/dev/serial/by-id/*',
@@ -794,7 +873,6 @@ def detect_mcu_devices():
                 })
         # 扫描 CAN 接口
         try:
-            import subprocess
             result = subprocess.run(
                 ['ip', '-br', 'link', 'show'],
                 capture_output=True, text=True, timeout=5

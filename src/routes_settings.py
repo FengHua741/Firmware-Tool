@@ -3,14 +3,13 @@
 """
 
 from flask import Blueprint, jsonify, request
-import subprocess
 import os
 import re
 import time
 import shlex
 
 from shared import (
-    app, config, logger, BASE_DIR,
+    config, logger, BASE_DIR,
     CAN_NETWORK_DIR, CAN_INTERFACES_DIR, CAN_BITRATES, BITRATE_VALUES,
     run_cmd, is_ssh_mode,
     expand_klipper_path, sudo_write_file, sudo_mkdir,

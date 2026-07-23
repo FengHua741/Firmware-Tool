@@ -8,6 +8,10 @@ import os
 import re
 import shlex
 import time
+import json
+import glob
+import socket
+import pwd
 import psutil
 import requests
 import threading
@@ -16,7 +20,7 @@ from datetime import datetime
 from collections import deque
 
 from shared import (
-    app, config, logger, BASE_DIR, CONFIG_PATH,
+    config, logger, BASE_DIR, CONFIG_PATH,
     DFU_KNOWN_DEVICES, DFU_KNOWN_VIDPIDS,
     run_cmd, run_cmd_check, path_exists, list_dir, is_ssh_mode, is_fast_ssh_mode,
     SSHManager, get_klipper_owner, get_klipper_python_bin, expand_klipper_path,
@@ -199,7 +203,6 @@ def _collect_remote_resources():
 
         net_info = {'interfaces': []}
         if 'NET' in sections:
-            import socket as _socket
             for line in sections['NET'].split('\n'):
                 line = line.strip()
                 if not line:
@@ -220,16 +223,14 @@ def _collect_remote_resources():
         global _remote_flyos_version, _remote_board_name
         if not _remote_flyos_version and 'VER' in sections:
             ver_line = sections['VER'].strip()
-            import re as _re
-            _ver_match = _re.search(r'FlyOS-Fast:\s*(v[\S]+)', ver_line)
+            _ver_match = re.search(r'FlyOS-Fast:\s*(v[\S]+)', ver_line)
             if _ver_match:
                 _remote_flyos_version = _ver_match.group(1)
             else:
                 _remote_flyos_version = ''
 
         if not _remote_board_name and 'BRD' in sections:
-            import re as _re
-            _brd_match = _re.search(r'board_name=([^\s]+)', sections['BRD'].strip())
+            _brd_match = re.search(r'board_name=([^\s]+)', sections['BRD'].strip())
             if _brd_match:
                 _remote_board_name = _brd_match.group(1)
             else:
@@ -395,7 +396,6 @@ def get_system_resources():
             }
             net_info = {'interfaces': []}
             try:
-                import socket
                 interfaces = psutil.net_if_addrs()
                 for iface_name, addrs in interfaces.items():
                     iface_lower = iface_name.lower()
@@ -437,7 +437,7 @@ def get_system_resources():
         except ConnectionError:
             service_status = {s: False for s in SERVICES}
 
-        return jsonify({
+        response_data = {
             'current': {
                 'cpu': cpu_info,
                 'memory': mem_info,
@@ -446,14 +446,16 @@ def get_system_resources():
                 'services': service_status,
                 'flyos_version': _remote_flyos_version if is_fast_ssh_mode() else None,
                 'board_name': _remote_board_name if is_fast_ssh_mode() else None
-            },
-            'history': {
+            }
+        }
+        if not request.args.get('no_history'):
+            response_data['history'] = {
                 'cpu': list(resource_history['cpu']),
                 'memory': list(resource_history['memory']),
                 'disk': list(resource_history['disk']),
                 'timestamps': list(resource_history['timestamps'])
             }
-        })
+        return jsonify(response_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -565,7 +567,6 @@ def _get_serial_devices():
         except Exception:
             pass
     else:
-        import glob
         serial_paths = glob.glob('/dev/serial/by-path/*')
         for path in serial_paths:
             try:
@@ -624,8 +625,7 @@ def get_can_interfaces():
             ['ip', '-d', '-j', 'link', 'show', 'type', 'can'],
             text=True, timeout=5
         )
-        import json as _json
-        ifaces_data = _json.loads(output) if output.strip() else []
+        ifaces_data = json.loads(output) if output.strip() else []
         result = []
         for iface in ifaces_data:
             if isinstance(iface, dict) and iface.get('ifname'):
@@ -896,8 +896,7 @@ def verify_mcu_connection_status(uuids):
             wh = r.json().get('result', {}).get('status', {}).get('webhooks', {})
             webhooks_state = wh.get('state', 'unknown')
             msg = wh.get('state_message', '')
-            import re as _re
-            for m in _re.finditer(r"Lost communication with MCU '([^']+)'", msg):
+            for m in re.finditer(r"Lost communication with MCU '([^']+)'", msg):
                 lost_mcus.append(m.group(1))
 
         query_str = '&'.join(urllib.parse.quote(s) for s in can_sections)
@@ -999,7 +998,6 @@ def search_can_uuid():
 @system_bp.route('/api/system/video')
 def get_video_devices():
     """获取摄像头详细信息"""
-    import glob
     devices = []
     video_paths = sorted(glob.glob('/dev/video*'))
     for path in video_paths:
@@ -1335,9 +1333,8 @@ def control_service():
 
     # firmware-tool 重启自身时，需要用后台方式执行，否则当前进程会被杀掉无法返回响应
     if service_name == 'firmware-tool' and action == 'restart':
-        import subprocess as _sp
-        _sp.Popen(['sudo', 'systemctl', 'restart', 'firmware-tool'],
-                   stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        subprocess.Popen(['sudo', 'systemctl', 'restart', 'firmware-tool'],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return jsonify({'success': True, 'message': 'firmware-tool 正在重启...'})
 
     try:
@@ -1357,7 +1354,6 @@ def control_service():
 def check_update():
     """检查项目更新"""
     try:
-        import pwd
         stat_info = os.stat(BASE_DIR)
         uid = stat_info.st_uid
         user_info = pwd.getpwuid(uid)
@@ -1415,7 +1411,6 @@ def update_project():
     """执行项目更新"""
     def generate():
         try:
-            import pwd
             stat_info = os.stat(BASE_DIR)
             uid = stat_info.st_uid
             user_info = pwd.getpwuid(uid)
@@ -1492,3 +1487,77 @@ def update_project():
             yield f"错误: {str(e)}\n"
 
     return Response(generate(), mimetype='text/plain')
+
+
+# ==================== CAN 总线拓扑 API ====================
+@system_bp.route('/api/system/can-topology')
+def can_topology():
+    """获取 CAN 总线拓扑数据：接口信息 + 设备列表 + 连接状态"""
+    iface = request.args.get('iface', 'can0').strip()
+    if not _is_valid_can_iface(iface):
+        iface = 'can0'
+
+    result = {
+        'success': True,
+        'interface': {'name': iface, 'state': 'UNKNOWN', 'bitrate': 0, 'type': ''},
+        'devices': [],
+        'klipper_state': 'unknown',
+        'total_devices': 0,
+    }
+
+    try:
+        ip_result = run_cmd(f'ip -d -j link show {shlex.quote(iface)} 2>/dev/null',
+                            shell=True, capture_output=True, text=True, timeout=5)
+        if ip_result.returncode == 0 and ip_result.stdout.strip():
+            try:
+                iface_data = json.loads(ip_result.stdout.strip())
+                if iface_data and len(iface_data) > 0:
+                    info = iface_data[0]
+                    result['interface']['state'] = info.get('operstate', 'UNKNOWN')
+                    result['interface']['type'] = info.get('link_type', 'can')
+                    link_info = info.get('linkinfo', {}).get('info_data', {})
+                    result['interface']['bitrate'] = link_info.get('bittime', {}).get('bitrate', 0)
+            except (json.JSONDecodeError, KeyError, IndexError):
+                pass
+    except Exception:
+        pass
+
+    try:
+        _, home_dir = get_klipper_owner()
+        devices_raw, scan_err = _scan_can_uuids(iface)
+        if devices_raw:
+            cfg_uuids, cfg_ok = read_printer_cfg_direct()
+            cfg_uuid_map = {}
+            for u in cfg_uuids:
+                uuid_val = u.get('uuid', '')
+                if uuid_val:
+                    cfg_uuid_map[uuid_val] = u
+
+            verified, verify_ok = verify_mcu_connection_status(devices_raw)
+
+            for dev in verified:
+                uuid = dev.get('uuid', '')
+                cfg_info = cfg_uuid_map.get(uuid, {})
+                dev['section'] = cfg_info.get('section', '')
+                dev['connection_status'] = 'unknown'
+
+                if dev.get('app') == 'Katapult':
+                    dev['connection_status'] = 'katapult'
+                elif dev.get('app') == 'Klipper':
+                    dev['connection_status'] = 'connected'
+
+            result['devices'] = verified
+            result['total_devices'] = len(verified)
+    except Exception as e:
+        logger.warning(f'CAN 拓扑扫描异常: {e}')
+
+    try:
+        base = get_moonraker_base_url()
+        r = requests.get(f'{base}/printer/objects/query?webhooks', timeout=3)
+        if r.status_code == 200:
+            wh = r.json().get('result', {}).get('status', {}).get('webhooks', {})
+            result['klipper_state'] = wh.get('state', 'unknown')
+    except Exception:
+        pass
+
+    return jsonify(result)

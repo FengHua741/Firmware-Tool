@@ -57,6 +57,64 @@ let compileParams = {
     };
 })();
 
+// ==================== 主题管理 ====================
+function initTheme() {
+    const saved = localStorage.getItem('firmwareToolTheme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const theme = saved || (prefersDark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+    updateThemeIcon(theme);
+}
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('firmwareToolTheme', next);
+    updateThemeIcon(next);
+}
+function updateThemeIcon(theme) {
+    const icon = document.querySelector('#themeToggle i');
+    if (icon) icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+}
+initTheme();
+
+// ==================== WebSocket 全局事件总线 ====================
+let _ws = null;
+let _wsReconnectTimer = null;
+const _wsListeners = {};
+
+function wsConnect() {
+    if (_wsReconnectTimer) { clearTimeout(_wsReconnectTimer); _wsReconnectTimer = null; }
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    try {
+        _ws = new WebSocket(`${proto}//${location.host}/ws`);
+        _ws.onmessage = (e) => {
+            try {
+                const msg = JSON.parse(e.data);
+                wsDispatch(msg.type, msg.data);
+            } catch (err) {}
+        };
+        _ws.onclose = () => {
+            _wsReconnectTimer = setTimeout(wsConnect, 3000);
+        };
+        _ws.onerror = () => { if (_ws) _ws.close(); };
+    } catch (e) {
+        _wsReconnectTimer = setTimeout(wsConnect, 5000);
+    }
+}
+
+function wsDispatch(type, data) {
+    if (type === 'compile_complete') showSuccess(t('toast.compile_done'));
+    if (type === 'flash_complete') showSuccess(t('toast.flash_done'));
+    if (type === 'flash_failed') showError(t('toast.flash_failed'));
+    (_wsListeners[type] || []).forEach(fn => { try { fn(data); } catch(e) {} });
+}
+
+function wsOn(type, fn) {
+    if (!_wsListeners[type]) _wsListeners[type] = [];
+    _wsListeners[type].push(fn);
+}
+
 // ==================== 页面切换 ====================
 function switchPage(pageId) {
     currentPage = pageId;
@@ -75,6 +133,12 @@ function switchPage(pageId) {
     });
     document.getElementById(`page-${pageId}`).classList.add('active');
 
+    // 离开资源页面时停止轮询
+    if (pageId !== 'resources' && resourceInterval) {
+        clearInterval(resourceInterval);
+        resourceInterval = null;
+    }
+
     // 页面特定初始化
     if (pageId === 'resources') {
         startResourceMonitoring();
@@ -91,6 +155,8 @@ function switchPage(pageId) {
         if (typeof initConfigManager === 'function') {
             initConfigManager();
         }
+        loadBackupList();
+        loadBackupSettings();
     } else if (pageId === 'settings') {
         loadSettings();
         loadVersionInfo();
@@ -181,6 +247,7 @@ async function searchSerial() {
     container.innerHTML = '<p class="empty">搜索中...</p>';
     try {
         const response = await fetch('/api/system/serial');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (data.devices && data.devices.length > 0) {
             container.innerHTML = data.devices.map(d => {
@@ -214,16 +281,18 @@ async function refreshCanIfaces() {
     select.innerHTML = '<option value="">加载中...</option>';
     try {
         const response = await fetch('/api/system/can-iface');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         select.innerHTML = '<option value="">选择CAN接口</option>';
         if (data.ifaces && data.ifaces.length > 0) {
-            data.ifaces.forEach(iface => {
+            const opts = data.ifaces.map(iface => {
                 const state = iface.operstate === 'UP' ? '✅' : '⚠️';
-                select.innerHTML += `<option value="${escapeHtml(iface.ifname)}">${state} ${escapeHtml(iface.ifname)} (${escapeHtml(iface.operstate)})</option>`;
-            });
+                return `<option value="${escapeHtml(iface.ifname)}">${state} ${escapeHtml(iface.ifname)} (${escapeHtml(iface.operstate)})</option>`;
+            }).join('');
+            select.innerHTML = '<option value="">选择CAN接口</option>' + opts;
             if (data.ifaces.length === 1) select.selectedIndex = 1;
         } else {
-            select.innerHTML += '<option value="" disabled>未找到CAN接口</option>';
+            select.innerHTML = '<option value="">选择CAN接口</option><option value="" disabled>未找到CAN接口</option>';
         }
     } catch (error) {
         select.innerHTML = '<option value="">加载失败</option>';
@@ -239,6 +308,7 @@ async function diagnoseCanNetwork() {
     container.innerHTML = '<p class="empty">正在诊断CAN网络...</p>';
     try {
         const response = await fetch('/api/system/can-diagnose');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         let html = '<div style="font-size:13px;line-height:1.8;">';
@@ -293,6 +363,7 @@ async function searchCanUuid() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ iface: select.value })
         });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (data.uuids && data.uuids.length > 0) {
             let html = '';
@@ -343,6 +414,7 @@ async function searchCamera() {
     container.innerHTML = '<p class="empty">搜索中...</p>';
     try {
         const response = await fetch('/api/system/video');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (data.videos && data.videos.length > 0) {
             container.innerHTML = data.videos.map(d => {
@@ -382,6 +454,7 @@ async function loadCanHostConfig() {
 
     try {
         const res = await fetch('/api/system/can-config');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
         let html = '';
@@ -444,7 +517,7 @@ async function loadCanHostConfig() {
                         <span style="color:#666;font-size:12px;">${configFile}</span>
                     </div>
                     <div style="background:rgba(76,175,80,0.06);padding:10px 14px;border-radius:6px;border-left:4px solid #4caf50;margin-bottom:14px;font-size:13px;display:flex;gap:20px;flex-wrap:wrap;">
-                        <span>接口: <strong>${data.live && data.live.interface || 'can0'}</strong></span>
+                        <span>接口: <strong>${escapeHtml(data.live && data.live.interface || 'can0')}</strong></span>
                         <span>状态: <strong>${liveState}</strong></span>
                         <span>实际速率: <strong>${liveBitrate}</strong></span>
                     </div>
@@ -539,6 +612,7 @@ async function applyCanHostConfig() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bitrate, txqueuelen })
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
         if (data.success) {
@@ -560,6 +634,7 @@ async function searchLsusb() {
     try {
         const url = filter ? `/api/system/lsusb?search=${encodeURIComponent(filter)}` : '/api/system/lsusb';
         const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (data.devices && data.devices.length > 0) {
             container.innerHTML = data.devices.map(d => `
@@ -643,6 +718,7 @@ let _loadedConnectionMode = 'local';
 async function loadSettings() {
     try {
         const response = await fetch('/api/settings/config');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const config = await response.json();
 
         if (config) {
@@ -743,6 +819,7 @@ async function saveSettings() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings)
         });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
 
@@ -833,6 +910,7 @@ async function updatePathHints() {
         if (ktpVal && ktpVal !== kpVal) params.append('path', ktpVal);
 
         const resp = await fetch('/api/settings/resolve-paths?' + params.toString());
+        if (!resp.ok) return;
         const data = await resp.json();
 
         if (data.resolved) {
@@ -916,6 +994,7 @@ async function testLocalConnection() {
 
     try {
         const response = await fetch('/api/settings/local-test', { method: 'POST' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (data.success) {
             const detail = (data.checks || []).map(c => `${c.name}: ${c.detail}`).join(' | ');
@@ -960,6 +1039,7 @@ async function testSshConnection() {
 
     try {
         const response = await fetch('/api/settings/ssh-test', { method: 'POST' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (data.success) {
             resultEl.textContent = data.message || '连接成功';
@@ -994,11 +1074,70 @@ function showError(message) {
     setTimeout(() => div.remove(), 3000);
 }
 
-// ==================== 初始化 ====================
-document.addEventListener('DOMContentLoaded', () => {
-    // 加载初始页面
-    switchPage('resources');
+// ==================== 配置 Diff 对比 ====================
+async function showBackupDiff(backupIdA, backupIdB, compareCurrent) {
+    try {
+        const resp = await fetch('/api/backup/diff', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({backup_id_a: backupIdA, backup_id_b: backupIdB || '', current: !!compareCurrent})
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.success) renderDiffModal(data.diff, data.has_changes);
+        else showError(data.error || '对比失败');
+    } catch (e) { showError('对比请求失败'); }
+}
 
+function renderDiffModal(diffLines, hasChanges) {
+    const modal = document.getElementById('diffModal');
+    const content = document.getElementById('diffContent');
+    if (!modal || !content) return;
+    if (!hasChanges || !diffLines || diffLines.length === 0) {
+        content.innerHTML = '<span style="color:var(--text-secondary);">' + t('diff.no_changes') + '</span>';
+    } else {
+        content.innerHTML = diffLines.map(line => {
+            const escaped = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            if (line.startsWith('+++') || line.startsWith('---')) return `<span style="font-weight:bold;color:var(--text-primary);">${escaped}</span>`;
+            if (line.startsWith('@@')) return `<span style="color:var(--primary-color);background:rgba(33,150,243,0.1);display:block;">${escaped}</span>`;
+            if (line.startsWith('+')) return `<span style="color:var(--success-color);background:rgba(76,175,80,0.12);display:block;">${escaped}</span>`;
+            if (line.startsWith('-')) return `<span style="color:var(--danger-color);background:rgba(244,67,54,0.12);display:block;">${escaped}</span>`;
+            return `<span>${escaped}</span>`;
+        }).join('\n');
+    }
+    modal.style.display = 'flex';
+}
+
+function closeDiffModal() {
+    const modal = document.getElementById('diffModal');
+    if (modal) modal.style.display = 'none';
+}
+
+// ==================== 配置导入/导出 ====================
+function exportAllConfigs() {
+    window.location.href = '/api/config/export-all';
+}
+
+async function importConfigBundle(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const resp = await fetch('/api/config/import-bundle', {method: 'POST', body: formData});
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.success) showSuccess(data.message || '导入成功');
+        else showError('导入失败: ' + (data.error || '未知错误'));
+    } catch (e) { showError('导入请求失败'); }
+    input.value = '';
+}
+
+// ==================== 初始化 ====================
+document.addEventListener('DOMContentLoaded', async () => {
+    if (typeof I18n !== 'undefined') await I18n.init();
+    wsConnect();
+    switchPage('resources');
 });
 
 // 更新资源显示
@@ -1007,7 +1146,8 @@ let _sshStatusCheckInterval = 0;  // 状态检查间隔计数器
 
 async function updateResources() {
     try {
-        const response = await fetch('/api/system/resources');
+        const response = await fetch('/api/system/resources?no_history=1');
+        if (!response.ok) return;
         const data = await response.json();
 
         const current = data.current || data;
@@ -1096,6 +1236,7 @@ async function updateSshConnectionStatus() {
 
     try {
         const resp = await fetch('/api/ssh/status');
+        if (!resp.ok) return;
         const status = await resp.json();
 
         // 本地模式不显示
@@ -1115,7 +1256,7 @@ async function updateSshConnectionStatus() {
                 content.style.color = '#4caf50';
                 content.style.border = '1px solid rgba(76,175,80,0.3)';
                 content.innerHTML = `
-                    <span>SSH 连接已恢复: ${status.user}@${status.host}:${status.port}</span>
+                    <span>SSH 连接已恢复: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                     <span></span>
                 `;
                 // 3 秒后切为简洁状态
@@ -1123,7 +1264,7 @@ async function updateSshConnectionStatus() {
                     if (bar.style.display !== 'none') {
                         content.style.background = 'rgba(76,175,80,0.05)';
                         content.innerHTML = `
-                            <span style="color:#4caf50;">SSH 已连接: ${status.user}@${status.host}:${status.port}</span>
+                            <span style="color:#4caf50;">SSH 已连接: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                             <span></span>
                         `;
                     }
@@ -1134,7 +1275,7 @@ async function updateSshConnectionStatus() {
                 content.style.color = '#4caf50';
                 content.style.border = '1px solid rgba(76,175,80,0.2)';
                 content.innerHTML = `
-                    <span>SSH 已连接: ${status.user}@${status.host}:${status.port}</span>
+                    <span>SSH 已连接: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                     <span></span>
                 `;
             }
@@ -1158,7 +1299,7 @@ async function updateSshConnectionStatus() {
             content.style.border = '1px solid rgba(244,67,54,0.25)';
             content.innerHTML = `
                 <div style="display:flex;flex-direction:column;gap:4px;">
-                    <span style="font-weight:600;">${modeLabel} 连接已断开: ${status.host}:${status.port}</span>
+                    <span style="font-weight:600;">${modeLabel} 连接已断开: ${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                     ${detailHtml}
                 </div>
                 <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:#d32f2f;cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
@@ -1183,6 +1324,7 @@ async function manualReconnect() {
 
     try {
         const resp = await fetch('/api/ssh/reconnect', { method: 'POST' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 
         if (data.success) {
@@ -1226,6 +1368,7 @@ async function controlService(serviceName, action) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ service: serviceName, action: action })
         });
+        if (!response.ok && !isSelfRestart) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
 
@@ -1260,6 +1403,7 @@ async function loadAvailableServices() {
 
     try {
         const response = await fetch('/api/system/services');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         renderServiceButtons(data.services || []);
     } catch (error) {
@@ -1321,6 +1465,7 @@ function renderServiceButtons(services) {
 async function loadVersionInfo() {
     try {
         const response = await fetch('/api/system/versions');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         const klipperVersionEl = document.getElementById('klipperVersion');
@@ -1349,6 +1494,7 @@ async function checkForUpdates() {
 
     try {
         const response = await fetch('/api/system/check-update');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         if (data.error) {
@@ -1391,6 +1537,7 @@ async function updateProject() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -1414,4 +1561,238 @@ async function updateProject() {
         updateBtn.disabled = false;
         updateBtn.textContent = '🔄 立即更新';
     }
+}
+
+// ==================== 配置备份管理 ====================
+async function createConfigBackup() {
+    try {
+        const response = await fetch('/api/backup/config', { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || '备份失败');
+        }
+        showSuccess(`备份成功 (${data.backup_id})`);
+        loadBackupList();
+    } catch (error) {
+        showError('备份失败: ' + error.message);
+    }
+}
+
+async function loadBackupList() {
+    const listEl = document.getElementById('backupList');
+    if (!listEl) return;
+    try {
+        const response = await fetch('/api/backup/list');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || '加载失败');
+        const backups = data.backups || [];
+        if (backups.length === 0) {
+            listEl.innerHTML = '<p class="empty">暂无备份记录</p>';
+            return;
+        }
+        listEl.innerHTML = backups.map(b => {
+            const ts = b.timestamp || b.id.replace(/_/g, ' ').replace(/(\d{8})/, (_, m) => `${m.slice(0,4)}-${m.slice(4,6)}-${m.slice(6,8)}`);
+            const sizeKb = ((b.size || 0) / 1024).toFixed(1);
+            const sourceLabel = {moonraker: 'Moonraker', ssh: 'SSH', local: '本地', auto: '自动'}[b.source] || b.source;
+            return `<div class="backup-item">
+                <div class="backup-meta">
+                    <span class="backup-name">${escapeHtml(b.filename || b.id)}</span>
+                    <span class="backup-info">${escapeHtml(ts)} · ${sizeKb} KB · ${escapeHtml(sourceLabel)}</span>
+                </div>
+                <div class="backup-actions">
+                    <button class="btn btn-sm btn-warning" onclick="rollbackBackup('${escapeHtml(b.id)}')">恢复</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteBackup('${escapeHtml(b.id)}')">删除</button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (error) {
+        listEl.innerHTML = `<p class="empty">加载失败: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+async function rollbackBackup(backupId) {
+    if (!confirm('确定要恢复此备份？当前 printer.cfg 将被覆盖。')) return;
+    try {
+        const response = await fetch('/api/backup/rollback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ backup_id: backupId })
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || '恢复失败');
+        showSuccess('配置已恢复');
+    } catch (error) {
+        showError('恢复失败: ' + error.message);
+    }
+}
+
+async function deleteBackup(backupId) {
+    if (!confirm('确定要删除此备份？')) return;
+    try {
+        const response = await fetch(`/api/backup/${encodeURIComponent(backupId)}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || '删除失败');
+        loadBackupList();
+    } catch (error) {
+        showError('删除失败: ' + error.message);
+    }
+}
+
+async function loadBackupSettings() {
+    const toggle = document.getElementById('autoBackupToggle');
+    if (!toggle) return;
+    try {
+        const response = await fetch('/api/backup/settings');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (data.success) toggle.checked = !!data.auto_backup;
+    } catch (error) {
+        console.error('加载备份设置失败:', error);
+    }
+}
+
+async function toggleAutoBackup() {
+    const toggle = document.getElementById('autoBackupToggle');
+    if (!toggle) return;
+    try {
+        const resp = await fetch('/api/backup/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ auto_backup: toggle.checked })
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    } catch (error) {
+        showError('更新设置失败: ' + error.message);
+        toggle.checked = !toggle.checked;
+    }
+}
+
+// ==================== CAN 总线拓扑可视化 ====================
+async function refreshCanTopology() {
+    const vizEl = document.getElementById('canTopologyViz');
+    if (!vizEl) return;
+    const iface = document.getElementById('canIfaceSelect')?.value || 'can0';
+    vizEl.innerHTML = '<p class="empty">正在扫描 CAN 总线...</p>';
+    try {
+        const response = await fetch(`/api/system/can-topology?iface=${encodeURIComponent(iface)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || '加载失败');
+        renderCanTopology(data, vizEl);
+    } catch (error) {
+        vizEl.innerHTML = `<p class="empty">加载失败: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+function renderCanTopology(data, container) {
+    const devices = data.devices || [];
+    const iface = data.interface || {};
+    const klipperState = data.klipper_state || 'unknown';
+
+    if (devices.length === 0) {
+        container.innerHTML = `<div class="can-topology-empty">
+            <i class="fas fa-search" style="font-size:24px;color:#ccc;margin-bottom:8px;display:block;"></i>
+            <p>未检测到 CAN 设备</p>
+            <p style="font-size:12px;color:#999;">接口: ${escapeHtml(iface.name)} · 状态: ${escapeHtml(iface.state)}</p>
+        </div>`;
+        return;
+    }
+
+    const stateColors = {
+        connected: '#4caf50',
+        katapult: '#ff9800',
+        lost: '#f44336',
+        unknown: '#9e9e9e',
+    };
+    const stateLabels = {
+        connected: '已连接',
+        katapult: 'Katapult',
+        lost: '已丢失',
+        unknown: '未知',
+    };
+
+    const busStateColor = iface.state === 'UP' ? '#4caf50' : '#ff9800';
+    const bitrateStr = iface.bitrate ? `${(iface.bitrate / 1000000).toFixed(1)} Mbps` : '';
+
+    let html = `<div class="can-topology-header">
+        <span class="can-topology-iface" style="color:${busStateColor}">
+            <i class="fas fa-${iface.state === 'UP' ? 'check-circle' : 'exclamation-circle'}"></i>
+            ${escapeHtml(iface.name)}
+        </span>
+        <span class="can-topology-meta">${escapeHtml(iface.state)}${bitrateStr ? ' · ' + escapeHtml(bitrateStr) : ''} · Klipper: ${escapeHtml(klipperState)} · ${devices.length} 设备</span>
+    </div>`;
+
+    html += '<div class="can-bus-line">';
+    html += '<div class="can-bus-label">CAN BUS</div>';
+
+    devices.forEach((dev, idx) => {
+        const status = dev.connection_status || 'unknown';
+        const color = stateColors[status] || stateColors.unknown;
+        const mcuModel = dev.mcu_model ? String(dev.mcu_model).toUpperCase() : '';
+        const mcuVersion = dev.mcu_version || '';
+        const uuidShort = (dev.uuid || '').substring(0, 8);
+        const section = dev.section || '';
+        const appLabel = dev.app || 'Unknown';
+        const leftPct = devices.length === 1 ? 50 : (10 + (idx / (devices.length - 1)) * 80);
+
+        html += `<div class="can-node can-node-${status}" style="left:${leftPct}%" onclick="showCanNodeDetail(this, ${JSON.stringify(JSON.stringify(dev))})">
+            <div class="can-node-connector" style="background:${color}"></div>
+            <div class="can-node-card" style="border-left:3px solid ${color}">
+                <div class="can-node-icon"><i class="fas fa-microchip"></i></div>
+                <div class="can-node-info">
+                    <div class="can-node-title">${escapeHtml(mcuModel || appLabel)}</div>
+                    <div class="can-node-detail">${escapeHtml(uuidShort)}${section ? ' · [' + escapeHtml(section) + ']' : ''}</div>
+                    ${mcuVersion ? `<div class="can-node-detail">${escapeHtml(mcuVersion)}</div>` : ''}
+                </div>
+                <div class="can-node-status" style="color:${color}">
+                    <i class="fas fa-${status === 'connected' ? 'check-circle' : status === 'katapult' ? 'download' : status === 'lost' ? 'times-circle' : 'question-circle'}"></i>
+                    ${escapeHtml(stateLabels[status] || status)}
+                </div>
+            </div>
+        </div>`;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function showCanNodeDetail(el, devJson) {
+    const dev = JSON.parse(devJson);
+    const lines = [
+        `UUID: ${dev.uuid || 'N/A'}`,
+        `应用: ${dev.app || 'Unknown'}`,
+        dev.mcu_model ? `MCU: ${String(dev.mcu_model).toUpperCase()}` : '',
+        dev.mcu_freq ? `频率: ${dev.mcu_freq}` : '',
+        dev.mcu_version ? `固件: ${dev.mcu_version}` : '',
+        dev.section ? `配置: [${dev.section}]` : '',
+        `状态: ${dev.connection_status || 'unknown'}`,
+    ].filter(Boolean);
+
+    const existing = document.querySelector('.can-node-detail-popup');
+    if (existing) existing.remove();
+
+    const popup = document.createElement('div');
+    popup.className = 'can-node-detail-popup';
+    popup.innerHTML = `
+        <div style="font-weight:600;margin-bottom:6px;">设备详情</div>
+        ${lines.map(l => `<div style="font-size:12px;padding:2px 0;">${escapeHtml(l)}</div>`).join('')}
+        <button class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="this.parentElement.remove()">关闭</button>
+    `;
+    popup.style.cssText = 'position:fixed;background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:1000;max-width:280px;';
+    const rect = el.getBoundingClientRect();
+    popup.style.left = Math.min(rect.left, window.innerWidth - 300) + 'px';
+    popup.style.top = (rect.bottom + 8) + 'px';
+    document.body.appendChild(popup);
+
+    setTimeout(() => {
+        document.addEventListener('click', function handler(e) {
+            if (!popup.contains(e.target) && !el.contains(e.target)) {
+                popup.remove();
+                document.removeEventListener('click', handler);
+            }
+        });
+    }, 100);
 }

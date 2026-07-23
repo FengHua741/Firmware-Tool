@@ -19,6 +19,15 @@ const CAN_BITRATE_LABELS = {
 };
 
 async function processSSEStream(resp, logEl) {
+    if (!resp.ok) {
+        let errMsg = `HTTP ${resp.status}`;
+        try {
+            const errData = await resp.json();
+            errMsg = errData.error || errMsg;
+        } catch {}
+        if (logEl) { logEl.textContent += `请求失败: ${errMsg}\n`; logEl.scrollTop = logEl.scrollHeight; }
+        return { error: errMsg };
+    }
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
@@ -65,14 +74,13 @@ async function refreshFlashCanIfaces() {
     if (!select) return false;
     try {
         const response = await fetch('/api/system/can-iface');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         select.innerHTML = '';
         let ifaceCount = 0;
         if (data.ifaces && data.ifaces.length > 0) {
-            data.ifaces.forEach(iface => {
-                select.innerHTML += `<option value="${escapeHtml(iface.ifname)}">${escapeHtml(iface.ifname)}</option>`;
-                ifaceCount++;
-            });
+            select.innerHTML = data.ifaces.map(iface => `<option value="${escapeHtml(iface.ifname)}">${escapeHtml(iface.ifname)}</option>`).join('');
+            ifaceCount = data.ifaces.length;
         }
         // 至少保证有 can0
         if (ifaceCount === 0) {
@@ -94,6 +102,7 @@ async function refreshFlashCanIfaces() {
 async function loadCompileMcuDatabase() {
     try {
         const response = await fetch('/api/klipper/mcu-database');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         if (data.success) {
@@ -108,17 +117,14 @@ async function loadCompileMcuDatabase() {
 async function loadCompilePresetManufacturers() {
     try {
         const response = await fetch('/api/config/manufacturers');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         const select = document.getElementById('compilePresetManufacturer');
         select.innerHTML = '<option value="">-- 选择厂家 --</option>';
 
         if (data.manufacturers) {
-            data.manufacturers.forEach(mfr => {
-                if (mfr !== '自定义') {
-                    select.innerHTML += `<option value="${escapeHtml(mfr)}">${escapeHtml(mfr)}</option>`;
-                }
-            });
+            select.innerHTML += data.manufacturers.filter(mfr => mfr !== '自定义').map(mfr => `<option value="${escapeHtml(mfr)}">${escapeHtml(mfr)}</option>`).join('');
         }
         // 默认选中 FLY 并自动加载类型
         if ([...select.options].some(o => o.value === 'FLY')) {
@@ -154,11 +160,8 @@ function onCompileModeChange() {
 // 加载 MCU 平台列表
 function loadCompileMcuPlatforms(autoDefault = true) {
     const select = document.getElementById('compileMcuPlatform');
-    select.innerHTML = '<option value="">-- 选择平台 --</option>';
-
-    for (const platform in compileMcuDatabase) {
-        select.innerHTML += `<option value="${escapeHtml(platform)}">${escapeHtml(platform)}</option>`;
-    }
+    const opts = Object.keys(compileMcuDatabase).map(platform => `<option value="${escapeHtml(platform)}">${escapeHtml(platform)}</option>`).join('');
+    select.innerHTML = '<option value="">-- 选择平台 --</option>' + opts;
     // 默认选中 STM32
     if (autoDefault && compileMcuDatabase['STM32']) {
         select.value = 'STM32';
@@ -180,12 +183,11 @@ async function onCompileMcuPlatformChange() {
 
     try {
         const response = await fetch(`/api/klipper/mcus/${platform}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         if (data.success) {
-            data.mcus.forEach(mcu => {
-                modelSelect.innerHTML += `<option value="${escapeHtml(mcu.id)}">${escapeHtml(mcu.name)}</option>`;
-            });
+            modelSelect.innerHTML = data.mcus.map(mcu => `<option value="${escapeHtml(mcu.id)}">${escapeHtml(mcu.name)}</option>`).join('');
             modelSelect.disabled = false;
         }
     } catch (error) {
@@ -204,6 +206,7 @@ async function onCompileMcuModelChange() {
 
     try {
         const response = await fetch(`/api/klipper/mcu-info/${mcuId}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         if (data.success) {
@@ -228,10 +231,12 @@ async function displayCompileMcuDetails(data) {
     const crystalGroup = crystalSelect ? crystalSelect.closest('.form-group') : null;
     if (!crystalSelect) return;
     crystalSelect.innerHTML = '';
+    let crystalOptionHtml = '';
     mcu.crystals.forEach(freq => {
         const label = formatCompileFrequency(freq);
-        crystalSelect.innerHTML += `<option value="${escapeHtml(freq)}">${escapeHtml(label)}</option>`;
+        crystalOptionHtml += `<option value="${escapeHtml(freq)}">${escapeHtml(label)}</option>`;
     });
+    crystalSelect.innerHTML = crystalOptionHtml;
     if (mcu.id === 'rp2040' || mcu.id === 'rp2350' || mcu.crystals.length <= 1) {
         crystalGroup.style.display = 'none';
     } else {
@@ -241,10 +246,12 @@ async function displayCompileMcuDetails(data) {
     // BL 偏移选项
     const blSelect = document.getElementById('compileBlOffset');
     blSelect.innerHTML = '';
+    let blOptionHtml = '';
     mcu.bl_offsets.forEach(offset => {
         const label = formatCompileBlOffset(offset, mcu.id);
-        blSelect.innerHTML += `<option value="${escapeHtml(offset)}">${escapeHtml(label)}</option>`;
+        blOptionHtml += `<option value="${escapeHtml(offset)}">${escapeHtml(label)}</option>`;
     });
+    blSelect.innerHTML = blOptionHtml;
 
     // 连接方式 - 两级选择（从Kconfig动态获取）
     await loadCommunicationOptions(mcu, data.platform_key);
@@ -322,6 +329,7 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
 
     try {
         const response = await fetch('/api/klipper/communication-options');
+        if (!response.ok) { _fallbackConnectionOptions(connSelect); return; }
         const data = await response.json();
 
         if (data.error) {
@@ -379,9 +387,8 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
         // 第一级：通信类型
         const typeLabels = { 'usb': 'USB', 'serial': 'Serial/UART', 'can': 'CAN', 'usbcanbridge': 'USB转CAN桥接' };
         connSelect.innerHTML = '<option value="">-- 选择通信类型 --</option>';
-        for (const type in _commGroupedOptions) {
-            connSelect.innerHTML += `<option value="${escapeHtml(type)}">${escapeHtml(typeLabels[type] || type)}</option>`;
-        }
+        const typeOpts = Object.keys(_commGroupedOptions).map(type => `<option value="${escapeHtml(type)}">${escapeHtml(typeLabels[type] || type)}</option>`).join('');
+        connSelect.innerHTML += typeOpts;
         // 默认选中 USB（如果可用，但从预设加载时跳过，由 _autoSelectPresetConnection 处理）
         if (_commGroupedOptions['usb'] && !window._fromPreset) {
             connSelect.value = 'usb';
@@ -394,11 +401,7 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
 }
 
 function _fallbackConnectionOptions(connSelect) {
-    connSelect.innerHTML = '<option value="">-- 选择通信类型 --</option>';
-    connSelect.innerHTML += '<option value="usb">USB</option>';
-    connSelect.innerHTML += '<option value="serial">Serial/UART</option>';
-    connSelect.innerHTML += '<option value="can">CAN</option>';
-    connSelect.innerHTML += '<option value="usbcanbridge">USB转CAN桥接</option>';
+    connSelect.innerHTML = '<option value="">-- 选择通信类型 --</option><option value="usb">USB</option><option value="serial">Serial/UART</option><option value="can">CAN</option><option value="usbcanbridge">USB转CAN桥接</option>';
     _commGroupedOptions = {};
     _commAllOptions = [];
 }
@@ -441,11 +444,11 @@ function onCompileConnectionChange() {
         connGroup.parentNode.insertBefore(subContainer, connGroup.nextSibling);
 
         const detailSelect = document.getElementById('compileConnectionDetail');
-        detailSelect.innerHTML = `<option value="">-- 选择${escapeHtml(label)} --</option>`;
-        options.forEach(opt => {
+        const detailOptsHtml = options.map(opt => {
             const dataComm = escapeHtml(JSON.stringify(opt)).replace(/'/g, '&apos;');
-            detailSelect.innerHTML += `<option value="${escapeHtml(opt.config_symbol)}" data-comm='${dataComm}'>${escapeHtml(opt.display)}</option>`;
-        });
+            return `<option value="${escapeHtml(opt.config_symbol)}" data-comm='${dataComm}'>${escapeHtml(opt.display)}</option>`;
+        }).join('');
+        detailSelect.innerHTML = `<option value="">-- 选择${escapeHtml(label)} --</option>` + detailOptsHtml;
         if (commType === 'can') {
             _selectCanPinsOption(detailSelect, options, 'config_symbol');
         }
@@ -489,10 +492,8 @@ function _showBridgeCanPinSelector(connGroup) {
     _insertAfterCompileConnectionOptions(connGroup, pinContainer);
 
     const pinSelect = document.getElementById('compileBridgeCanPin');
-    pinSelect.innerHTML = '<option value="">-- 选择CAN引脚 --</option>';
-    _bridgeCanOptions.forEach(opt => {
-        pinSelect.innerHTML += `<option value="${escapeHtml(opt.config)}">${escapeHtml(opt.display)}</option>`;
-    });
+    const pinOptsHtml = _bridgeCanOptions.map(opt => `<option value="${escapeHtml(opt.config)}">${escapeHtml(opt.display)}</option>`).join('');
+    pinSelect.innerHTML = '<option value="">-- 选择CAN引脚 --</option>' + pinOptsHtml;
     _selectCanPinsOption(pinSelect, _bridgeCanOptions, 'config');
 }
 
@@ -627,15 +628,17 @@ async function onCompilePresetManufacturerChange() {
 
     try {
         const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         if (data.configs) {
             const types = [...new Set(data.configs.map(c => c.type))];
-            types.forEach(type => {
+            const typeOptsHtml = types.map(type => {
                 const label = type === 'mainboard' ? '主板' :
                              type === 'toolboard' ? '工具板' : '扩展板';
-                typeSelect.innerHTML += `<option value="${escapeHtml(type)}">${escapeHtml(label)}</option>`;
-            });
+                return `<option value="${escapeHtml(type)}">${escapeHtml(label)}</option>`;
+            }).join('');
+            typeSelect.innerHTML += typeOptsHtml;
             typeSelect.disabled = false;
             // 默认选中主板
             if ([...typeSelect.options].some(o => o.value === 'mainboard')) {
@@ -661,14 +664,16 @@ async function onCompilePresetTypeChange() {
 
     try {
         const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         if (data.configs) {
             const configs = data.configs.filter(c => c.type === type);
-            configs.forEach(config => {
+            const modelOptsHtml = configs.map(config => {
                 const dataConfig = escapeHtml(JSON.stringify(config)).replace(/'/g, '&apos;');
-                modelSelect.innerHTML += `<option value="${escapeHtml(config.id)}" data-config='${dataConfig}'>${escapeHtml(config.name)}</option>`;
-            });
+                return `<option value="${escapeHtml(config.id)}" data-config='${dataConfig}'>${escapeHtml(config.name)}</option>`;
+            }).join('');
+            modelSelect.innerHTML += modelOptsHtml;
             modelSelect.disabled = false;
         }
     } catch (error) {
@@ -1210,7 +1215,7 @@ async function refreshDeviceIds() {
 
                 if (filteredDevices.length > 0) {
                     // 添加USB分组标题（禁用选项）
-                    select.innerHTML += `<option disabled>━━━━━━━━ USB 设备 ━━━━━━━━</option>`;
+                    let usbOptsHtml = `<option disabled>━━━━━━━━ USB 设备 ━━━━━━━━</option>`;
 
                     filteredDevices.forEach(device => {
                     // 根据设备类型显示不同图标
@@ -1236,9 +1241,10 @@ async function refreshDeviceIds() {
 
                     // 简化显示：类型 + 设备名
                     const shortName = device.name.length > 40 ? device.name.substring(0, 40) + '...' : device.name;
-                    select.innerHTML += `<option value="${escapeHtml(device.id)}">${icon} [${escapeHtml(typeLabel)}] ${escapeHtml(shortName)}</option>`;
+                    usbOptsHtml += `<option value="${escapeHtml(device.id)}">${icon} [${escapeHtml(typeLabel)}] ${escapeHtml(shortName)}</option>`;
                     usbCount++;
                 });
+                    select.innerHTML += usbOptsHtml;
                 } // end if filteredDevices.length > 0
             }
         }
@@ -1249,8 +1255,8 @@ async function refreshDeviceIds() {
 
             // 只在有CAN设备时才显示CAN分组标题和设备
             if (canData.uuids && canData.uuids.length > 0) {
-                // 添加CAN分组标题（禁用选项）
-                select.innerHTML += `<option disabled>━━━━━━━━ CAN 设备 (${escapeHtml(canIface)}) ━━━━━━━━</option>`;
+                // 添加CAN分组标题和设备
+                let canOptsHtml = `<option disabled>━━━━━━━━ CAN 设备 (${escapeHtml(canIface)}) ━━━━━━━━</option>`;
 
                 canData.uuids.forEach(d => {
                     // 根据应用类型和来源构建标签
@@ -1291,9 +1297,10 @@ async function refreshDeviceIds() {
                     const sectionInfo = d.section ? ` [${d.section}]` : '';
 
                     const label = `${d.uuid}${bracketInfo}${sectionInfo}`;
-                    select.innerHTML += `<option value="${escapeHtml(d.uuid)}">${escapeHtml(icon)} ${escapeHtml(label)}</option>`;
+                    canOptsHtml += `<option value="${escapeHtml(d.uuid)}">${escapeHtml(icon)} ${escapeHtml(label)}</option>`;
                     canCount++;
                 });
+                select.innerHTML += canOptsHtml;
             }
 
             // 显示来源提示
@@ -1398,6 +1405,7 @@ async function fetchFlashPlan() {
             can_iface: canIface
         })
     });
+    if (!response.ok) throw new Error(`烧录计划请求失败: HTTP ${response.status}`);
     const data = await response.json();
     if (data.manifest) compiledFirmwareManifest = data.manifest;
     return data.plan || null;
@@ -1637,6 +1645,7 @@ async function autoDetectHostFirmwarePath() {
         if (blOffset) params.set('bl_offset', blOffset);
 
         const resp = await fetch('/api/firmware/host-info?' + params.toString());
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const info = await resp.json();
 
         if (info.best_match && info.best_score > 0) {
@@ -1688,6 +1697,7 @@ async function loadHostBrowserDir(path) {
     try {
         const params = path ? `?path=${encodeURIComponent(path)}` : '';
         const resp = await fetch(`/api/remote/browse${params}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 
         if (data.error) {
@@ -1771,6 +1781,7 @@ async function loadBlFiles() {
         if (board.id) params.set('board_id', board.id);
         if (board.name) params.set('board_name', board.name);
         const response = await fetch('/api/firmware/bl-firmwares' + (params.toString() ? '?' + params.toString() : ''));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         const select = document.getElementById('blFileSelect');
@@ -1861,6 +1872,7 @@ async function loadBlAddressOptions() {
 
     try {
         const response = await fetch('/api/firmware/bl/address-options?' + params.toString());
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (!data.success) {
             throw new Error(data.error || '无法加载 BL 烧录地址');
@@ -1935,6 +1947,11 @@ async function flashBootloader() {
                 erase_flash: eraseFlash
             })
         });
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${response.status}`);
+        }
 
         const result = await response.json();
 
@@ -2093,6 +2110,10 @@ async function installDependencies() {
     const logEl = document.getElementById('depsLog');
     try {
         const resp = await fetch('/api/firmware/dependencies/install', { method: 'POST' });
+        if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${resp.status}`);
+        }
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
@@ -2119,4 +2140,182 @@ async function installDependencies() {
     } catch (e) {
         if (statusEl.querySelector('p')) statusEl.querySelector('p').textContent = `安装失败: ${e.message}`;
     }
+}
+
+// ==================== 编译配置导入/导出 ====================
+async function exportCompileConfig() {
+    const klipperPath = document.getElementById('klipperPath')?.value || '~/klipper';
+    try {
+        const params = new URLSearchParams({ klipper_path: klipperPath });
+        const response = await fetch('/api/firmware/export-config?' + params.toString());
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || '导出配置失败');
+        }
+        const blob = new Blob([JSON.stringify(data.config, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const boardId = data.config.board?.id || 'custom';
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.href = url;
+        a.download = `firmware-config-${boardId}-${ts}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showSuccess('编译配置已导出');
+    } catch (error) {
+        console.error('导出配置失败:', error);
+        showError('导出配置失败: ' + error.message);
+    }
+}
+
+async function importCompileConfig(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        if (json.schema !== 1) {
+            throw new Error('不支持的配置版本: ' + json.schema);
+        }
+        const response = await fetch('/api/firmware/import-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(json)
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || '导入配置失败');
+        }
+
+        const current = data.params || {};
+        const boardConfig = data.board_config;
+
+        if (boardConfig) {
+            const presetMode = document.querySelector('input[name="compileMode"][value="preset"]');
+            if (presetMode) presetMode.checked = true;
+            document.getElementById('compilePresetSection').style.display = '';
+            document.getElementById('compileCustomSection').style.display = 'none';
+
+            await loadCompilePresetManufacturers();
+            const mfrSelect = document.getElementById('compilePresetManufacturer');
+            if (_selectCompileOption(mfrSelect, boardConfig.manufacturer)) {
+                await onCompilePresetManufacturerChange();
+                const typeSelect = document.getElementById('compilePresetType');
+                if (_selectCompileOption(typeSelect, boardConfig.board_type || boardConfig.type)) {
+                    await onCompilePresetTypeChange();
+                    const modelSelect = document.getElementById('compilePresetModel');
+                    _selectCompileOption(modelSelect, boardConfig.id);
+                    await onCompilePresetModelChange();
+                }
+            }
+        } else {
+            const customMode = document.querySelector('input[name="compileMode"][value="custom"]');
+            if (customMode) customMode.checked = true;
+            document.getElementById('compilePresetSection').style.display = 'none';
+            document.getElementById('compileCustomSection').style.display = 'block';
+            document.getElementById('compileMcuDetails').style.display = 'none';
+            currentCompileMcu = null;
+            await loadCompileMcuPlatforms(false);
+
+            const platformSelect = document.getElementById('compileMcuPlatform');
+            const platformValue = current.platform || current.platform_key;
+            if (platformValue && _selectCompileOption(platformSelect, platformValue)) {
+                await onCompileMcuPlatformChange();
+                const modelSelect = document.getElementById('compileMcuModel');
+                if (current.mcu && _selectCompileOption(modelSelect, current.mcu)) {
+                    await onCompileMcuModelChange();
+                }
+            }
+        }
+
+        _setCompileSelectValue(document.getElementById('compileCrystal'), current.crystal);
+        _setCompileSelectValue(document.getElementById('compileBlOffset'), current.bl_offset);
+
+        const startupPin = document.getElementById('compileStartupPin');
+        if (startupPin) startupPin.value = current.startup_pin || '';
+
+        if (current.comm_type) {
+            const connSelect = document.getElementById('compileConnection');
+            if (_selectCompileOption(connSelect, current.comm_type)) {
+                onCompileConnectionChange();
+                if (current.comm_config_symbol) {
+                    _selectCompileSymbol(document.getElementById('compileConnectionDetail'), current.comm_config_symbol);
+                }
+            }
+        }
+        if (current.bridge_can_config) {
+            _selectCompileSymbol(document.getElementById('compileBridgeCanPin'), current.bridge_can_config);
+        }
+        if (current.canbus_frequency) {
+            _setSelectedCanBitrate(current.canbus_frequency);
+        }
+        if (current.rp2040_can_rx_gpio) {
+            const rxInput = document.getElementById('compileRp2040CanRx');
+            if (rxInput) rxInput.value = current.rp2040_can_rx_gpio;
+        }
+        if (current.rp2040_can_tx_gpio) {
+            const txInput = document.getElementById('compileRp2040CanTx');
+            if (txInput) txInput.value = current.rp2040_can_tx_gpio;
+        }
+
+        const warningText = (data.warnings || []).length ? `（${data.warnings.join('；')}）` : '';
+        showSuccess('编译配置已导入' + warningText);
+    } catch (error) {
+        console.error('导入配置失败:', error);
+        showError('导入配置失败: ' + error.message);
+    }
+}
+
+// ==================== 编译历史 ====================
+function _escFh(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+async function loadFirmwareHistory() {
+    const container = document.getElementById('firmwareHistoryList');
+    if (!container) return;
+    try {
+        const resp = await fetch('/api/firmware/history');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (!data.success || !data.history || data.history.length === 0) {
+            container.innerHTML = '<span style="color:var(--text-secondary);">暂无编译记录</span>';
+            return;
+        }
+        container.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="border-bottom:1px solid var(--border-color);text-align:left;">
+                <th style="padding:6px 8px;">时间</th><th style="padding:6px 8px;">板卡</th>
+                <th style="padding:6px 8px;">MCU</th><th style="padding:6px 8px;">大小</th>
+                <th style="padding:6px 8px;">操作</th>
+            </tr></thead><tbody>${data.history.slice(0, 20).map(h => `
+                <tr style="border-bottom:1px solid var(--border-color);">
+                    <td style="padding:6px 8px;">${_escFh(h.timestamp)}</td>
+                    <td style="padding:6px 8px;">${_escFh((h.board && h.board.name) || (h.board && h.board.id) || '-')}</td>
+                    <td style="padding:6px 8px;">${_escFh((h.mcu && h.mcu.id) || '-')}</td>
+                    <td style="padding:6px 8px;">${h.firmware_size ? (h.firmware_size / 1024).toFixed(1) + 'KB' : '-'}</td>
+                    <td style="padding:6px 8px;">
+                        <a href="/api/firmware/history/${encodeURIComponent(h.id)}/download" style="color:var(--primary-color);margin-right:8px;" title="下载"><i class="fas fa-download"></i></a>
+                        <button onclick="deleteFirmwareHistory('${_escFh(h.id)}')" style="background:none;border:none;color:var(--danger-color);cursor:pointer;" title="删除"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>`).join('')}
+            </tbody></table>`;
+    } catch (e) {
+        container.innerHTML = '<span style="color:var(--danger-color);">加载失败</span>';
+    }
+}
+
+async function deleteFirmwareHistory(id) {
+    if (!confirm('确定删除此编译记录？')) return;
+    try {
+        const resp = await fetch(`/api/firmware/history/${encodeURIComponent(id)}`, {method: 'DELETE'});
+        if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            showError(errData.error || `删除失败: HTTP ${resp.status}`);
+            return;
+        }
+        const data = await resp.json();
+        if (data.success) { showSuccess('已删除'); loadFirmwareHistory(); }
+        else showError(data.error || '删除失败');
+    } catch (e) { showError('删除请求失败'); }
 }

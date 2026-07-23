@@ -20,6 +20,9 @@ from routes_settings import settings_bp
 from routes_klipper import klipper_bp
 from routes_update import firmware_update_bp
 from routes_tools import tools_bp
+from routes_backup import backup_bp
+from routes_notifications import notifications_bp
+from routes_firmware_history import firmware_history_bp
 
 # 注册蓝图
 app.register_blueprint(system_bp)
@@ -29,6 +32,15 @@ app.register_blueprint(settings_bp)
 app.register_blueprint(klipper_bp)
 app.register_blueprint(firmware_update_bp)
 app.register_blueprint(tools_bp)
+app.register_blueprint(backup_bp)
+app.register_blueprint(notifications_bp)
+app.register_blueprint(firmware_history_bp)
+
+
+@app.route('/api/docs')
+def api_docs():
+    return app.send_static_file('api-docs.html')
+
 
 # 启动
 if __name__ == '__main__':

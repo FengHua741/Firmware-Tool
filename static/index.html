@@ -13,8 +13,11 @@
     <div class="app-container">
         <!-- 侧边栏 -->
         <aside class="sidebar">
-            <div class="sidebar-header">
+            <div class="sidebar-header" style="display:flex;align-items:center;justify-content:space-between;">
                 <h1>🔧 Firmware-Tool</h1>
+                <button id="themeToggle" onclick="toggleTheme()" title="切换主题" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--text-secondary);padding:4px;">
+                    <i class="fas fa-moon"></i>
+                </button>
             </div>
             <nav class="sidebar-nav">
                 <a href="#" class="nav-item active" data-page="resources">
@@ -40,9 +43,30 @@
                 <div style="border-top:1px solid var(--border-color); margin:8px 0;"></div>
                 <a href="#" class="nav-item" data-page="config-generator">
                     <span class="nav-icon">📝</span>
-                    <span>配置生成器</span>
+                    <span data-i18n="nav.config_generator">配置生成器</span>
+                </a>
+                <div style="border-top:1px solid var(--border-color); margin:8px 0;"></div>
+                <a href="/api/docs" target="_blank" class="nav-item">
+                    <span class="nav-icon">📖</span>
+                    <span data-i18n="nav.api_docs">API 文档</span>
                 </a>
             </nav>
+            <div style="position:absolute;bottom:16px;left:0;right:0;padding:0 20px;">
+                <div id="notificationBell" onclick="toggleNotificationPanel()" style="position:relative;cursor:pointer;padding:8px;border-radius:6px;text-align:center;color:var(--text-secondary);transition:background .2s;">
+                    <i class="fas fa-bell" style="font-size:18px;"></i>
+                    <span id="notifBadge" style="display:none;position:absolute;top:2px;right:12px;background:var(--danger-color);color:#fff;font-size:10px;min-width:16px;height:16px;border-radius:8px;align-items:center;justify-content:center;padding:0 3px;">0</span>
+                </div>
+                <div id="notificationPanel" style="display:none;position:absolute;bottom:50px;left:10px;right:10px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;box-shadow:var(--shadow-hover);max-height:320px;overflow-y:auto;z-index:200;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border-color);">
+                        <strong style="font-size:13px;" data-i18n="notifications.title">通知</strong>
+                        <div style="display:flex;gap:8px;">
+                            <button onclick="markAllNotifRead()" style="font-size:11px;background:none;border:none;color:var(--primary-color);cursor:pointer;" data-i18n="btn.mark_read">全部已读</button>
+                            <button onclick="clearAllNotif()" style="font-size:11px;background:none;border:none;color:var(--danger-color);cursor:pointer;" data-i18n="btn.clear">清空</button>
+                        </div>
+                    </div>
+                    <div id="notifList"></div>
+                </div>
+            </div>
         </aside>
 
         <!-- 主内容区 -->
@@ -165,6 +189,16 @@
                             </div>
                             <div id="canDevices" class="id-list"><p class="empty">先选择CAN接口再搜索</p></div>
                             <div id="canSearchError" style="display:none;"></div>
+                        </div>
+                        <hr class="can-divider">
+                        <div class="card-body can-section">
+                            <div class="can-section-header" style="display:flex;justify-content:space-between;align-items:center;">
+                                <span>CAN 总线拓扑</span>
+                                <button class="btn btn-sm btn-secondary" onclick="refreshCanTopology()">刷新拓扑</button>
+                            </div>
+                            <div id="canTopologyViz" class="can-topology-viz">
+                                <p class="empty">点击"刷新拓扑"加载总线拓扑图</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -296,6 +330,9 @@
                         <!-- 编译按钮 -->
                         <div class="form-row" style="margin-top: 20px;">
                             <button class="btn btn-info" onclick="loadCurrentCompileConfig()">📥 读取当前参数</button>
+                            <button class="btn btn-secondary" onclick="exportCompileConfig()">📤 导出配置</button>
+                            <button class="btn btn-secondary" onclick="document.getElementById('importConfigFile').click()">📥 导入配置</button>
+                            <input type="file" id="importConfigFile" accept=".json" style="display:none" onchange="importCompileConfig(event)">
                             <button class="btn btn-success btn-lg" onclick="compileFirmware()">🔨 编译固件</button>
                             <button class="btn btn-secondary" onclick="resetCompileForm()">🔄 重置</button>
                         </div>
@@ -444,6 +481,16 @@
                         <div id="blFlashResult" class="flash-result" style="display:none; margin-top: 15px;">
                             <div class="result-box"></div>
                         </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+                        <h3>📜 <span data-i18n="firmware.history">编译历史</span></h3>
+                        <button class="btn btn-secondary" onclick="loadFirmwareHistory()" style="font-size:12px;padding:4px 10px;"><i class="fas fa-sync-alt"></i></button>
+                    </div>
+                    <div class="card-body">
+                        <div id="firmwareHistoryList" style="font-size:13px;color:var(--text-secondary);" data-i18n="firmware.history_empty">暂无编译记录</div>
                     </div>
                 </div>
             </div>
@@ -662,6 +709,24 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- 配置备份 -->
+                <div class="card" style="margin-top:16px;">
+                    <div class="card-header">
+                        <h3>配置备份</h3>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <button class="btn btn-sm btn-primary" onclick="createConfigBackup()">立即备份</button>
+                            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;">
+                                <input type="checkbox" id="autoBackupToggle" onchange="toggleAutoBackup()"> 烧录前自动备份
+                            </label>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="backupList" class="backup-list">
+                            <p class="empty">加载中...</p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- ==================== 系统设置页面 ==================== -->
@@ -835,6 +900,30 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-header"><h3>📦 <span data-i18n="settings.import_export">配置导入/导出</span></h3></div>
+                    <div class="card-body">
+                        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                            <button class="btn btn-primary" onclick="exportAllConfigs()"><i class="fas fa-download"></i> <span data-i18n="settings.export_all">导出全部配置</span></button>
+                            <label class="btn btn-secondary" style="cursor:pointer;">
+                                <i class="fas fa-upload"></i> <span data-i18n="settings.import_bundle">导入配置包</span>
+                                <input type="file" accept=".zip" style="display:none" onchange="importConfigBundle(this)">
+                            </label>
+                        </div>
+                        <p style="margin-top:8px;font-size:12px;color:var(--text-secondary);">导出包含: 板卡配置、机型预设、应用设置 (不含密码)</p>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-header"><h3>🌐 <span data-i18n="settings.language">语言 / Language</span></h3></div>
+                    <div class="card-body">
+                        <select id="langSelect" class="form-control" style="max-width:200px;" onchange="I18n.setLang(this.value)">
+                            <option value="zh-CN">中文</option>
+                            <option value="en">English</option>
+                        </select>
+                    </div>
+                </div>
             </div>
 
             <!-- ==================== Klipper配置解析器页面 ==================== -->
@@ -901,6 +990,10 @@
                     <h2>📝 Klipper配置生成器</h2>
                 </div>
 
+                <div class="cg-progress-container">
+                    <div class="cg-progress-bar" id="cgProgressBar" style="width:0%"></div>
+                </div>
+
                 <!-- 选项卡导航 -->
                 <div class="cg-tabs-nav" id="cgTabsNav">
                     <button class="cg-tab-btn active" data-tab="1" onclick="switchCgTab(1)"><i class="fas fa-cog"></i> 机器设置</button>
@@ -913,6 +1006,11 @@
 
                 <!-- Tab 1: 主板与连接 -->
                 <div class="cg-tab-panel active" data-tab="1">
+                    <div style="margin:12px 0;text-align:right;">
+                        <button class="btn btn-success" onclick="quickStart()" style="font-size:13px;padding:6px 14px;">
+                            <i class="fas fa-bolt"></i> 快速配置
+                        </button>
+                    </div>
                     <div class="card" style="margin-top:12px;">
                         <div class="card-header"><h3><i class="fas fa-microchip" style="margin-right:8px;color:var(--primary-color)"></i> 主板与连接</h3></div>
                         <div class="card-body">
@@ -1210,7 +1308,20 @@
         </main>
     </div>
 
-    <script src="/static/js/app.js?v=20260605c"></script>
+    <!-- Diff 对比模态框 -->
+    <div id="diffModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+        <div style="background:var(--card-bg);border-radius:10px;width:90%;max-width:900px;max-height:85vh;display:flex;flex-direction:column;box-shadow:var(--shadow-hover);">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border-color);">
+                <h3 style="font-size:15px;" data-i18n="diff.title">配置对比</h3>
+                <button onclick="closeDiffModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-secondary);">&times;</button>
+            </div>
+            <pre id="diffContent" style="flex:1;overflow:auto;padding:16px;margin:0;font-family:'Courier New',monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-all;"></pre>
+        </div>
+    </div>
+
+    <script src="/static/js/i18n.js?v=20260724a"></script>
+    <script src="/static/js/notifications.js?v=20260724a"></script>
+    <script src="/static/js/app.js?v=20260724a"></script>
     <script src="/static/js/mcu-presets.js?v=20260320f"></script>
     <script src="/static/js/config-manager.js?v=20260320f"></script>
     <script src="/static/js/firmware-compile.js?v=20260710a"></script>

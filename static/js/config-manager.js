@@ -39,9 +39,11 @@ function initConfigManager() {
 async function loadKlipperMcuDatabase() {
     try {
         const res = await fetch('/api/klipper/platforms');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.success) {
             const dbRes = await fetch('/api/klipper/mcu-database');
+            if (!dbRes.ok) throw new Error(`HTTP ${dbRes.status}`);
             const dbData = await dbRes.json();
             if (dbData.success) klipperMcuDatabase = dbData.database;
         }
@@ -73,14 +75,17 @@ async function refreshConfigTree() {
 
     try {
         const manufacturersRes = await fetch('/api/config/manufacturers');
+        if (!manufacturersRes.ok) throw new Error(`HTTP ${manufacturersRes.status}`);
         const manufacturersData = await manufacturersRes.json();
         const manufacturers = manufacturersData.manufacturers || [];
 
         configTreeData = [];
 
-        for (const mfr of manufacturers) {
-            const listRes = await fetch(`/api/config/list/${mfr}`);
-            const listData = await listRes.json();
+        const listResults = await Promise.all(manufacturers.map(mfr =>
+            fetch(`/api/config/list/${encodeURIComponent(mfr)}`).then(r => r.json()).then(data => ({ mfr, data }))
+        ));
+
+        for (const { mfr, data: listData } of listResults) {
             const configs = listData.configs || [];
             const boardTypes = listData.board_types || [];
 
@@ -283,6 +288,7 @@ async function selectConfigFile(manufacturer, boardType, configId, nodeId) {
 
     try {
         const res = await fetch(`/api/config/get/${manufacturer}/${configId}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
         if (data.error) {
@@ -565,6 +571,7 @@ async function onCmMcuPlatformChange() {
 
     try {
         const res = await fetch(`/api/klipper/mcus/${platform}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.success && data.mcus) {
             const opts = data.mcus.map(mcu => `<option value="${escapeHtml(mcu.id)}">${escapeHtml(mcu.name)}</option>`).join('');
@@ -600,6 +607,7 @@ async function onCmMcuModelChange() {
 
     try {
         const res = await fetch(`/api/klipper/mcu-info/${mcuId}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!data.success || !data.mcu) return;
 
@@ -903,6 +911,12 @@ async function saveCurrentConfig() {
             body
         });
 
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            showError(errData.error || `请求失败: HTTP ${response.status}`);
+            return;
+        }
+
         const result = await response.json();
 
         if (result.success) {
@@ -941,7 +955,12 @@ async function deleteCurrentConfig() {
     }
 
     try {
-        const res = await fetch(`/api/config/delete/${manufacturer}/${configId}`, { method: 'DELETE' });
+        const res = await fetch(`/api/config/delete/${encodeURIComponent(manufacturer)}/${encodeURIComponent(configId)}`, { method: 'DELETE' });
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            showError(errData.error || `删除失败: HTTP ${res.status}`);
+            return;
+        }
         const result = await res.json();
 
         if (result.success) {
@@ -1049,6 +1068,7 @@ async function createManufacturer() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name })
         });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const result = await response.json();
 

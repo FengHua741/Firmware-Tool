@@ -329,6 +329,7 @@ async function loadRemoteConfigList() {
 
     try {
         const resp = await fetch('/api/tools/config-files');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 
         if (!data.success) {
@@ -415,6 +416,7 @@ async function expandIncludePattern(includePath, cfgDir) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pattern: fullPattern })
             });
+            if (!resp.ok) return [];
             const data = await resp.json();
             if (data.success && data.files && data.files.length > 0) {
                 return data.files.map(f => f.path);
@@ -472,6 +474,10 @@ async function recursiveLoadIncludes(includePatterns, cfgDir, loadedFiles, depth
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ path: filePath })
                 });
+                if (!resp.ok) {
+                    result += `\n\n# ===== [include ${fileName}] - 请求失败: HTTP ${resp.status} =====`;
+                    continue;
+                }
                 const data = await resp.json();
 
                 if (data.success) {
@@ -510,6 +516,11 @@ async function loadPrinterCfgWithIncludes(printerCfgPath, sourceLabel) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: printerCfgPath })
         });
+        if (!mainResp.ok) {
+            const errData = await mainResp.json().catch(() => ({}));
+            status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 请求失败: ${kpEscapeHtml(errData.error || 'HTTP ' + mainResp.status)}</span>`;
+            return;
+        }
         const mainData = await mainResp.json();
 
         if (!mainData.success) {
@@ -546,6 +557,7 @@ async function loadPrinterCfgWithIncludes(printerCfgPath, sourceLabel) {
         // 5. 尝试加载 mainsail.cfg 作为宏基准
         try {
             const msResp = await fetch('/api/tools/mainsail-config');
+            if (!msResp.ok) throw new Error(`HTTP ${msResp.status}`);
             const msData = await msResp.json();
             if (msData.success) {
                 _mainsailBaseline = msData.content;
@@ -579,6 +591,7 @@ async function loadRemoteConfig(filePath) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: filePath })
         });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 
         if (!data.success) {
@@ -608,15 +621,18 @@ async function updateMainsailBaseline() {
 
     try {
         const resp = await fetch('/api/tools/mainsail-config/update', { method: 'POST' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 
         if (data.success) {
             status.innerHTML = `<span style="color:var(--success-color)"><i class="fas fa-check-circle"></i> ${kpEscapeHtml(data.message)}，包含 ${kpEscapeHtml(data.macro_count)} 个宏</span>`;
             // 重新加载基准到内存
             const msResp = await fetch('/api/tools/mainsail-config');
-            const msData = await msResp.json();
-            if (msData.success) {
-                _mainsailBaseline = msData.content;
+            if (msResp.ok) {
+                const msData = await msResp.json();
+                if (msData.success) {
+                    _mainsailBaseline = msData.content;
+                }
             }
         } else {
             status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> ${kpEscapeHtml(data.error)}</span>`;

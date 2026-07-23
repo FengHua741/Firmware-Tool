@@ -1,0 +1,87 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Firmware-Tool API",
+    "description": "3D打印机固件管理工具 API 文档",
+    "version": "2.0.0"
+  },
+  "servers": [{"url": "/"}],
+  "tags": [
+    {"name": "system", "description": "系统管理"},
+    {"name": "firmware", "description": "固件编译与烧录"},
+    {"name": "config", "description": "板卡配置管理"},
+    {"name": "backup", "description": "配置备份与回滚"},
+    {"name": "settings", "description": "系统设置"},
+    {"name": "klipper", "description": "Klipper MCU 数据库"},
+    {"name": "tools", "description": "工具页面"},
+    {"name": "notifications", "description": "通知系统"},
+    {"name": "firmware_history", "description": "固件版本历史"}
+  ],
+  "paths": {
+    "/api/system/resources": {
+      "get": {"tags": ["system"], "summary": "获取系统资源使用情况", "responses": {"200": {"description": "CPU/内存/磁盘/网络数据"}}}
+    },
+    "/api/system/services": {
+      "get": {"tags": ["system"], "summary": "获取服务状态列表", "responses": {"200": {"description": "服务状态数组"}}}
+    },
+    "/api/system/services/{name}/restart": {
+      "post": {"tags": ["system"], "summary": "重启指定服务", "parameters": [{"name": "name", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "操作结果"}}}
+    },
+    "/api/firmware/compile": {
+      "post": {"tags": ["firmware"], "summary": "编译固件 (SSE流)", "responses": {"200": {"description": "SSE 事件流"}}}
+    },
+    "/api/firmware/flash": {
+      "post": {"tags": ["firmware"], "summary": "烧录固件 (SSE流)", "responses": {"200": {"description": "SSE 事件流"}}}
+    },
+    "/api/firmware/history": {
+      "get": {"tags": ["firmware_history"], "summary": "获取编译历史列表", "responses": {"200": {"description": "历史记录数组"}}}
+    },
+    "/api/firmware/history/{id}/download": {
+      "get": {"tags": ["firmware_history"], "summary": "下载历史固件", "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "固件文件"}}}
+    },
+    "/api/firmware/history/{id}": {
+      "delete": {"tags": ["firmware_history"], "summary": "删除历史记录", "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "删除结果"}}}
+    },
+    "/api/config/list/{manufacturer}": {
+      "get": {"tags": ["config"], "summary": "列出厂家配置", "parameters": [{"name": "manufacturer", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "配置列表"}}}
+    },
+    "/api/config/export-all": {
+      "get": {"tags": ["config"], "summary": "导出全部配置为ZIP", "responses": {"200": {"description": "ZIP文件下载"}}}
+    },
+    "/api/config/import-bundle": {
+      "post": {"tags": ["config"], "summary": "导入配置ZIP包", "requestBody": {"content": {"multipart/form-data": {"schema": {"type": "object", "properties": {"file": {"type": "string", "format": "binary"}}}}}}, "responses": {"200": {"description": "导入结果"}}}
+    },
+    "/api/backup/config": {
+      "post": {"tags": ["backup"], "summary": "创建 printer.cfg 备份", "responses": {"200": {"description": "备份ID"}}}
+    },
+    "/api/backup/list": {
+      "get": {"tags": ["backup"], "summary": "列出所有备份", "responses": {"200": {"description": "备份列表"}}}
+    },
+    "/api/backup/diff": {
+      "post": {"tags": ["backup"], "summary": "对比两个备份版本的差异", "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"backup_id_a": {"type": "string"}, "backup_id_b": {"type": "string"}, "current": {"type": "boolean"}}}}}}, "responses": {"200": {"description": "unified diff 行数组"}}}
+    },
+    "/api/backup/rollback": {
+      "post": {"tags": ["backup"], "summary": "恢复备份到 printer.cfg", "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"backup_id": {"type": "string"}}}}}}, "responses": {"200": {"description": "恢复结果"}}}
+    },
+    "/api/settings/config": {
+      "get": {"tags": ["settings"], "summary": "获取系统配置", "responses": {"200": {"description": "配置对象"}},
+      "post": {"tags": ["settings"], "summary": "更新系统配置", "responses": {"200": {"description": "更新结果"}}}
+    },
+    "/api/klipper/mcu-database": {
+      "get": {"tags": ["klipper"], "summary": "获取 Klipper MCU 数据库", "responses": {"200": {"description": "MCU平台数据"}}}
+    },
+    "/api/tools/boards": {
+      "get": {"tags": ["tools"], "summary": "获取板卡索引", "responses": {"200": {"description": "按品牌分类的板卡数据"}}}
+    },
+    "/api/tools/machines": {
+      "get": {"tags": ["tools"], "summary": "获取机型预设列表", "responses": {"200": {"description": "机型数组"}}}
+    },
+    "/api/notifications": {
+      "get": {"tags": ["notifications"], "summary": "获取通知列表", "responses": {"200": {"description": "通知数组+未读数"}},
+      "delete": {"tags": ["notifications"], "summary": "清空所有通知", "responses": {"200": {"description": "操作结果"}}}
+    },
+    "/api/notifications/read": {
+      "post": {"tags": ["notifications"], "summary": "标记通知已读", "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string", "description": "留空则全部标记"}}}}}}, "responses": {"200": {"description": "操作结果"}}}
+    }
+  }
+}

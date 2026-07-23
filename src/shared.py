@@ -4,7 +4,7 @@ Firmware-Tool 共享资源模块
 提供全局常量、配置管理、工具函数等
 """
 
-from flask import Flask, jsonify, request, send_from_directory, send_file, Response
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import subprocess
 import os
@@ -13,10 +13,8 @@ import re
 import json
 import secrets
 import time
-import psutil
-import shutil
-import threading
-from datetime import datetime
+import pwd
+import base64
 import logging
 import sys
 
@@ -144,6 +142,10 @@ def _configured_cors_origins():
 
 CORS(app, origins=_configured_cors_origins())
 
+# WebSocket 全局事件总线
+from websocket_manager import init_websocket, broadcast as ws_broadcast
+init_websocket(app)
+
 
 @app.before_request
 def require_api_token():
@@ -200,7 +202,6 @@ if config.get('connection_mode') == 'fast-ssh':
 
 def get_klipper_owner(klipper_path=None):
     """获取 Klipper 安装用户的用户名和家目录"""
-    import pwd
     if not klipper_path:
         klipper_path = config.get('klipper_path', '~/klipper')
 
@@ -293,8 +294,7 @@ def expand_klipper_path(path, force_local=False):
         except OSError:
             pass
         # 回退: 查找 uid >= 1000 的用户
-        import pwd as _pwd
-        for entry in _pwd.getpwall():
+        for entry in pwd.getpwall():
             if entry.pw_uid >= 1000 and entry.pw_name not in ('nobody', 'nogroup'):
                 candidate = os.path.join(entry.pw_dir, 'klipper')
                 if os.path.isdir(candidate):
@@ -371,7 +371,6 @@ def sudo_write_file(path, content):
     if is_ssh_mode():
         # SSH 模式：两步法写入（先写临时文件，再 sudo cp 到目标）
         # 避免 sudo -S 管道冲突导致密码被写入文件
-        import base64
         encoded = base64.b64encode(content.encode()).decode()
         manager = SSHManager.get_instance()
         from ssh_manager import load_credential

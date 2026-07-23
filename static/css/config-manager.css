@@ -1,5 +1,11 @@
 /* ==================== 配置管理器 - Fluidd 风格 ==================== */
 
+[data-theme="dark"] .config-manager-layout { background: var(--card-bg); }
+[data-theme="dark"] .cm-tree-sidebar { background: #252525; }
+[data-theme="dark"] .cm-tree-toolbar { background: #2a2a2a; }
+[data-theme="dark"] .cm-tree-toolbar button { background: #333; color: #e0e0e0; border-color: #555; }
+[data-theme="dark"] .cm-tree-toolbar button:hover { background: #444; border-color: #777; }
+
 .config-manager-layout {
     display: flex;
     height: calc(100vh - 140px);

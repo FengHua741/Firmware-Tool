@@ -11,10 +11,11 @@ import json
 import time
 import shlex
 import hashlib
+import shutil
 import threading
 
 from shared import (
-    app, config, logger, BASE_DIR, BOARD_CONFIGS_DIR,
+    config, logger, BASE_DIR, BOARD_CONFIGS_DIR,
     DFU_KNOWN_DEVICES,
     run_cmd, run_cmd_stream, path_exists, get_file_size,
     is_ssh_mode, is_fast_ssh_mode,
@@ -144,10 +145,11 @@ def _read_text_file(path):
         if result.returncode != 0:
             return ''
         return result.stdout or ''
-    if not os.path.exists(path):
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
+    except (OSError, IOError):
         return ''
-    with open(path, 'r', encoding='utf-8') as f:
-        return f.read()
 
 
 def _normalize_fs_path(path):
@@ -1210,12 +1212,10 @@ def compile_firmware():
 
         if verbose_config_logs:
             yield 'data: [LOG] 生成配置中...\n\n'
-        olddefconfig_failed = False
         for line in run_cmd_stream(f'cd {shlex.quote(klipper_path)} && make olddefconfig', shell=True, timeout=60):
             if line.startswith('[DONE]'):
                 pass
             elif line.startswith('[ERROR]'):
-                olddefconfig_failed = True
                 yield f'data: {json.dumps({"error": "配置生成失败", "detail": line})}\n\n'
                 return
             else:
@@ -1258,7 +1258,7 @@ def compile_firmware():
                         config_file = os.path.join(klipper_path, '.config')
                         run_cmd(f'chown {shlex.quote(owner_name)} {shlex.quote(config_file)}', shell=True, capture_output=True, timeout=5)
                 else:
-                    import shutil as _shutil, pwd as _pwd, grp as _grp
+                    import pwd as _pwd, grp as _grp
                     os.chmod(firmware_path, 0o664)
                     os.chmod(out_dir, 0o755)
                     try:
@@ -1269,16 +1269,16 @@ def compile_firmware():
                         owner_name = None
                         group_name = None
                     if owner_name and group_name:
-                        _shutil.chown(firmware_path, user=owner_name, group=group_name)
-                        _shutil.chown(out_dir, user=owner_name, group=group_name)
+                        shutil.chown(firmware_path, user=owner_name, group=group_name)
+                        shutil.chown(out_dir, user=owner_name, group=group_name)
                         for root_dir, dirs, files in os.walk(out_dir):
                             for d in dirs:
-                                _shutil.chown(os.path.join(root_dir, d), user=owner_name, group=group_name)
+                                shutil.chown(os.path.join(root_dir, d), user=owner_name, group=group_name)
                             for f in files:
-                                _shutil.chown(os.path.join(root_dir, f), user=owner_name, group=group_name)
+                                shutil.chown(os.path.join(root_dir, f), user=owner_name, group=group_name)
                         config_file = os.path.join(klipper_path, '.config')
                         if os.path.exists(config_file):
-                            _shutil.chown(config_file, user=owner_name, group=group_name)
+                            shutil.chown(config_file, user=owner_name, group=group_name)
             except Exception as e:
                 logger.warning(f"修改文件权限失败: {e}")
 
@@ -1306,6 +1306,15 @@ def compile_firmware():
             manifest_path = _write_manifest(klipper_path, manifest)
 
             yield f'data: {json.dumps({"success": True, "message": "编译成功", "firmware_path": firmware_path, "firmware_size": size_str, "firmware_size_bytes": firmware_size, "manifest_path": manifest_path, "manifest": manifest})}\n\n'
+            try:
+                from shared import ws_broadcast
+                ws_broadcast('compile_complete', {'firmware_path': firmware_path, 'size': size_str})
+                from routes_notifications import push_notification
+                push_notification('compile_complete', '编译完成', f'固件: {size_str}', 'success')
+                from routes_firmware_history import record_compile
+                record_compile(manifest, firmware_path)
+            except Exception:
+                pass
             return
         else:
             yield f'data: {json.dumps({"success": False, "error": "编译失败：未找到固件文件"})}\n\n'
@@ -1578,6 +1587,15 @@ def flash_firmware():
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
+
+        if config.get('backup', {}).get('auto_backup', False):
+            try:
+                from routes_backup import auto_backup_printer_cfg
+                backup_id = auto_backup_printer_cfg()
+                if backup_id:
+                    yield f'data: {json.dumps({"log": f"[AUTO-BACKUP] 已自动备份 printer.cfg ({backup_id})"})}\n\n'
+            except Exception as e:
+                yield f'data: {json.dumps({"log": f"[AUTO-BACKUP] 自动备份失败: {e}"})}\n\n'
         # CAN Bridge 烧录方式映射：实际使用 DFU 或 KAT 方式烧录
         if flash_mode == 'CAN_BRIDGE_DFU':
             flash_mode = 'DFU'
@@ -1680,9 +1698,23 @@ def flash_firmware():
 
                 if returncode == 0:
                     yield f'data: {json.dumps({"success": True, "message": "烧录成功", "output": output})}\n\n'
+                    try:
+                        from shared import ws_broadcast
+                        ws_broadcast('flash_complete', {'message': '烧录成功'})
+                        from routes_notifications import push_notification
+                        push_notification('flash_complete', '烧录成功', '', 'success')
+                    except Exception:
+                        pass
                     return
                 else:
                     yield f'data: {json.dumps({"success": False, "error": "烧录失败", "output": output})}\n\n'
+                    try:
+                        from shared import ws_broadcast
+                        ws_broadcast('flash_failed', {'error': '烧录失败'})
+                        from routes_notifications import push_notification
+                        push_notification('flash_failed', '烧录失败', '', 'error')
+                    except Exception:
+                        pass
                     return
 
         if flash_mode in ('KAT', 'CAN'):
@@ -1690,14 +1722,9 @@ def flash_firmware():
             python_bin = get_klipper_python_bin(home_dir)
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
 
-            _prefix = f'{can_iface}:'
-            _is_can_uuid = bool(re.match(r'^[a-fA-F0-9]{8,32}$', device.replace(_prefix, '').replace('can0:', '')))
-            if _prefix in device or 'can0:' in device or _is_can_uuid:
-                can_uuid = device
-                for pfx in (_prefix, 'can0:', 'can1:', 'can2:'):
-                    if pfx in can_uuid:
-                        can_uuid = can_uuid.replace(pfx, '')
-                        break
+            _is_can_uuid = bool(re.match(r'^[a-fA-F0-9]{8,32}$', re.sub(r'^can\d+:', '', device)))
+            if re.match(r'^can\d+:', device) or _is_can_uuid:
+                can_uuid = re.sub(r'^can\d+:', '', device)
 
                 if is_fast_ssh_mode():
                     logger.info('FAST-SSH 模式：使用 CAN 直接烧录')
@@ -1844,7 +1871,6 @@ def install_host_firmware():
                 yield f'data: {json.dumps({"error": f"复制失败: {result.stderr}"})}\n\n'
                 return
         else:
-            import shutil
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             shutil.copy2(firmware_path, target_path)
 
@@ -2184,3 +2210,126 @@ def flash_bl_firmware():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ==================== 编译配置导入/导出 API ====================
+@firmware_bp.route('/api/firmware/export-config')
+def export_compile_config():
+    """导出当前编译配置为可分享的 JSON 文件"""
+    try:
+        raw_klipper_path = request.args.get('klipper_path') or config.get('klipper_path', '~/klipper')
+        klipper_path = expand_klipper_path(raw_klipper_path)
+        kconfig_klipper_path = expand_klipper_path(raw_klipper_path, force_local=True)
+
+        config_path = os.path.join(klipper_path, '.config')
+        content = _read_text_file(config_path)
+        if not content.strip():
+            return jsonify({'success': False, 'error': '未找到 Klipper .config'}), 404
+
+        config_values, _ = _parse_klipper_config(content)
+        params, warnings = _resolve_current_config_params(kconfig_klipper_path, config_values)
+        if not params:
+            return jsonify({'success': False, 'error': '无法解析编译参数', 'warnings': warnings}), 400
+
+        manifest = _load_manifest(klipper_path)
+        board_info = {}
+        if manifest and manifest.get('board', {}).get('id'):
+            board_info = manifest['board']
+        else:
+            boards = load_all_boards()
+            for mfr, types in boards.items():
+                for btype, configs in types.items():
+                    for bc in configs:
+                        if bc.get('mcu') == params.get('mcu') and bc.get('platform') == params.get('platform'):
+                            board_info = {
+                                'manufacturer': mfr,
+                                'board_type': btype,
+                                'id': bc.get('id', ''),
+                                'name': bc.get('name', ''),
+                            }
+                            break
+
+        export_data = {
+            'schema': 1,
+            'exported_at': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+            'board': board_info,
+            'mcu': {
+                'platform': params.get('platform', ''),
+                'platform_key': params.get('platform_key', ''),
+                'mcu': params.get('mcu', ''),
+                'mcu_name': params.get('mcu_name', ''),
+            },
+            'compile': {
+                'crystal': params.get('crystal', ''),
+                'bl_offset': params.get('bl_offset', ''),
+                'communication': params.get('communication', ''),
+                'comm_type': params.get('comm_type', ''),
+                'comm_config_symbol': params.get('comm_config_symbol', ''),
+                'canbus_frequency': params.get('canbus_frequency', '1000000'),
+                'bridge_can_config': params.get('bridge_can_config', ''),
+                'startup_pin': params.get('startup_pin', ''),
+                'rp2040_can_rx_gpio': params.get('rp2040_can_rx_gpio', ''),
+                'rp2040_can_tx_gpio': params.get('rp2040_can_tx_gpio', ''),
+            },
+            'klipper_path': raw_klipper_path,
+        }
+        return jsonify({'success': True, 'config': export_data, 'warnings': warnings})
+    except Exception as e:
+        logger.exception('导出编译配置失败')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@firmware_bp.route('/api/firmware/import-config', methods=['POST'])
+def import_compile_config():
+    """导入编译配置 JSON，返回验证后的参数和板卡配置"""
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'success': False, 'error': '无效的 JSON 数据'}), 400
+
+        schema = data.get('schema')
+        if schema != 1:
+            return jsonify({'success': False, 'error': f'不支持的配置版本: {schema}'}), 400
+
+        compile_cfg = data.get('compile', {})
+        mcu_cfg = data.get('mcu', {})
+        board_cfg = data.get('board', {})
+
+        warnings = []
+        board_config = None
+
+        if board_cfg.get('id') and board_cfg.get('manufacturer'):
+            bc = load_board_config(board_cfg['manufacturer'], board_cfg.get('board_type', ''), board_cfg['id'])
+            if bc:
+                board_config = bc
+            else:
+                warnings.append(f'板卡 {board_cfg["id"]} 未找到，将使用自定义模式')
+
+        params = {
+            'platform': mcu_cfg.get('platform', ''),
+            'platform_key': mcu_cfg.get('platform_key', ''),
+            'mcu': mcu_cfg.get('mcu', ''),
+            'mcu_name': mcu_cfg.get('mcu_name', ''),
+            'crystal': compile_cfg.get('crystal', ''),
+            'bl_offset': compile_cfg.get('bl_offset', ''),
+            'communication': compile_cfg.get('communication', ''),
+            'comm_type': compile_cfg.get('comm_type', ''),
+            'comm_config_symbol': compile_cfg.get('comm_config_symbol', ''),
+            'canbus_frequency': compile_cfg.get('canbus_frequency', '1000000'),
+            'bridge_can_config': compile_cfg.get('bridge_can_config', ''),
+            'startup_pin': compile_cfg.get('startup_pin', ''),
+            'rp2040_can_rx_gpio': compile_cfg.get('rp2040_can_rx_gpio', ''),
+            'rp2040_can_tx_gpio': compile_cfg.get('rp2040_can_tx_gpio', ''),
+        }
+
+        return jsonify({
+            'success': True,
+            'params': params,
+            'board_config': board_config,
+            'board_info': board_cfg,
+            'klipper_path': data.get('klipper_path', ''),
+            'warnings': warnings,
+        })
+    except Exception as e:
+        logger.exception('导入编译配置失败')
+        return jsonify({'success': False, 'error': str(e)}), 500

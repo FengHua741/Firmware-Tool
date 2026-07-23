@@ -31,6 +31,14 @@ function fuPruneSelectedUpdateConfigs() {
 }
 
 async function fuReadSseJson(response, onLog) {
+    if (!response.ok) {
+        let errMsg = `HTTP ${response.status}`;
+        try {
+            const errData = await response.json();
+            errMsg = errData.error || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+    }
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
         return response.json();
@@ -100,6 +108,7 @@ async function initFirmwareUpdatePage() {
 async function loadUpdateBoardManufacturers() {
     try {
         const response = await fetch('/api/config/manufacturers');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         const select = document.getElementById('updateBoardManufacturer');
@@ -128,6 +137,7 @@ async function onUpdateBoardManufacturerChange() {
 
     try {
         const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         updateBoardConfigs = data.configs || [];
 
@@ -201,6 +211,7 @@ async function loadFirmwareUpdateConfigs() {
 
     try {
         const response = await fetch('/api/firmware-update/configs');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
         if (data.success) {
@@ -231,11 +242,13 @@ async function loadUpdateableConfigs() {
         if (manufacturer) {
             // 加载特定厂家的配置
             const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             configs = data.configs || [];
         } else {
             // 加载所有配置
             const response = await fetch('/api/config/all');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             configs = data.configs || [];
         }
@@ -329,6 +342,7 @@ async function deleteFirmwareUpdateConfig(manufacturer, configId) {
         const response = await fetch(`/api/firmware-update/config/${encodeURIComponent(manufacturer)}/${encodeURIComponent(configId)}`, {
             method: 'DELETE'
         });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const result = await response.json();
 
@@ -492,6 +506,7 @@ async function openUpdateSettings(configKey) {
         try {
             const mfr = config._manufacturer || config.manufacturer;
             const bcResponse = await fetch(`/api/config/get/${encodeURIComponent(mfr)}/${encodeURIComponent(config.board_config_id)}`);
+            if (!bcResponse.ok) throw new Error(`HTTP ${bcResponse.status}`);
             const boardConfig = await bcResponse.json();
             if (boardConfig && !boardConfig.error) {
                 linkedInfoDiv.innerHTML = `
@@ -576,6 +591,7 @@ async function scanDeviceIdForUpdate() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ iface: 'can0' })
             });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             if (data.uuids && data.uuids.length > 0) {
                 deviceIdInput.value = data.uuids[0].uuid;
@@ -586,6 +602,7 @@ async function scanDeviceIdForUpdate() {
         } else {
             // 扫描USB设备
             const response = await fetch('/api/firmware/detect');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
             if (data.devices && data.devices.length > 0) {
                 // 优先匹配 USB 串口设备（type === 'usb_serial'），其次匹配含 by-id 的 id
@@ -652,6 +669,7 @@ async function saveUpdateSettings() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updateConfig)
         });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const result = await response.json();
 
@@ -701,6 +719,12 @@ async function compileAllSelected() {
             // 先获取完整的主板配置
             const mfr = config._manufacturer || config.manufacturer;
             const bcResponse = await fetch(`/api/config/get/${encodeURIComponent(mfr)}/${encodeURIComponent(config.board_config_id)}`);
+            if (!bcResponse.ok) {
+                addBatchResult(displayName, 'error', `获取主板配置失败: HTTP ${bcResponse.status}`);
+                completed++;
+                updateBatchProgress(completed, total);
+                continue;
+            }
             const boardConfig = await bcResponse.json();
 
             if (boardConfig.error) {
@@ -783,6 +807,12 @@ async function flashAllSelected() {
             // 1. 先获取完整的主板配置
             const mfr = config._manufacturer || config.manufacturer;
             const bcResponse = await fetch(`/api/config/get/${encodeURIComponent(mfr)}/${encodeURIComponent(config.board_config_id)}`);
+            if (!bcResponse.ok) {
+                addBatchResult(displayName, 'error', `获取主板配置失败: HTTP ${bcResponse.status}`);
+                completed++;
+                updateBatchProgress(completed, total);
+                continue;
+            }
             const boardConfig = await bcResponse.json();
 
             if (boardConfig.error) {

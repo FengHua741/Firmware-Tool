@@ -7,7 +7,7 @@ import os
 import json
 
 from shared import (
-    app, config, logger, BASE_DIR, BOARD_CONFIGS_DIR,
+    config, logger, BASE_DIR, BOARD_CONFIGS_DIR,
     sanitize_manufacturer, sanitize_config_id,
 )
 

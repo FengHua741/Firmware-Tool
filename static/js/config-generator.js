@@ -643,10 +643,13 @@ function cgClearBoardImages(message='正在加载板卡图片...') {
 }
 
 function cgRefreshBoardHotspotUsage() {
+    const boardConflicts = cgCheckBoardMappingConflicts();
+    const conflictKeys = new Set(boardConflicts.map(c => c.key));
     document.querySelectorAll('.cg-board-hotspot').forEach(btn => {
         const key = btn.dataset.key || '';
         btn.classList.toggle('used', cgMainKeyUsages(key).length > 0);
         btn.classList.toggle('active', key === _cgSelectedBoardPin);
+        btn.classList.toggle('conflict', conflictKeys.has(key));
     });
     cgBoardMapRoots().forEach(root => {
         const parts = cgEnsureBoardMap(root);
@@ -655,6 +658,57 @@ function cgRefreshBoardHotspotUsage() {
         const item = _cgSelectedBoardPin ? items.find(x => x.key === _cgSelectedBoardPin) : null;
         parts.panel.innerHTML = item ? cgBoardPinInfoHtml(item) : cgBoardMapDefaultHtml(root, items.length > 0);
     });
+}
+
+function cgCheckBoardMappingConflicts() {
+    if (!_currentMapping) return [];
+    const conflicts = [];
+    const items = cgBoardLayoutItems();
+
+    items.forEach(item => {
+        const mappingPin = _currentMapping[item.key];
+        if (!mappingPin || typeof mappingPin !== 'string') return;
+        const defaultPin = mappingPin.trim().toUpperCase();
+        if (!/^[A-G]\d{1,2}$/.test(defaultPin)) return;
+
+        const usages = cgMainKeyUsages(item.key);
+        if (usages.length === 0) return;
+
+        const assignedPins = [];
+        const driveMatch = String(item.key).match(/^Drives(\d+)$/i);
+        if (driveMatch) {
+            const idx = driveMatch[1];
+            ['step', 'dir', 'enable', 'uart'].forEach(type => {
+                const el = document.getElementById(`cg${type.charAt(0).toUpperCase()}${type.slice(1)}_Drives${idx}`);
+                if (el?.value) assignedPins.push(el.value.trim().toUpperCase());
+            });
+            return;
+        }
+
+        const pinElId = {
+            'heat': 'cgHeatPin_', 'temp': 'cgTempPin_', 'fan': 'cgFanPin_',
+            'stop': 'cgEndstopPin_', 'probe': 'cgProbePin_', 'servo': 'cgServoPin_',
+        };
+        for (const [prefix, elPrefix] of Object.entries(pinElId)) {
+            if (item.key.toLowerCase().startsWith(prefix)) {
+                const suffix = item.key.substring(prefix.length);
+                const el = document.getElementById(`${elPrefix}${suffix}`);
+                if (el?.value) assignedPins.push(el.value.trim().toUpperCase());
+                break;
+            }
+        }
+
+        if (assignedPins.length > 0 && !assignedPins.includes(defaultPin)) {
+            conflicts.push({
+                key: item.key,
+                label: item.label || item.key,
+                defaultPin,
+                assignedPins,
+            });
+        }
+    });
+
+    return conflicts;
 }
 
 function cgRenderBoardMapRoot(root) {
@@ -1402,6 +1456,18 @@ function renderToolboardConflictPanel() {
             panel.className = result.ok ? 'cg-toolboard-check warn' : 'cg-toolboard-check error';
             panel.innerHTML = `<strong>${result.ok ? '建议确认' : '需要处理'}</strong><ul>${items.join('')}</ul>`;
         }
+
+        const boardConflicts = cgCheckBoardMappingConflicts();
+        if (boardConflicts.length > 0) {
+            panel.innerHTML += `<div class="cg-board-conflicts">
+                <h4><i class="fas fa-exclamation-triangle"></i> 板卡引脚映射提示</h4>
+                ${boardConflicts.map(c => `<div class="cg-board-conflict-item">
+                    <span class="conflict-pin">${cgEscapeHtml(c.defaultPin)}</span>:
+                    ${cgEscapeHtml(c.label)} 当前使用 ${cgEscapeHtml(c.assignedPins.join(', '))}，
+                    板卡默认为 <span class="conflict-pin">${cgEscapeHtml(c.defaultPin)}</span>
+                </div>`).join('')}
+            </div>`;
+        }
     }
 
     result.claims.toolboards.forEach(tb => {
@@ -1717,6 +1783,7 @@ async function cgParserLoadRemoteConfigList() {
     if (fileListDiv) fileListDiv.style.display = 'none';
     try {
         const resp = await fetch('/api/tools/config-files');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         if (!data.success) throw new Error(data.error || '加载失败');
         const files = data.files || [];
@@ -1760,6 +1827,10 @@ async function cgParserLoadPrinterCfgWithIncludes(printerCfgPath, sourceLabel='�
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: printerCfgPath })
     });
+    if (!mainResp.ok) {
+        const errData = await mainResp.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${mainResp.status}`);
+    }
     const mainData = await mainResp.json();
     if (!mainData.success) throw new Error(mainData.error || 'printer.cfg 加载失败');
     let mergedContent = `# ===== printer.cfg (主配置) =====\n${mainData.content}`;
@@ -1772,6 +1843,7 @@ async function cgParserLoadPrinterCfgWithIncludes(printerCfgPath, sourceLabel='�
     }
     try {
         const msResp = await fetch('/api/tools/mainsail-config');
+        if (!msResp.ok) throw new Error(`HTTP ${msResp.status}`);
         const msData = await msResp.json();
         cgParserSetBaseline(msData.success ? msData.content : '');
     } catch (e) {
@@ -1791,6 +1863,10 @@ async function cgParserLoadRemoteConfig(filePath) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: filePath })
         });
+        if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${resp.status}`);
+        }
         const data = await resp.json();
         if (!data.success) throw new Error(data.error || '读取失败');
         cgParserSetInput(data.content);
@@ -1808,11 +1884,17 @@ async function cgParserUpdateMainsailBaseline() {
     cgParserSetStatus('正在更新 mainsail.cfg 宏基准...', 'info');
     try {
         const resp = await fetch('/api/tools/mainsail-config/update', { method: 'POST' });
+        if (!resp.ok) {
+            const errData = await resp.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${resp.status}`);
+        }
         const data = await resp.json();
         if (!data.success) throw new Error(data.error || '更新失败');
         const msResp = await fetch('/api/tools/mainsail-config');
-        const msData = await msResp.json();
-        if (msData.success) cgParserSetBaseline(msData.content);
+        if (msResp.ok) {
+            const msData = await msResp.json();
+            if (msData.success) cgParserSetBaseline(msData.content);
+        }
         cgParserSetStatus(`${data.message}，包含 ${data.macro_count} 个宏`, 'success');
         if (cgParserGetInput().trim()) cgParserRun(false);
     } catch (err) {
@@ -1886,6 +1968,10 @@ async function validateGeneratedConfigLocal() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({content: _cgCurrentConfig})
         });
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${res.status}`);
+        }
         const data = await res.json();
         if (!data.success) throw new Error(data.error || '校验失败');
         const items = [...(data.errors || []).map(msg => `<li class="error">${cgEscapeHtml(msg)}</li>`), ...(data.warnings || []).map(msg => `<li class="warn">${cgEscapeHtml(msg)}</li>`)];
@@ -1915,8 +2001,44 @@ function initConfigGenerator() {
 
 // ========== 选项卡切换 ==========
 function switchCgTab(n) {
+    const currentBtn = document.querySelector('.cg-tab-btn.active');
+    const currentTab = currentBtn ? parseInt(currentBtn.dataset.tab) : 1;
+    if (n > currentTab && !validateCgStep(currentTab)) {
+        if (typeof cgShowToast === 'function') cgShowToast('请先完成当前步骤的必填项', 'error');
+        return;
+    }
     document.querySelectorAll('.cg-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab == n));
     document.querySelectorAll('.cg-tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab == n));
+    updateCgProgress();
+}
+
+function validateCgStep(tab) {
+    if (tab === 1) return !!document.getElementById('cgBoard')?.value;
+    if (tab === 2) return document.querySelectorAll('[id^="cgAxis_"]').length > 0 || true;
+    return true;
+}
+
+function updateCgProgress() {
+    const bar = document.getElementById('cgProgressBar');
+    if (!bar) return;
+    let done = 0;
+    const total = 6;
+    if (document.getElementById('cgBoard')?.value) done++;
+    if (document.querySelectorAll('[id^="cgAxis_"]').length > 0) done++;
+    if (_currentProbeMode) done++;
+    done += 2;
+    if (document.getElementById('cgOutput')?.value) done++;
+    const pct = Math.round((done / total) * 100);
+    bar.style.width = pct + '%';
+}
+
+async function quickStart() {
+    const board = document.getElementById('cgBoard')?.value;
+    if (!board) { if (typeof cgShowToast === 'function') cgShowToast('请先选择主板', 'error'); return; }
+    if (!_currentPreset) { if (typeof cgShowToast === 'function') cgShowToast('请先选择打印机型号', 'error'); return; }
+    if (typeof cgApplyPreset === 'function') cgApplyPreset(_currentPreset);
+    switchCgTab(6);
+    if (typeof cgShowToast === 'function') cgShowToast('快速配置完成，请检查后生成', 'success');
 }
 
 // ========== 连接方式切换修复 ==========
@@ -1948,6 +2070,7 @@ function onConnectionTypeChange() {
 async function loadBoardIndex() {
     try {
         const r = await fetch('/api/tools/boards');
+        if (!r.ok) { cgShowToast(`加载板卡数据失败: HTTP ${r.status}`,'error'); return; }
         const d = await r.json();
         if (!d.success) { cgShowToast('加载板卡数据失败','error'); return; }
         _boardsIndex = d.brands; populateBrands();
@@ -1956,6 +2079,7 @@ async function loadBoardIndex() {
 async function loadMachinePresets() {
     try {
         const r = await fetch('/api/tools/machines');
+        if (!r.ok) return;
         const d = await r.json();
         if (!d.success) return;
         _machineList = d.machines;
@@ -1976,6 +2100,7 @@ function populatePrinterModels() {
 async function _loadFullPreset(machineId) {
     try {
         const r = await fetch(`/api/tools/machines/${encodeURIComponent(machineId)}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
         if (d.success) { _currentPreset = d.preset; }
     } catch (e) { console.error('加载预设详情失败', e); }
@@ -2021,6 +2146,7 @@ async function onBoardChange() {
     _cgSelectedBoardPin = '';
     try {
         const r = await fetch(`/api/tools/boards/${encodeURIComponent(boardId)}/mapping`);
+        if (!r.ok) { if (loadSeq === _cgBoardLoadSeq) cgShowToast(`HTTP ${r.status}`,'error'); return; }
         const d = await r.json();
         if (loadSeq !== _cgBoardLoadSeq) return;
         if (!d.success) { cgShowToast(d.error,'error'); return; }
@@ -2077,6 +2203,7 @@ async function detectMcuDevices() {
         let devices = [];
         try {
             const r = await fetch('/api/tools/detect-mcus');
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
             const d = await r.json();
             if (d.success && d.devices) devices = d.devices;
         } catch(e) { console.warn('MCU 设备检测请求失败:', e); }
@@ -2598,7 +2725,7 @@ async function onToolBoardSelect(i) {
     const info=document.getElementById(`cgTBInfo${i}`);
     if(!boardId){_toolboardData[i].mapping=null;renderToolboardConflictPanel();if(_currentMapping){renderDriverAssignment();renderEndstopConfig();renderProbeConfig();renderHeaterConfig();renderFanConfig();}return;}
     try {
-        const r=await fetch(`/api/tools/boards/${encodeURIComponent(boardId)}/mapping`), d=await r.json();
+        const r=await fetch(`/api/tools/boards/${encodeURIComponent(boardId)}/mapping`); if(!r.ok){cgShowToast(`HTTP ${r.status}`,'error');return;} const d=await r.json();
         if(!d.success){cgShowToast(d.error,'error');return;}
         _toolboardData[i].mapping=d.mapping; _toolboardData[i].boardInfo=d.board_info;
         const bi=d.board_info; info.textContent=`${bi.drive_count}驱动, ${bi.heat_count}加热, ${bi.fan_count}风扇`;

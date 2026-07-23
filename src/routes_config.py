@@ -4,10 +4,11 @@
 
 from flask import Blueprint, jsonify, request
 import os
+import re
 import json
 
 from shared import (
-    app, config, logger, BASE_DIR, BOARD_CONFIGS_DIR, CONFIGS_DIR,
+    config, logger, BASE_DIR, BOARD_CONFIGS_DIR, CONFIGS_DIR,
     sanitize_manufacturer, sanitize_config_id,
 )
 
@@ -30,7 +31,8 @@ def _is_board_config_type(board_type):
 
 def _path_in_board_configs(path):
     try:
-        return os.path.commonpath([os.path.realpath(path), os.path.realpath(BOARD_CONFIGS_DIR)]) == os.path.realpath(BOARD_CONFIGS_DIR)
+        real_base = os.path.realpath(BOARD_CONFIGS_DIR)
+        return os.path.commonpath([os.path.realpath(path), real_base]) == real_base
     except ValueError:
         return False
 
@@ -120,7 +122,6 @@ KLIPPER_MCU_LIST = {
 
 def generate_id_from_name(name):
     """从名称生成 ID"""
-    import re
     config_id = name.lower()
     config_id = re.sub(r'[^a-z0-9]', '-', config_id)
     config_id = re.sub(r'-+', '-', config_id)
@@ -513,3 +514,111 @@ def save_board_config():
             'success': False,
             'error': str(e)
         }), 500
+
+
+# ==================== 配置导入/导出 ====================
+
+@board_config_bp.route('/export-all', methods=['GET'])
+def export_all_configs():
+    """将所有板卡配置 + 机型预设 + 应用设置打包为 ZIP 下载"""
+    import io
+    import time as _time
+    import zipfile
+    from flask import send_file
+    from shared import public_config
+
+    try:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(BOARD_CONFIGS_DIR):
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                for fname in files:
+                    if fname.endswith('.json'):
+                        full = os.path.join(root, fname)
+                        arcname = os.path.relpath(full, BOARD_CONFIGS_DIR)
+                        zf.write(full, f'board_configs/{arcname}')
+
+            machines_dir = os.path.join(BASE_DIR, 'data', 'machines')
+            if os.path.isdir(machines_dir):
+                for fname in os.listdir(machines_dir):
+                    if fname.endswith('.json'):
+                        zf.write(os.path.join(machines_dir, fname), f'machines/{fname}')
+
+            zf.writestr('settings.json', json.dumps(public_config(), indent=2, ensure_ascii=False))
+            zf.writestr('manifest.json', json.dumps({
+                'tool': 'Firmware-Tool',
+                'exported_at': _time.strftime('%Y-%m-%dT%H:%M:%S'),
+                'schema': 1,
+            }, ensure_ascii=False))
+
+        buf.seek(0)
+        return send_file(buf, mimetype='application/zip',
+                         as_attachment=True, download_name='firmware-tool-export.zip')
+    except Exception as e:
+        logger.error(f"导出配置失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@board_config_bp.route('/import-bundle', methods=['POST'])
+def import_config_bundle():
+    """上传 ZIP 配置包，验证后恢复板卡配置和机型预设"""
+    import io
+    import zipfile
+
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '未上传文件'}), 400
+    f = request.files['file']
+    if not f.filename.endswith('.zip'):
+        return jsonify({'success': False, 'error': '仅支持 .zip 格式'}), 400
+
+    try:
+        data = f.read()
+        if len(data) > 50 * 1024 * 1024:
+            return jsonify({'success': False, 'error': '文件过大 (最大50MB)'}), 413
+
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        names = zf.namelist()
+        if 'manifest.json' not in names:
+            return jsonify({'success': False, 'error': '无效的配置包 (缺少 manifest.json)'}), 400
+
+        restored = {'board_configs': 0, 'machines': 0}
+        for name in names:
+            if '..' in name or name.startswith('/'):
+                continue
+            if name.startswith('board_configs/') and name.endswith('.json'):
+                rel = name[len('board_configs/'):]
+                dest = os.path.join(BOARD_CONFIGS_DIR, rel)
+                if not _path_in_board_configs(dest):
+                    continue
+                content = zf.read(name)
+                try:
+                    json.loads(content)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, 'wb') as out:
+                    out.write(content)
+                restored['board_configs'] += 1
+            elif name.startswith('machines/') and name.endswith('.json'):
+                rel = os.path.basename(name)
+                dest = os.path.join(BASE_DIR, 'data', 'machines', rel)
+                content = zf.read(name)
+                try:
+                    json.loads(content)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, 'wb') as out:
+                    out.write(content)
+                restored['machines'] += 1
+
+        return jsonify({
+            'success': True,
+            'message': f'导入完成: {restored["board_configs"]} 个板卡配置, {restored["machines"]} 个机型预设',
+            'restored': restored,
+        })
+    except zipfile.BadZipFile:
+        return jsonify({'success': False, 'error': '无效的 ZIP 文件'}), 400
+    except Exception as e:
+        logger.error(f"导入配置失败: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
