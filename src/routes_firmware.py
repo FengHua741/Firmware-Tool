@@ -1236,7 +1236,7 @@ def compile_firmware():
             try:
                 if is_ssh_mode():
                     owner_name, _ = get_klipper_owner(klipper_path)
-                    run_cmd(f'chmod 666 {shlex.quote(firmware_path)}', shell=True, capture_output=True, timeout=5)
+                    run_cmd(f'chmod 664 {shlex.quote(firmware_path)}', shell=True, capture_output=True, timeout=5)
                     run_cmd(f'chmod 755 {shlex.quote(out_dir)}', shell=True, capture_output=True, timeout=5)
                     if owner_name:
                         run_cmd(f'chown {shlex.quote(owner_name)} {shlex.quote(firmware_path)} {shlex.quote(out_dir)}', shell=True, capture_output=True, timeout=5)
@@ -1245,7 +1245,7 @@ def compile_firmware():
                         run_cmd(f'chown {shlex.quote(owner_name)} {shlex.quote(config_file)}', shell=True, capture_output=True, timeout=5)
                 else:
                     import shutil as _shutil, pwd as _pwd, grp as _grp
-                    os.chmod(firmware_path, 0o666)
+                    os.chmod(firmware_path, 0o664)
                     os.chmod(out_dir, 0o755)
                     try:
                         klipper_stat = os.stat(klipper_path)

@@ -255,36 +255,72 @@ def upload_config():
         manufacturer = sanitize_manufacturer(manufacturer)
         if not manufacturer:
             return jsonify({'error': '无效的厂家名称'}), 400
+        board_type = _normalize_board_type(request.form.get('type') or request.form.get('board_type') or 'mainboard')
         files = request.files.getlist('files[]')
         
         if not files:
             return jsonify({'error': '没有文件'}), 400
         
         uploaded_count = 0
+        errors = []
         
         for file in files:
             if file.filename:
                 safe_filename = os.path.basename(file.filename)
                 if not safe_filename or safe_filename.startswith('.'):
-                    logger.warning(f"跳过不安全的文件名: {file.filename}")
+                    msg = f"跳过不安全的文件名: {file.filename}"
+                    errors.append(msg)
+                    logger.warning(msg)
                     continue
-                save_path = os.path.join(CONFIGS_DIR, manufacturer, safe_filename)
+                if not safe_filename.lower().endswith('.json'):
+                    msg = f"仅支持上传 JSON 板卡配置: {safe_filename}"
+                    errors.append(msg)
+                    logger.warning(msg)
+                    continue
+
+                try:
+                    cfg_data = json.load(file.stream)
+                except Exception as e:
+                    msg = f"JSON 解析失败 {safe_filename}: {e}"
+                    errors.append(msg)
+                    logger.warning(msg)
+                    continue
+
+                config_id = sanitize_config_id(
+                    cfg_data.get('id') or os.path.splitext(safe_filename)[0]
+                )
+                if not config_id:
+                    msg = f"无效的配置 ID: {safe_filename}"
+                    errors.append(msg)
+                    logger.warning(msg)
+                    continue
+
+                cfg_board_type = _normalize_board_type(cfg_data.get('type') or board_type)
+                cfg_data['id'] = config_id
+                cfg_data['manufacturer'] = manufacturer
+                cfg_data['type'] = cfg_board_type
+
+                save_path = os.path.join(CONFIGS_DIR, manufacturer, cfg_board_type, f"{config_id}.json")
                 
                 real_save = os.path.realpath(save_path)
                 real_base = os.path.realpath(CONFIGS_DIR)
                 if not real_save.startswith(real_base + os.sep):
-                    logger.warning(f"路径遍历拦截: {save_path}")
+                    msg = f"路径遍历拦截: {save_path}"
+                    errors.append(msg)
+                    logger.warning(msg)
                     continue
                 
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
                 
-                file.save(save_path)
+                with open(save_path, 'w', encoding='utf-8') as f:
+                    json.dump(cfg_data, f, indent=2, ensure_ascii=False)
                 uploaded_count += 1
                 logger.info(f"上传文件：{save_path}")
         
         return jsonify({
             'success': True,
-            'uploaded_count': uploaded_count
+            'uploaded_count': uploaded_count,
+            'errors': errors
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
