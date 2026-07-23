@@ -1,6 +1,6 @@
 # Firmware-Tool
 
-Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板固件。支持本地模式与 SSH 远程模式，可在远程设备上直接编译和烧录固件。
+Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板固件。支持本地模式、SSH 远程模式与 FAST-SSH 模式，可在远程设备上直接编译和烧录固件。
 
 ## 目录
 
@@ -102,7 +102,7 @@ Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板
 - 烧录地址/偏移从当前 MCU 的 Klipper Kconfig 规则生成（NO BL / 8 KB / 16 KB 等）
 - 全片擦除默认开启，执行前需要二次确认；擦除失败时停止 BL 烧录
 - 支持 DFU / UF2 / Katapult 烧录方式，接口层也支持 `st-flash` 与 `openocd`
-- 嵌套目录结构：`BL/mainboard/产品/xxx.bin`
+- 嵌套目录结构：`BL/MainBoard/产品/xxx.bin`
 
 ### 配置管理
 - 主板配置创建 / 编辑 / 删除 / 上传

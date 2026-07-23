@@ -27,8 +27,8 @@ fi
 
 # 停止并禁用服务
 echo -e "${YELLOW}正在停止服务...${NC}"
-systemctl stop $SERVICE_NAME 2>/dev/null || true
-systemctl disable $SERVICE_NAME 2>/dev/null || true
+systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+systemctl disable "$SERVICE_NAME" 2>/dev/null || true
 
 # 删除 systemd 服务文件
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
@@ -44,6 +44,16 @@ echo ""
 read -p "是否删除项目目录 ($PROJECT_DIR)? (y/n): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
+    case "$PROJECT_DIR" in
+        ""|"/"|"/home"|"/root"|"/data")
+            echo -e "${RED}拒绝删除危险目录: $PROJECT_DIR${NC}"
+            exit 1
+            ;;
+    esac
+    if [ ! -f "$PROJECT_DIR/src/app.py" ] || [ ! -d "$PROJECT_DIR/scripts" ]; then
+        echo -e "${RED}目录不像 Firmware-Tool 项目，已停止删除: $PROJECT_DIR${NC}"
+        exit 1
+    fi
     echo -e "${YELLOW}删除项目目录...${NC}"
     rm -rf "$PROJECT_DIR"
     echo -e "${GREEN}项目目录已删除${NC}"

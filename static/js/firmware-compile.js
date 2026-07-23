@@ -20,7 +20,6 @@ const CAN_BITRATE_LABELS = {
 
 // 初始化固件编译页面
 async function initFirmwarePage() {
-    console.log('初始化固件编译页面...');
     await loadCompileMcuDatabase();
     await loadCompilePresetManufacturers();
     await refreshFlashCanIfaces();
@@ -65,10 +64,9 @@ async function loadCompileMcuDatabase() {
     try {
         const response = await fetch('/api/klipper/mcu-database');
         const data = await response.json();
-        
+
         if (data.success) {
             compileMcuDatabase = data.database;
-            console.log('✓ MCU 数据库已加载:', Object.keys(compileMcuDatabase));
         }
     } catch (error) {
         console.error('加载 MCU 数据库失败:', error);
@@ -80,10 +78,10 @@ async function loadCompilePresetManufacturers() {
     try {
         const response = await fetch('/api/config/manufacturers');
         const data = await response.json();
-        
+
         const select = document.getElementById('compilePresetManufacturer');
         select.innerHTML = '<option value="">-- 选择厂家 --</option>';
-        
+
         if (data.manufacturers) {
             data.manufacturers.forEach(mfr => {
                 if (mfr !== '自定义') {
@@ -107,7 +105,7 @@ function onCompileModeChange() {
     const mode = modeEl ? modeEl.value : 'preset';
     const presetSection = document.getElementById('compilePresetSection');
     const customSection = document.getElementById('compileCustomSection');
-    
+
     if (mode === 'preset') {
         presetSection.style.display = 'block';
         customSection.style.display = 'none';
@@ -116,7 +114,7 @@ function onCompileModeChange() {
         customSection.style.display = 'block';
         loadCompileMcuPlatforms();
     }
-    
+
     // 重置
     currentCompileMcu = null;
     document.getElementById('compileMcuDetails').style.display = 'none';
@@ -126,7 +124,7 @@ function onCompileModeChange() {
 function loadCompileMcuPlatforms(autoDefault = true) {
     const select = document.getElementById('compileMcuPlatform');
     select.innerHTML = '<option value="">-- 选择平台 --</option>';
-    
+
     for (const platform in compileMcuDatabase) {
         select.innerHTML += `<option value="${escapeHtml(platform)}">${escapeHtml(platform)}</option>`;
     }
@@ -141,18 +139,18 @@ function loadCompileMcuPlatforms(autoDefault = true) {
 async function onCompileMcuPlatformChange() {
     const platform = document.getElementById('compileMcuPlatform').value;
     const modelSelect = document.getElementById('compileMcuModel');
-    
+
     modelSelect.innerHTML = '<option value="">-- 选择型号 --</option>';
     modelSelect.disabled = true;
     document.getElementById('compileMcuDetails').style.display = 'none';
     currentCompileMcu = null;
-    
+
     if (!platform) return;
-    
+
     try {
         const response = await fetch(`/api/klipper/mcus/${platform}`);
         const data = await response.json();
-        
+
         if (data.success) {
             data.mcus.forEach(mcu => {
                 modelSelect.innerHTML += `<option value="${escapeHtml(mcu.id)}">${escapeHtml(mcu.name)}</option>`;
@@ -167,16 +165,16 @@ async function onCompileMcuPlatformChange() {
 // MCU 型号选择变化
 async function onCompileMcuModelChange() {
     const mcuId = document.getElementById('compileMcuModel').value;
-    
+
     if (!mcuId) {
         document.getElementById('compileMcuDetails').style.display = 'none';
         return;
     }
-    
+
     try {
         const response = await fetch(`/api/klipper/mcu-info/${mcuId}`);
         const data = await response.json();
-        
+
         if (data.success) {
             currentCompileMcu = data;
             await displayCompileMcuDetails(data);
@@ -193,7 +191,7 @@ async function onCompileMcuModelChange() {
 // 显示 MCU 详细参数
 async function displayCompileMcuDetails(data) {
     const mcu = data.mcu;
-    
+
     // 晶振选项 - RP2040/RP2350 固定时钟，隐藏选择
     const crystalSelect = document.getElementById('compileCrystal');
     const crystalGroup = crystalSelect ? crystalSelect.closest('.form-group') : null;
@@ -208,7 +206,7 @@ async function displayCompileMcuDetails(data) {
     } else {
         crystalGroup.style.display = 'block';
     }
-    
+
     // BL 偏移选项
     const blSelect = document.getElementById('compileBlOffset');
     blSelect.innerHTML = '';
@@ -216,10 +214,10 @@ async function displayCompileMcuDetails(data) {
         const label = formatCompileBlOffset(offset, mcu.id);
         blSelect.innerHTML += `<option value="${escapeHtml(offset)}">${escapeHtml(label)}</option>`;
     });
-    
+
     // 连接方式 - 两级选择（从Kconfig动态获取）
     await loadCommunicationOptions(mcu, data.platform_key);
-    
+
     // 根据 MCU 预设自动设置烧录模式（自定义模式）
     // 如果从预设产品切换过来，保留预设配置的烧录模式，不覆盖
     const flashModeEl = document.getElementById('flashMode');
@@ -244,7 +242,7 @@ async function displayCompileMcuDetails(data) {
     if (window._fromPreset) {
         window._fromPreset = false;
     }
-    
+
     document.getElementById('compileMcuDetails').style.display = 'block';
 }
 
@@ -284,22 +282,22 @@ const MCU_PLATFORM_MAP = {
 async function loadCommunicationOptions(mcu, platformKeyFromApi) {
     const connSelect = document.getElementById('compileConnection');
     connSelect.innerHTML = '<option value="">加载中...</option>';
-    
+
     // 隐藏子选项区域
     const canBridgeOptions = document.getElementById('compileCanBridgeOptions');
     if (canBridgeOptions) canBridgeOptions.style.display = 'none';
     let subContainer = document.getElementById('compileConnectionSub');
     if (subContainer) subContainer.remove();
-    
+
     try {
         const response = await fetch('/api/klipper/communication-options');
         const data = await response.json();
-        
+
         if (data.error) {
             _fallbackConnectionOptions(connSelect);
             return;
         }
-        
+
         const mcuId = mcu.id.toUpperCase();
         // 通过映射找到平台键名，再获取该平台的通信选项
         const platformKey = platformKeyFromApi || MCU_PLATFORM_MAP[mcuId] || mcuId.toLowerCase();
@@ -307,7 +305,7 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
         let commOptions = [];
         _bridgeCanOptions = [];
         _rp2040CanGpio = null;
-        
+
         if (platformData && platformData.communication_options) {
             commOptions = platformData.communication_options;
             // 存储桥接CAN引脚选项，按MCU过滤
@@ -329,7 +327,7 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
                 };
             }
         }
-        
+
         // 过滤兼容当前MCU的选项
         let filtered = commOptions.filter(opt => {
             if (!opt.compatible_processors || opt.compatible_processors.length === 0) return true;
@@ -338,7 +336,7 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
         if (filtered.length === 0 && commOptions.length > 0) {
             filtered = commOptions;
         }
-        
+
         _commAllOptions = filtered;
         _commGroupedOptions = {};
         filtered.forEach(opt => {
@@ -346,7 +344,7 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
             if (!_commGroupedOptions[type]) _commGroupedOptions[type] = [];
             _commGroupedOptions[type].push(opt);
         });
-        
+
         // 第一级：通信类型
         const typeLabels = { 'usb': 'USB', 'serial': 'Serial/UART', 'can': 'CAN', 'usbcanbridge': 'USB转CAN桥接' };
         connSelect.innerHTML = '<option value="">-- 选择通信类型 --</option>';
@@ -379,7 +377,7 @@ function onCompileConnectionChange() {
     const commType = document.getElementById('compileConnection').value;
     const canBridgeOptions = document.getElementById('compileCanBridgeOptions');
     if (canBridgeOptions) canBridgeOptions.style.display = 'none';
-    
+
     // 移除旧的子选项和引脚选项
     let subContainer = document.getElementById('compileConnectionSub');
     if (subContainer) subContainer.remove();
@@ -387,30 +385,30 @@ function onCompileConnectionChange() {
     if (pinContainer) pinContainer.remove();
     let bitrateContainer = document.getElementById('compileCanBitrateSub');
     if (bitrateContainer) bitrateContainer.remove();
-    
+
     if (!commType || !_commGroupedOptions[commType]) return;
-    
+
     const options = _commGroupedOptions[commType];
     const connEl = document.getElementById('compileConnection');
     const connGroup = connEl ? connEl.closest('.form-group') : null;
     if (!connGroup) return;
-    
+
     // 有选项时显示第二级选择
     if (options.length >= 1) {
         subContainer = document.createElement('div');
         subContainer.id = 'compileConnectionSub';
         subContainer.className = 'form-group';
         subContainer.style.marginTop = '10px';
-        
+
         let label = '接口';
         if (commType === 'serial') label = 'UART接口';
         else if (commType === 'can') label = 'CAN引脚';
         else if (commType === 'usbcanbridge') label = 'USB接口';
         else if (commType === 'usb') label = 'USB接口';
-        
+
         subContainer.innerHTML = `<label>${escapeHtml(label)}</label><select id="compileConnectionDetail" class="form-control" onchange="onCompileConnectionDetailChange()"></select>`;
         connGroup.parentNode.insertBefore(subContainer, connGroup.nextSibling);
-        
+
         const detailSelect = document.getElementById('compileConnectionDetail');
         detailSelect.innerHTML = `<option value="">-- 选择${escapeHtml(label)} --</option>`;
         options.forEach(opt => {
@@ -425,12 +423,12 @@ function onCompileConnectionChange() {
             detailSelect.value = options[0].config_symbol;
         }
     }
-    
+
     // USB-CAN桥接(STM32)：显示CAN引脚选择
     if (commType === 'usbcanbridge' && _bridgeCanOptions.length > 0) {
         _showBridgeCanPinSelector(connGroup);
     }
-    
+
     // RP2040 CAN/桥接：显示GPIO引脚配置
     if (_rp2040CanGpio && (commType === 'can' || commType === 'usbcanbridge')) {
         _showRp2040CanGpioSelector(connGroup);
@@ -454,11 +452,11 @@ function _showBridgeCanPinSelector(connGroup) {
     pinContainer.id = 'compileCanPinSub';
     pinContainer.className = 'form-group';
     pinContainer.style.marginTop = '10px';
-    
+
     pinContainer.innerHTML = `<label>CAN总线引脚</label><select id="compileBridgeCanPin" class="form-control"></select>`;
-    
+
     _insertAfterCompileConnectionOptions(connGroup, pinContainer);
-    
+
     const pinSelect = document.getElementById('compileBridgeCanPin');
     pinSelect.innerHTML = '<option value="">-- 选择CAN引脚 --</option>';
     _bridgeCanOptions.forEach(opt => {
@@ -490,26 +488,26 @@ function _showRp2040CanGpioSelector(connGroup) {
     pinContainer.id = 'compileCanPinSub';
     pinContainer.className = 'form-group';
     pinContainer.style.marginTop = '10px';
-    
+
     const min = _rp2040CanGpio.range[0];
     const max = _rp2040CanGpio.range[1];
-    
+
     pinContainer.innerHTML = `
         <label>CAN GPIO 引脚</label>
         <div style="display:flex;gap:10px;">
             <div style="flex:1;">
                 <small>RX GPIO</small>
-                <input type="number" id="compileRp2040CanRx" class="form-control" 
+                <input type="number" id="compileRp2040CanRx" class="form-control"
                     value="${_rp2040CanGpio.rx_default}" min="${min}" max="${max}">
             </div>
             <div style="flex:1;">
                 <small>TX GPIO</small>
-                <input type="number" id="compileRp2040CanTx" class="form-control" 
+                <input type="number" id="compileRp2040CanTx" class="form-control"
                     value="${_rp2040CanGpio.tx_default}" min="${min}" max="${max}">
             </div>
         </div>
     `;
-    
+
     const lastSub = document.getElementById('compileConnectionSub') || connGroup;
     lastSub.parentNode.insertBefore(pinContainer, lastSub.nextSibling);
 }
@@ -588,22 +586,22 @@ async function onCompilePresetManufacturerChange() {
     const manufacturer = document.getElementById('compilePresetManufacturer').value;
     const typeSelect = document.getElementById('compilePresetType');
     const modelSelect = document.getElementById('compilePresetModel');
-    
+
     typeSelect.innerHTML = '<option value="">-- 选择类型 --</option>';
     typeSelect.disabled = true;
     modelSelect.innerHTML = '<option value="">-- 先选择类型 --</option>';
     modelSelect.disabled = true;
-    
+
     if (!manufacturer) return;
-    
+
     try {
         const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
         const data = await response.json();
-        
+
         if (data.configs) {
             const types = [...new Set(data.configs.map(c => c.type))];
             types.forEach(type => {
-                const label = type === 'mainboard' ? '主板' : 
+                const label = type === 'mainboard' ? '主板' :
                              type === 'toolboard' ? '工具板' : '扩展板';
                 typeSelect.innerHTML += `<option value="${escapeHtml(type)}">${escapeHtml(label)}</option>`;
             });
@@ -624,16 +622,16 @@ async function onCompilePresetTypeChange() {
     const manufacturer = document.getElementById('compilePresetManufacturer').value;
     const type = document.getElementById('compilePresetType').value;
     const modelSelect = document.getElementById('compilePresetModel');
-    
+
     modelSelect.innerHTML = '<option value="">-- 选择型号 --</option>';
     modelSelect.disabled = true;
-    
+
     if (!type) return;
-    
+
     try {
         const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
         const data = await response.json();
-        
+
         if (data.configs) {
             const configs = data.configs.filter(c => c.type === type);
             configs.forEach(config => {
@@ -735,7 +733,7 @@ async function onCompilePresetModelChange() {
 
     // 标记为从预设切换，避免 displayCompileMcuDetails 覆盖烧录模式
     window._fromPreset = true;
-    
+
     // 加载MCU详细参数（晶振选项、BL偏移选项、通信选项）
     await onCompileMcuModelChange();
 
@@ -985,22 +983,22 @@ async function loadCurrentCompileConfig() {
 async function compileFirmware() {
     const modeEl = document.querySelector('input[name="compileMode"]:checked');
     const mode = modeEl ? modeEl.value : 'preset';
-    
+
     let compileParams = {
         klipper_path: document.getElementById('klipperPath')?.value || '~/klipper'
     };
-    
+
     if (mode === 'preset') {
         const modelSelect = document.getElementById('compilePresetModel');
         const option = modelSelect.options[modelSelect.selectedIndex];
-        
+
         if (!option.dataset.config) {
             showError('请选择预设配置');
             return;
         }
-        
+
         const config = JSON.parse(option.dataset.config);
-        
+
         // 如果 MCU 详情区域可见，用用户修改后的值覆盖预设
         const mcuDetailsEl = document.getElementById('compileMcuDetails');
         if (mcuDetailsEl && mcuDetailsEl.style.display !== 'none') {
@@ -1011,7 +1009,7 @@ async function compileFirmware() {
             if (blOffsetVal) config.bl_offset = blOffsetVal;
             config.boot_pins = startupPinVal || null;
         }
-        
+
         // 检查是否有覆盖的连接方式
         const overrideConnection = document.getElementById('compilePresetConnection')?.value;
         if (overrideConnection) {
@@ -1024,33 +1022,33 @@ async function compileFirmware() {
             };
             config.default_connection = connMap[overrideConnection] || overrideConnection;
         }
-        
+
         // 检查是否有启动引脚
         const startupPin = document.getElementById('compilePresetStartupPin')?.value;
         if (startupPin) {
             config.boot_pins = startupPin;
         }
-        
+
         compileParams.config = config;
     } else {
         if (!currentCompileMcu) {
             showError('请选择 MCU 型号');
             return;
         }
-        
+
         compileParams.mcu = currentCompileMcu.mcu.id;
         compileParams.platform = currentCompileMcu.platform;
         compileParams.crystal = document.getElementById('compileCrystal').value;
         compileParams.bl_offset = document.getElementById('compileBlOffset').value;
         compileParams.startup_pin = document.getElementById('compileStartupPin').value;
-        
+
         // 两级通信选择
         const commType = document.getElementById('compileConnection').value;
         compileParams.comm_type = commType;
-        
+
         const detailSelect = document.getElementById('compileConnectionDetail');
         const options = _commGroupedOptions[commType] || [];
-        
+
         if (detailSelect && detailSelect.value) {
             // 有第二级选择
             compileParams.comm_config_symbol = detailSelect.value;
@@ -1061,7 +1059,7 @@ async function compileFirmware() {
             showError('请选择具体的接口');
             return;
         }
-        
+
         // STM32 USB-CAN桥接：传递CAN引脚
         if (commType === 'usbcanbridge') {
             const bridgePinSelect = document.getElementById('compileBridgeCanPin');
@@ -1073,7 +1071,7 @@ async function compileFirmware() {
         if (commType === 'can' || commType === 'usbcanbridge') {
             compileParams.canbus_frequency = _getSelectedCanBitrate();
         }
-        
+
         // RP2040 CAN/桥接：传递GPIO引脚
         if (_rp2040CanGpio && (commType === 'can' || commType === 'usbcanbridge')) {
             const rxInput = document.getElementById('compileRp2040CanRx');
@@ -1082,7 +1080,7 @@ async function compileFirmware() {
             if (txInput) compileParams.rp2040_can_tx_gpio = txInput.value;
         }
     }
-    
+
     // 显示编译中
     const resultDiv = document.getElementById('compileResult');
     resultDiv.style.display = 'block';
@@ -1090,7 +1088,7 @@ async function compileFirmware() {
     resultBox.innerHTML = '<p id="compileStatusMsg">⏳ 正在编译，请稍候...</p><pre id="compileLogOutput" style="background:#1a1a2e;color:#e0e0e0;padding:10px;max-height:400px;overflow-y:auto;font-size:12px;margin-top:8px;white-space:pre-wrap"></pre>';
     const logEl = document.getElementById('compileLogOutput');
     const statusMsg = document.getElementById('compileStatusMsg');
-    
+
     try {
         const resp = await fetch('/api/firmware/compile', {
             method: 'POST',
@@ -1101,7 +1099,7 @@ async function compileFirmware() {
         const decoder = new TextDecoder();
         let buf = '';
         let lastResult = null;
-        
+
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
@@ -1124,7 +1122,7 @@ async function compileFirmware() {
                 }
             }
         }
-        
+
         if (lastResult && lastResult.success) {
             compiledFirmwarePath = lastResult.firmware_path;
             compiledFirmwareManifest = lastResult.manifest || null;
@@ -1160,12 +1158,12 @@ async function refreshDeviceIds() {
 
     if (canErrDiv) canErrDiv.style.display = 'none';
     select.innerHTML = '<option value="">-- 正在扫描 --</option>';
-    
+
     try {
         // 根据烧录模式决定是否需要扫描 CAN 设备
         const currentFlashMode = document.getElementById('flashMode')?.value || '';
         const needCan = (currentFlashMode === 'KAT' || currentFlashMode === 'CAN' || currentFlashMode === 'CAN_BRIDGE_KAT');
-        
+
         // 并行：USB检测 + (可选)CAN UUID搜索
         const fetches = [fetch('/api/firmware/detect')];
         if (needCan) {
@@ -1177,12 +1175,12 @@ async function refreshDeviceIds() {
         }
         const results = await Promise.allSettled(fetches);
         const [usbResp, canResp] = results;
-        
+
         select.innerHTML = '<option value="">-- 选择设备 --</option>';
-        
+
         let usbCount = 0;
         let canCount = 0;
-        
+
         // USB设备 - 添加分组标题
         if (usbResp.status === 'fulfilled') {
             const usbData = await usbResp.value.json();
@@ -1204,16 +1202,16 @@ async function refreshDeviceIds() {
                     }
                     return true;
                 });
-                
+
                 if (filteredDevices.length > 0) {
                     // 添加USB分组标题（禁用选项）
                     select.innerHTML += `<option disabled>━━━━━━━━ USB 设备 ━━━━━━━━</option>`;
-                    
+
                     filteredDevices.forEach(device => {
                     // 根据设备类型显示不同图标
                     let icon = '🔌';
                     let typeLabel = '';
-                    
+
                     if (device.type === 'usb_serial') {
                         icon = '🔌';
                         typeLabel = 'USB';
@@ -1230,7 +1228,7 @@ async function refreshDeviceIds() {
                         icon = '💾';
                         typeLabel = 'UF2';
                     }
-                    
+
                     // 简化显示：类型 + 设备名
                     const shortName = device.name.length > 40 ? device.name.substring(0, 40) + '...' : device.name;
                     select.innerHTML += `<option value="${escapeHtml(device.id)}">${icon} [${escapeHtml(typeLabel)}] ${escapeHtml(shortName)}</option>`;
@@ -1239,21 +1237,21 @@ async function refreshDeviceIds() {
                 } // end if filteredDevices.length > 0
             }
         }
-        
+
         // CAN设备 - 仅在 KAT/CAN 模式下且有设备时显示分组
         if (canResp && canResp.status === 'fulfilled') {
             const canData = await canResp.value.json();
-            
+
             // 只在有CAN设备时才显示CAN分组标题和设备
             if (canData.uuids && canData.uuids.length > 0) {
                 // 添加CAN分组标题（禁用选项）
                 select.innerHTML += `<option disabled>━━━━━━━━ CAN 设备 (${escapeHtml(canIface)}) ━━━━━━━━</option>`;
-                
+
                 canData.uuids.forEach(d => {
                     // 根据应用类型和来源构建标签
                     let icon = '';
                     let appLabel = '';
-                    
+
                     if (d.app === 'Klipper') {
                         icon = '';
                         appLabel = d.source === 'moonraker' || d.source === 'filesystem' ? 'Klipper (config)' : 'Klipper';
@@ -1266,7 +1264,7 @@ async function refreshDeviceIds() {
                     } else {
                         appLabel = '';
                     }
-                    
+
                     // 构建完整显示信息
                     let parts = [];
                     // 第一部分：应用类型
@@ -1283,16 +1281,16 @@ async function refreshDeviceIds() {
                         parts.push(d.mcu_version);
                     }
                     const bracketInfo = parts.length > 0 ? ` [${parts.join(' / ')}]` : '';
-                    
+
                     // 第三部分：section 名称（如 [mcu SHT36]）
                     const sectionInfo = d.section ? ` [${d.section}]` : '';
-                    
+
                     const label = `${d.uuid}${bracketInfo}${sectionInfo}`;
                     select.innerHTML += `<option value="${escapeHtml(d.uuid)}">${escapeHtml(icon)} ${escapeHtml(label)}</option>`;
                     canCount++;
                 });
             }
-            
+
             // 显示来源提示
             if (canData.source === 'printer_cfg' && canData.skipped > 0 && canErrDiv) {
                 canErrDiv.style.display = 'block';
@@ -1306,11 +1304,11 @@ async function refreshDeviceIds() {
             const statsText = `共找到 ${usbCount + canCount} 个设备 (USB: ${usbCount}, CAN: ${canCount})`;
             select.innerHTML += `<option disabled style="color:#6c757d;font-style:italic;">${statsText}</option>`;
         }
-        
+
         if (select.options.length === 1) {
             select.innerHTML += '<option value="" disabled>未找到设备</option>';
         }
-        
+
         // 恢复之前的选择（如果仍然有效）
         if (previousValue) {
             for (let i = 0; i < select.options.length; i++) {
@@ -1337,7 +1335,7 @@ function onFlashModeChange(skipRefresh = false) {
     const deviceIdGroup = deviceIdEl ? deviceIdEl.closest('.form-group') : null;
     const canIfaceEl = document.getElementById('flashCanIface');
     const needCan = (flashMode === 'KAT' || flashMode === 'CAN' || flashMode === 'CAN_BRIDGE_KAT');
-    
+
     if (flashMode === 'TF') {
         // TF卡模式：显示下载区域，隐藏烧录按钮和设备选择
         tfCardSection.style.display = 'block';
@@ -1441,16 +1439,16 @@ async function downloadFirmwareForTF() {
         showError('请先编译固件');
         return;
     }
-    
+
     try {
         // 调用 API 获取固件文件
         const response = await fetch(`/api/firmware/download?path=${encodeURIComponent(compiledFirmwarePath)}`);
         if (!response.ok) {
             throw new Error('下载失败');
         }
-        
+
         const blob = await response.blob();
-        
+
         // 创建下载链接
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1460,7 +1458,7 @@ async function downloadFirmwareForTF() {
         a.click();
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
-        
+
         showSuccess('firmware.bin 下载成功！请复制到TF卡中。');
     } catch (error) {
         console.error('下载失败:', error);
@@ -1472,15 +1470,15 @@ async function downloadFirmwareForTF() {
 async function flashFirmware() {
     const deviceId = document.getElementById('flashDeviceId').value;
     const flashMode = document.getElementById('flashMode').value;
-    
+
     if (flashMode === 'TF') {
         // TF卡模式不需要烧录
         showSuccess('TF卡模式：编译后可下载固件复制到TF卡');
         return;
     }
-    
+
     let firmwarePath = compiledFirmwarePath;
-    
+
     if (flashMode === 'HOST') {
         // HOST模式：根据固件源选择文件
         const source = document.getElementById('hostFirmwareSource')?.value || 'compiled';
@@ -1498,12 +1496,12 @@ async function flashFirmware() {
         }
         return await flashHostFirmware(firmwarePath);
     }
-    
+
     if (!deviceId && (flashMode === 'KAT' || flashMode === 'CAN' || flashMode === 'CAN_BRIDGE_KAT')) {
         showError('请选择设备 ID');
         return;
     }
-    
+
     if (!firmwarePath) {
         // 如果没有编译过，尝试使用默认路径
         firmwarePath = '~/klipper/out/klipper.bin';
@@ -1517,14 +1515,14 @@ async function flashFirmware() {
             return;
         }
     }
-    
+
     const resultDiv = document.getElementById('flashResult');
     resultDiv.style.display = 'block';
     const resultBox = resultDiv.querySelector('.result-box');
     resultBox.innerHTML = '<p id="flashStatusMsg">⏳ 正在烧录，请稍候...</p><pre id="flashLogOutput" style="background:#1a1a2e;color:#e0e0e0;padding:10px;max-height:400px;overflow-y:auto;font-size:12px;margin-top:8px;white-space:pre-wrap"></pre>';
     const logEl = document.getElementById('flashLogOutput');
     const statusMsg = document.getElementById('flashStatusMsg');
-    
+
     try {
         const canIfaceEl = document.getElementById('flashCanIface');
         const canIface = canIfaceEl ? canIfaceEl.value : 'can0';
@@ -1542,7 +1540,7 @@ async function flashFirmware() {
         const decoder = new TextDecoder();
         let buf = '';
         let lastResult = null;
-        
+
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
@@ -1565,7 +1563,7 @@ async function flashFirmware() {
                 }
             }
         }
-        
+
         if (lastResult && lastResult.success) {
             statusMsg.textContent = '✅ 烧录成功！';
             statusMsg.style.color = '#4caf50';
@@ -1597,7 +1595,7 @@ async function flashHostFirmware(firmwarePath) {
     resultBox.innerHTML = '<p id="hostStatusMsg">⏳ 正在烧录固件，请稍候...</p><pre id="hostLogOutput" style="background:#1a1a2e;color:#e0e0e0;padding:10px;max-height:400px;overflow-y:auto;font-size:12px;margin-top:8px;white-space:pre-wrap"></pre>';
     const logEl = document.getElementById('hostLogOutput');
     const statusMsg = document.getElementById('hostStatusMsg');
-    
+
     try {
         const resp = await fetch('/api/firmware/install-host', {
             method: 'POST',
@@ -1608,7 +1606,7 @@ async function flashHostFirmware(firmwarePath) {
         const decoder = new TextDecoder();
         let buf = '';
         let lastResult = null;
-        
+
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
@@ -1631,7 +1629,7 @@ async function flashHostFirmware(firmwarePath) {
                 }
             }
         }
-        
+
         if (lastResult && lastResult.success) {
             statusMsg.textContent = '✅ ' + (lastResult.message || '固件烧录成功');
             statusMsg.style.color = '#4caf50';
@@ -1673,21 +1671,21 @@ function onHostSourceChange() {
 async function autoDetectHostFirmwarePath() {
     const pathInput = document.getElementById('hostPrebuiltPath');
     if (!pathInput) return;
-    
+
     // 收集当前 MCU 和通信参数
     const mcuId = currentCompileMcu ? currentCompileMcu.mcu.id : '';
     const commType = document.getElementById('compileConnection')?.value || '';
     const blOffset = document.getElementById('compileBlOffset')?.value || '';
-    
+
     try {
         const params = new URLSearchParams();
         if (mcuId) params.set('mcu', mcuId);
         if (commType) params.set('comm_type', commType);
         if (blOffset) params.set('bl_offset', blOffset);
-        
+
         const resp = await fetch('/api/firmware/host-info?' + params.toString());
         const info = await resp.json();
-        
+
         if (info.best_match && info.best_score > 0) {
             pathInput.value = info.best_match.path;
             const sizeStr = info.best_match.size ? ` (${formatFileSize(info.best_match.size)})` : '';
@@ -1731,28 +1729,28 @@ async function loadHostBrowserDir(path) {
     const pathEl = document.getElementById('hostBrowserPath');
     const upBtn = document.getElementById('hostBrowserUpBtn');
     if (!listEl) return;
-    
+
     listEl.innerHTML = '<div class="browser-empty">加载中...</div>';
-    
+
     try {
         const params = path ? `?path=${encodeURIComponent(path)}` : '';
         const resp = await fetch(`/api/remote/browse${params}`);
         const data = await resp.json();
-        
+
         if (data.error) {
             listEl.innerHTML = `<div class="browser-empty">${escapeHtml(data.error)}</div>`;
             return;
         }
-        
+
         _hostBrowserParent = data.parent;
         if (pathEl) pathEl.textContent = data.path;
         if (upBtn) upBtn.style.display = data.parent ? '' : 'none';
-        
+
         if (!data.entries || data.entries.length === 0) {
             listEl.innerHTML = '<div class="browser-empty">目录为空</div>';
             return;
         }
-        
+
         let html = '';
         for (const entry of data.entries) {
             const icon = entry.is_dir ? '&#x1F4C1;' : '&#x1F4C4;';
@@ -1799,7 +1797,7 @@ function escapeHtml(s) {
 function toggleBlFlashSection() {
     const section = document.getElementById('blFlashSection');
     const toggle = document.getElementById('blFlashToggle');
-    
+
     if (section.style.display === 'none') {
         section.style.display = 'block';
         toggle.textContent = '▲';
@@ -1821,11 +1819,11 @@ async function loadBlFiles() {
         if (board.name) params.set('board_name', board.name);
         const response = await fetch('/api/firmware/bl-firmwares' + (params.toString() ? '?' + params.toString() : ''));
         const data = await response.json();
-        
+
         const select = document.getElementById('blFileSelect');
         select.innerHTML = '<option value="">-- 选择 BL 文件 --</option>';
         _lastBlFiles = data.files || [];
-        
+
         if (_lastBlFiles.length > 0) {
             _lastBlFiles.forEach(file => {
                 const label = file.relative_path || file.name;
@@ -1945,7 +1943,7 @@ async function flashBootloader() {
     const platformKey = selectedAddress?.dataset.platformKey || '';
     const tool = document.getElementById('blFlashTool').value;
     const eraseFlash = document.getElementById('blEraseFlash').checked;
-    
+
     if (!blFile) {
         showError('请选择 BL 文件');
         return;
@@ -1960,13 +1958,13 @@ async function flashBootloader() {
     if (!eraseFlash && !confirm('不擦除整个 Flash 可能保留旧固件并与 BL 偏移规则冲突，确认继续？')) {
         return;
     }
-    
+
     const resultDiv = document.getElementById('blFlashResult');
     resultDiv.style.display = 'block';
     resultDiv.querySelector('.result-box').innerHTML = eraseFlash
         ? '<p>⏳ 正在擦除 Flash 并烧录 BL，请稍候...</p>'
         : '<p>⏳ 正在烧录 BL，请稍候...</p>';
-    
+
     try {
         const response = await fetch('/api/firmware/bl/flash', {
             method: 'POST',
@@ -1981,9 +1979,9 @@ async function flashBootloader() {
                 erase_flash: eraseFlash
             })
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             resultDiv.querySelector('.result-box').innerHTML = `
                 <div class="status-success">
@@ -2017,21 +2015,21 @@ async function flashBootloader() {
 function resetCompileForm() {
     document.querySelector('input[name="compileMode"][value="preset"]').checked = true;
     onCompileModeChange();
-    
+
     document.getElementById('compilePresetManufacturer').value = '';
     document.getElementById('compilePresetType').innerHTML = '<option value="">-- 先选择厂家 --</option>';
     document.getElementById('compilePresetType').disabled = true;
     document.getElementById('compilePresetModel').innerHTML = '<option value="">-- 先选择类型 --</option>';
     document.getElementById('compilePresetModel').disabled = true;
-    
+
     document.getElementById('compileMcuPlatform').value = '';
     document.getElementById('compileMcuModel').innerHTML = '<option value="">-- 先选择平台 --</option>';
     document.getElementById('compileMcuModel').disabled = true;
     document.getElementById('compileMcuDetails').style.display = 'none';
-    
+
     document.getElementById('compileResult').style.display = 'none';
     document.getElementById('flashResult').style.display = 'none';
-    
+
     // 清理两级通信子选项和CAN引脚选项
     let subContainer = document.getElementById('compileConnectionSub');
     if (subContainer) subContainer.remove();
@@ -2043,11 +2041,11 @@ function resetCompileForm() {
     _commAllOptions = [];
     _bridgeCanOptions = [];
     _rp2040CanGpio = null;
-    
+
     // 清理启动引脚
     const startupPin = document.getElementById('compileStartupPin');
     if (startupPin) startupPin.value = '';
-    
+
     compiledFirmwarePath = null;
     compiledFirmwareManifest = null;
     currentCompileMcu = null;

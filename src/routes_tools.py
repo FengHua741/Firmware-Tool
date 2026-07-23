@@ -8,21 +8,26 @@ import re
 import json
 import shlex
 import fnmatch
+import urllib.parse
 import requests
 from flask import Blueprint, jsonify, request, send_from_directory
 
-from shared import config, logger
+from shared import config, logger, expand_klipper_path
 from ssh_manager import run_cmd, is_ssh_mode
 
 tools_bp = Blueprint('tools_api', __name__)
 
 
+def _path_under_local(path, root):
+    try:
+        return os.path.commonpath([os.path.realpath(path), os.path.realpath(root)]) == os.path.realpath(root)
+    except ValueError:
+        return False
+
+
 def get_moonraker_base_url():
     """获取 Moonraker HTTP API 基础 URL"""
-    if is_ssh_mode():
-        host = config.get('ssh_host', '127.0.0.1')
-    else:
-        host = '127.0.0.1'
+    host = config.get('moonraker_host') or ('127.0.0.1' if not is_ssh_mode() else config.get('ssh_host', '127.0.0.1'))
     port = config.get('moonraker_port', 7125)
     return f'http://{host}:{port}'
 
@@ -36,8 +41,8 @@ def get_klipper_config_dir():
         home = f'/home/{ssh_user}' if ssh_user and ssh_user != 'root' else '/root'
         base = home + klipper_path.lstrip('~') if klipper_path.startswith('~') else klipper_path
     else:
-        home = os.path.expanduser('~')
-        base = os.path.expanduser(klipper_path)
+        base = expand_klipper_path(klipper_path, force_local=True)
+        home = os.path.dirname(base) if os.path.basename(base) == 'klipper' else os.path.expanduser('~')
 
     candidates = [
         os.path.join(home, 'printer_data', 'config'),
@@ -104,6 +109,7 @@ def _static_validate_klipper_config(content):
     sections = _parse_cfg_sections(content)
     section_map = {sec['name']: sec for sec in sections}
     seen = {}
+    pin_usage = {}
     errors = []
     warnings = []
 
@@ -112,16 +118,30 @@ def _static_validate_klipper_config(content):
         for key, value in sec.get('options', {}).items():
             if not (key.endswith('_pin') or key == 'pin'):
                 continue
+            clean_pin = str(value or '').split('#', 1)[0].strip()
+            clean_pin = re.sub(r'^[!^~]+', '', clean_pin)
+            if clean_pin.endswith(':virtual_endstop') or clean_pin.startswith('probe:'):
+                continue
+            if clean_pin and ':' not in clean_pin and not clean_pin.startswith('probe:'):
+                pin_usage.setdefault(clean_pin.lower(), []).append(f'[{sec["name"]}] {key}')
             m = re.search(r'[!^~]?\b([A-Za-z_][\w.-]*):[A-Za-z0-9_.-]+', value)
             if not m:
                 continue
             mcu = m.group(1)
             if mcu not in ('mcu', 'probe') and f'mcu {mcu}' not in section_map:
                 errors.append(f'[{sec["name"]}] {key} 使用 {mcu}: 前缀，但缺少 [mcu {mcu}]')
+            prefixed_pin = re.sub(r'^[!^~]+', '', str(value or '').strip()).lower()
+            if prefixed_pin and not prefixed_pin.startswith('probe:'):
+                pin_usage.setdefault(prefixed_pin, []).append(f'[{sec["name"]}] {key}')
 
     for name, lines in seen.items():
         if len(lines) > 1:
             errors.append(f'重复 section [{name}]，行号: {", ".join(map(str, lines))}')
+
+    for pin, owners in pin_usage.items():
+        unique_owners = sorted(set(owners))
+        if len(unique_owners) > 1:
+            errors.append(f'引脚重复使用 {pin}: {", ".join(unique_owners)}')
 
     if 'mcu' not in section_map:
         warnings.append('未发现 [mcu] 主控 section')
@@ -215,7 +235,7 @@ def list_wildcard_files():
     请求体: { pattern: "config/macros/*.cfg" }
     返回: { success, files: [{name, path}] }
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     pattern = data.get('pattern', '').strip()
     if not pattern:
         return jsonify({'success': False, 'error': '未指定通配符模式'})
@@ -282,7 +302,7 @@ def list_wildcard_files():
 @tools_bp.route('/api/tools/validate-klipper-config', methods=['POST'])
 def validate_klipper_config():
     """校验生成的 Klipper 配置。"""
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     content = data.get('content', '')
     if not content.strip():
         return jsonify({'success': False, 'error': '配置内容为空'})
@@ -298,7 +318,7 @@ def read_config_content():
             或 { path: "/home/pi/printer_data/config/printer.cfg" }  (SSH/本地来源)
     返回: { success, content, filename, source }
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     file_path = data.get('path', '').strip()
     if not file_path:
         return jsonify({'success': False, 'error': '未指定文件路径'})
@@ -310,8 +330,9 @@ def read_config_content():
     # 方案1: Moonraker API 读取 (path 以 "config/" 开头)
     if file_path.startswith('config/'):
         base = get_moonraker_base_url()
+        encoded_path = urllib.parse.quote(file_path, safe='/')
         try:
-            r = requests.get(f'{base}/server/files/{file_path}', timeout=10)
+            r = requests.get(f'{base}/server/files/{encoded_path}', timeout=10)
             if r.status_code == 200:
                 return jsonify({
                     'success': True,
@@ -483,6 +504,8 @@ def get_board_image(board_id):
         # image_path 是相对于 data/ 的路径，如 boards/board/C5/C5.png
         data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
         full_path = os.path.join(data_dir, image_path)
+        if not _path_under_local(full_path, data_dir):
+            return 'Invalid image path', 403
         if not os.path.isfile(full_path):
             return 'Image not found', 404
         directory = os.path.dirname(full_path)
@@ -578,6 +601,8 @@ def get_board_mapping(board_id):
             return jsonify({'success': False, 'error': f'未找到板卡: {board_id}'})
 
         mapping_file = os.path.join(BOARDS_BASE_DIR, mapping_dir, 'klipper_Mapping.json')
+        if not _path_under_local(mapping_file, BOARDS_BASE_DIR):
+            return jsonify({'success': False, 'error': '非法映射路径'})
         if not os.path.isfile(mapping_file):
             return jsonify({'success': False, 'error': '引脚映射文件不存在'})
 
@@ -592,6 +617,8 @@ def get_board_mapping(board_id):
             layout_candidates.append(os.path.basename(mapping_dir.rstrip('/')) + '.json')
         for filename in dict.fromkeys(layout_candidates):
             layout_file = os.path.join(BOARDS_BASE_DIR, mapping_dir, filename)
+            if not _path_under_local(layout_file, BOARDS_BASE_DIR):
+                continue
             if os.path.isfile(layout_file):
                 with open(layout_file, 'r', encoding='utf-8') as f:
                     layout = json.load(f)
@@ -645,8 +672,7 @@ def get_machine_preset(machine_id):
     返回: { success, preset: {...} }
     """
     try:
-        # 防止路径遍历
-        if '..' in machine_id or '/' in machine_id:
+        if not re.match(r'^[A-Za-z0-9_.-]+$', machine_id or '') or machine_id.startswith('.'):
             return jsonify({'success': False, 'error': '非法ID'})
         fpath = os.path.join(MACHINES_DIR, f'{machine_id}.json')
         if not os.path.isfile(fpath):

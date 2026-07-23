@@ -21,31 +21,89 @@ from routes_system import _ssh_connection_status, _update_ssh_disconnect_status,
 settings_bp = Blueprint('settings', __name__)
 
 
+def _coerce_port(value, name):
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f'{name} 必须是数字')
+    if port < 1 or port > 65535:
+        raise ValueError(f'{name} 范围必须是 1-65535')
+    return port
+
+
+def _clean_setting_string(value, name, max_len=300):
+    value = str(value or '').strip()
+    if len(value) > max_len:
+        raise ValueError(f'{name} 过长')
+    if '\n' in value or '\r' in value or '\x00' in value:
+        raise ValueError(f'{name} 包含非法字符')
+    return value
+
+
+def _clean_secret(value, name, max_len=1000):
+    value = str(value or '')
+    if len(value) > max_len:
+        raise ValueError(f'{name} 过长')
+    if '\x00' in value:
+        raise ValueError(f'{name} 包含非法字符')
+    return value
+
+
 # ==================== 系统设置 API ====================
 @settings_bp.route('/api/settings/config', methods=['GET', 'POST'])
 def handle_config():
     """获取或更新系统配置"""
     from shared import config as _config, save_config, PORT
-    
+
     if request.method == 'GET':
         return jsonify(public_config(_config))
     else:
-        data = request.json
-        for key in ['klipper_path', 'katapult_path', 'json_repo_url', 'port', 'moonraker_host', 'moonraker_port',
-                       'connection_mode', 'ssh_host', 'ssh_port', 'ssh_user', 'sudo_mode']:
-            if key in data:
-                _config[key] = data[key]
-        
+        data = request.get_json(silent=True) or {}
+        old_mode = _config.get('connection_mode', 'local')
+
+        try:
+            if 'port' in data:
+                _config['port'] = _coerce_port(data['port'], '服务端口')
+            if 'moonraker_port' in data:
+                _config['moonraker_port'] = _coerce_port(data['moonraker_port'], 'Moonraker 端口')
+            if 'ssh_port' in data:
+                _config['ssh_port'] = _coerce_port(data['ssh_port'], 'SSH 端口')
+
+            for key, label in [
+                ('klipper_path', 'Klipper 路径'),
+                ('katapult_path', 'Katapult 路径'),
+                ('json_repo_url', 'JSON 仓库地址'),
+                ('bind_host', '监听地址'),
+                ('moonraker_host', 'Moonraker 地址'),
+                ('ssh_host', 'SSH 地址'),
+                ('ssh_user', 'SSH 用户'),
+            ]:
+                if key in data:
+                    _config[key] = _clean_setting_string(data[key], label)
+
+            if 'bind_host' in data and not re.match(r'^[A-Za-z0-9:_.-]{1,120}$', _config['bind_host']):
+                raise ValueError('监听地址格式无效')
+
+            if 'connection_mode' in data:
+                mode = _clean_setting_string(data['connection_mode'], '连接模式', 20)
+                if mode not in ('local', 'ssh', 'fast-ssh'):
+                    raise ValueError('连接模式无效')
+                _config['connection_mode'] = mode
+
+            if 'sudo_mode' in data:
+                sudo_mode = _clean_setting_string(data['sudo_mode'], 'sudo 模式', 20)
+                if sudo_mode not in ('password', 'nopasswd'):
+                    raise ValueError('sudo 模式无效')
+                _config['sudo_mode'] = sudo_mode
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
         if 'port' in data:
             global PORT
-            PORT = data['port']
-        
-        if 'json_repo_url' in data:
-            _config['json_repo_url'] = data['json_repo_url']
-        
-        old_mode = _config.get('connection_mode', 'local')
-        new_mode = data.get('connection_mode', old_mode)
-        
+            PORT = _config['port']
+
+        new_mode = _config.get('connection_mode', old_mode)
+
         if _config.get('connection_mode') == 'fast-ssh':
             from ssh_manager import save_credential
             _fast_user, _fast_pwd = get_fast_ssh_credentials()
@@ -56,7 +114,7 @@ def handle_config():
             if not _config.get('fast_ssh_user'):
                 _config['fast_ssh_user'] = _fast_user
             _config.pop('fast_ssh_password', None)
-        
+
         if new_mode == 'local' and old_mode in ('ssh', 'fast-ssh'):
             try:
                 manager = SSHManager.get_instance()
@@ -64,11 +122,11 @@ def handle_config():
                 logger.info(f"连接模式从 {old_mode} 切换到 local，已断开 SSH 连接")
             except Exception as e:
                 logger.warning(f"断开 SSH 连接时出错: {e}")
-        
+
         import routes_system
         routes_system._remote_flyos_version = None
         routes_system._remote_board_name = None
-        
+
         if save_config(_config):
             return jsonify({'success': True, 'message': '配置已保存', 'config': public_config(_config)})
         else:
@@ -87,13 +145,17 @@ def handle_ssh_credentials():
             'has_sudo_password': has_credential('sudo_password')
         })
     else:
-        data = request.json
-        if data.get('ssh_password') is not None:
-            save_credential('ssh_password', data['ssh_password'])
-        if data.get('sudo_password') is not None:
-            save_credential('sudo_password', data['sudo_password'])
+        data = request.get_json(silent=True) or {}
         if data.get('clear_all'):
             clear_credentials()
+            return jsonify({'success': True, 'message': '凭据已清除'})
+        try:
+            if data.get('ssh_password') is not None:
+                save_credential('ssh_password', _clean_secret(data['ssh_password'], 'SSH 密码'))
+            if data.get('sudo_password') is not None:
+                save_credential('sudo_password', _clean_secret(data['sudo_password'], 'sudo 密码'))
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
         return jsonify({'success': True, 'message': '凭据已保存'})
 
 
@@ -495,8 +557,11 @@ def get_can_config():
 def set_can_config():
     """设置CAN配置（三模式自适应，支持自动生成）"""
     try:
-        data = request.get_json()
-        bitrate = data.get('bitrate', 1000000)
+        data = request.get_json(silent=True) or {}
+        try:
+            bitrate = int(data.get('bitrate', 1000000))
+        except (TypeError, ValueError):
+            return jsonify({'error': '速率必须是数字'}), 400
         txqueuelen = data.get('txqueuelen', 1024)
 
         if bitrate not in CAN_BITRATES:
@@ -504,7 +569,10 @@ def set_can_config():
                 'error': f'不支持的速率: {bitrate}，仅支持 {", ".join(CAN_BITRATES.values())}'
             }), 400
 
-        txqueuelen = int(txqueuelen)
+        try:
+            txqueuelen = int(txqueuelen)
+        except (TypeError, ValueError):
+            return jsonify({'error': '缓存大小必须是数字'}), 400
         if txqueuelen < 128 or txqueuelen > 8192:
             return jsonify({'error': '缓存大小范围: 128-8192'}), 400
 
@@ -642,7 +710,7 @@ def diagnose_can_network():
             'kernel_support': False,
             'errors': []
         }
-        
+
         if is_ssh_mode():
             cmd = (
                 'echo "===MODPROBE==="; sudo modprobe can 2>/dev/null && echo "OK" || echo "FAIL"; '
@@ -653,7 +721,7 @@ def diagnose_can_network():
             )
             out = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=10)
             output = out.stdout or ''
-            
+
             sections = {}
             current_key = None
             current_lines = []
@@ -668,17 +736,17 @@ def diagnose_can_network():
                     current_lines.append(line_s)
             if current_key:
                 sections[current_key] = current_lines
-            
+
             modprobe_lines = sections.get('MODPROBE', [])
             result['kernel_support'] = any('OK' in l for l in modprobe_lines)
             if not result['kernel_support']:
                 result['errors'].append('内核CAN模块加载失败')
-            
+
             lsusb_lines = sections.get('LSUSB', [])
             if lsusb_lines:
                 result['can_device_exists'] = True
                 result['can_device_info'] = '\n'.join(lsusb_lines)
-            
+
             can0_lines = sections.get('CAN0', [])
             can0_output = '\n'.join(can0_lines)
             if can0_lines and 'can0' in can0_output and 'does not exist' not in can0_output:
@@ -701,7 +769,7 @@ def diagnose_can_network():
                 result['kernel_support'] = 'OK' in modprobe_result.stdout
             except:
                 result['errors'].append('内核CAN模块检查失败')
-            
+
             try:
                 lsusb_result = run_cmd('lsusb | grep -E "(GS_USB|CAN|UTOC|can)" || echo ""', shell=True, capture_output=True, text=True)
                 if lsusb_result.stdout.strip():
@@ -709,7 +777,7 @@ def diagnose_can_network():
                     result['can_device_info'] = lsusb_result.stdout.strip()
             except:
                 pass
-            
+
             try:
                 can0_result = run_cmd('ip link show can0 2>&1', shell=True, capture_output=True, text=True)
                 if 'can0' in can0_result.stdout and 'does not exist' not in can0_result.stdout:
@@ -728,9 +796,9 @@ def diagnose_can_network():
                     result['errors'].append('can0接口不存在')
             except:
                 result['errors'].append('can0接口检查失败')
-        
+
         return jsonify(result)
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -739,8 +807,11 @@ def diagnose_can_network():
 def repair_can_network():
     """修复CAN网络"""
     try:
-        data = request.json or {}
-        bitrate = data.get('bitrate', 1000000)
+        data = request.get_json(silent=True) or {}
+        try:
+            bitrate = int(data.get('bitrate', 1000000))
+        except (TypeError, ValueError):
+            return jsonify({'error': '速率必须是数字'}), 400
         txqueuelen = data.get('txqueuelen', 1024)
 
         if bitrate not in CAN_BITRATES:
@@ -753,9 +824,9 @@ def repair_can_network():
             return jsonify({'error': '缓存大小必须是数字'}), 400
         if txqueuelen < 128 or txqueuelen > 8192:
             return jsonify({'error': '缓存大小范围: 128-8192'}), 400
-        
+
         messages = []
-        
+
         try:
             run_cmd('sudo modprobe can', shell=True, capture_output=True)
             run_cmd('sudo modprobe can_raw', shell=True, capture_output=True)
@@ -763,29 +834,29 @@ def repair_can_network():
             messages.append('CAN内核模块已加载')
         except:
             messages.append('CAN内核模块加载失败')
-        
+
         lsusb_result = run_cmd(
             'lsusb | grep -E "(GS_USB|CAN|UTOC)" || echo ""',
             shell=True, capture_output=True, text=True
         )
-        
+
         if not lsusb_result.stdout.strip():
             return jsonify({
                 'success': False,
                 'error': '未检测到USB CAN设备，请检查硬件连接',
                 'messages': messages
             }), 400
-        
+
         try:
             sudo_mkdir(CAN_NETWORK_DIR)
-            
+
             if bitrate >= 1000000:
                 bitrate_str = f"{bitrate // 1000000}M"
             elif bitrate >= 1000:
                 bitrate_str = f"{bitrate // 1000}K"
             else:
                 bitrate_str = str(bitrate)
-            
+
             config_content = f"""[Match]
 Name=can*
 
@@ -793,7 +864,7 @@ Name=can*
 BitRate={bitrate_str}
 """
             sudo_write_file(os.path.join(CAN_NETWORK_DIR, '99-can.network'), config_content)
-            
+
             link_content = f"""[Match]
 OriginalName=can*
 
@@ -801,22 +872,22 @@ OriginalName=can*
 TxQueueLength={txqueuelen}
 """
             sudo_write_file(os.path.join(CAN_NETWORK_DIR, '99-can.link'), link_content)
-            
+
             messages.append(f'CAN配置文件已创建（速率: {bitrate_str}）')
         except Exception as e:
             messages.append(f'配置文件创建失败: {str(e)}')
-        
+
         try:
             run_cmd('sudo systemctl restart systemd-networkd', shell=True, capture_output=True, check=True)
             messages.append('systemd-networkd已重启')
         except:
             messages.append('systemd-networkd重启失败')
-        
+
         time.sleep(2)
-        
+
         try:
             can0_check = run_cmd('ip link show can0 2>&1', shell=True, capture_output=True, text=True)
-            
+
             if 'does not exist' in can0_check.stdout:
                 messages.append('can0接口不存在，尝试手动创建...')
                 can_devs = run_cmd('ls /sys/bus/usb/devices/*/can* 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
@@ -826,13 +897,13 @@ TxQueueLength={txqueuelen}
                 messages.append('can0接口已启动')
         except Exception as e:
             messages.append(f'can0启动失败: {str(e)}')
-        
+
         return jsonify({
             'success': True,
             'messages': messages,
             'note': '修复完成，请刷新页面查看状态。如果仍有问题，请检查硬件连接或重启系统。'
         })
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -849,8 +920,10 @@ def handle_timezone():
         except:
             return jsonify({'timezone': 'Unknown'})
     else:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         new_timezone = data.get('timezone', 'Asia/Shanghai')
+        if not re.match(r'^[A-Za-z0-9_+./-]{1,80}$', str(new_timezone or '')):
+            return jsonify({'error': '时区格式无效'}), 400
         try:
             run_cmd(['sudo', 'timedatectl', 'set-timezone', new_timezone], check=True, capture_output=True)
             return jsonify({'success': True, 'message': f'时区已设置为 {new_timezone}'})
@@ -865,16 +938,16 @@ def manage_service(action):
     valid_actions = ['restart', 'stop', 'start', 'status']
     if action not in valid_actions:
         return jsonify({'error': '无效的操作'}), 400
-    
-    data = request.json
+
+    data = request.get_json(silent=True) or {}
     requested_service = data.get('service', '')
     service = _normalize_service_name(requested_service)
-    
+
     if not requested_service:
         return jsonify({'error': '未指定服务'}), 400
     if not service:
         return jsonify({'error': '不允许控制该服务'}), 400
-    
+
     try:
         if action == 'status':
             result = run_cmd(['systemctl', 'is-active', service], capture_output=True, text=True)

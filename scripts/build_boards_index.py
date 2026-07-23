@@ -61,17 +61,17 @@ def load_config_info(manufacturer, config_id):
 def analyze_mapping(mapping):
     """分析 klipper_Mapping.json 的结构"""
     drive_count = sum(1 for k in mapping if k.startswith('Drives'))
-    
+
     # 统计各类引脚
     heat_keys = [k for k in mapping if k.startswith('heat')]
     temp_keys = [k for k in mapping if k.startswith('temp')]
     fan_keys = [k for k in mapping if k.startswith('fan')]
     stop_keys = [k for k in mapping if k.startswith('stop')]
-    
+
     has_bed = 'bed-heat' in mapping or 'BED_OUT' in mapping
     has_probe = 'probe' in mapping
     has_servo = 'servo' in mapping
-    
+
     # 判断引脚类型（P格式 vs GPIO格式）
     pin_style = 'P'  # 默认
     for k, v in mapping.items():
@@ -81,7 +81,7 @@ def analyze_mapping(mapping):
         elif isinstance(v, dict) and isinstance(v.get('step_pin', ''), str) and v['step_pin'].startswith('gpio'):
             pin_style = 'gpio'
             break
-    
+
     return {
         'drive_count': drive_count,
         'heat_count': len(heat_keys),
@@ -108,33 +108,35 @@ def find_image(board_dir, board_name):
 
 def build_index():
     index = {}
-    
+    if not os.path.isdir(BOARDS_DIR):
+        raise FileNotFoundError(f'板卡数据目录不存在: {BOARDS_DIR}')
+
     # 目前只有 FLY 品牌
     manufacturer = 'FLY'
     index[manufacturer] = {'mainboards': {}, 'toolboards': {}}
-    
+
     # 处理主板
     for board_name in sorted(os.listdir(BOARDS_DIR)):
         board_dir = os.path.join(BOARDS_DIR, board_name)
         if not os.path.isdir(board_dir) or board_name == 'tool_board':
             continue
-        
+
         mapping_file = os.path.join(board_dir, 'klipper_Mapping.json')
         if not os.path.isfile(mapping_file):
             continue
-        
+
         with open(mapping_file, 'r', encoding='utf-8') as f:
             mapping = json.load(f)
-        
+
         info = analyze_mapping(mapping)
         config_id = BOARD_TO_CONFIG.get(board_name)
         config_info = load_config_info(manufacturer, config_id)
-        
+
         # 生成 board_id
         board_id = f'fly-{board_name.lower().replace("-pro", "pro").replace(" ", "-")}'
         if config_info:
             board_id = config_info['id']
-        
+
         # 确定连接方式
         connections = []
         if config_info:
@@ -146,9 +148,9 @@ def build_index():
                 connections = ['USB', 'CAN']
             else:
                 connections = ['USB']
-        
+
         image = find_image(board_dir, board_name)
-        
+
         board_data = {
             'name': config_info['name'] if config_info else f'FLY-{board_name}',
             'board_id': board_id,
@@ -167,9 +169,9 @@ def build_index():
             'image': image,
             'mapping_dir': f'board/{board_name}',
         }
-        
+
         index[manufacturer]['mainboards'][board_id] = board_data
-    
+
     # 处理工具板
     tool_dir = os.path.join(BOARDS_DIR, 'tool_board')
     if os.path.isdir(tool_dir):
@@ -177,23 +179,23 @@ def build_index():
             board_dir = os.path.join(tool_dir, board_name)
             if not os.path.isdir(board_dir):
                 continue
-            
+
             mapping_file = os.path.join(board_dir, 'klipper_Mapping.json')
             if not os.path.isfile(mapping_file):
                 continue
-            
+
             with open(mapping_file, 'r', encoding='utf-8') as f:
                 mapping = json.load(f)
-            
+
             info = analyze_mapping(mapping)
             config_id = TOOLBOARD_MAP.get(board_name)
             config_info = load_config_info(manufacturer, config_id)
-            
+
             board_id = config_info['id'] if config_info else f'fly-{board_name.lower()}'
-            
+
             connections = config_info.get('connections', ['CAN', 'USB']) if config_info else ['CAN', 'USB']
             image = find_image(board_dir, board_name)
-            
+
             board_data = {
                 'name': config_info['name'] if config_info else f'FLY-{board_name}',
                 'board_id': board_id,
@@ -212,12 +214,13 @@ def build_index():
                 'image': image,
                 'mapping_dir': f'board/tool_board/{board_name}',
             }
-            
+
             index[manufacturer]['toolboards'][board_id] = board_data
-    
+
+    os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
     with open(OUTPUT, 'w', encoding='utf-8') as f:
         json.dump(index, f, indent=2, ensure_ascii=False)
-    
+
     print(f'索引已生成: {OUTPUT}')
     print(f'  主板: {len(index[manufacturer]["mainboards"])} 块')
     print(f'  工具板: {len(index[manufacturer]["toolboards"])} 块')

@@ -11,6 +11,7 @@ import json
 import time
 import shlex
 import hashlib
+import threading
 
 from shared import (
     app, config, logger, BASE_DIR, BOARD_CONFIGS_DIR,
@@ -31,6 +32,8 @@ firmware_bp = Blueprint('firmware', __name__)
 MANIFEST_FILENAME = 'firmware-tool-manifest.json'
 DEFAULT_CANBUS_FREQUENCY = '1000000'
 CAN_IFACE_RE = re.compile(r'^can[\w.-]*$')
+_compile_lock = threading.Lock()
+_flash_lock = threading.Lock()
 
 
 def load_klipper_rules():
@@ -79,6 +82,13 @@ def _config_line(symbol):
     if not symbol:
         return ''
     return f'CONFIG_{symbol}=y'
+
+
+def _kconfig_string(value):
+    value = str(value or '').strip()
+    if '\n' in value or '\r' in value:
+        raise ValueError('Kconfig 字符串不能包含换行')
+    return value.replace('\\', '\\\\').replace('"', '\\"')
 
 
 def _truthy(value):
@@ -367,6 +377,11 @@ def _file_sha256(path):
         for chunk in iter(lambda: f.read(1024 * 1024), b''):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _firmware_download_name(path):
+    ext = os.path.splitext(str(path or ''))[1].lower()
+    return f'firmware{ext}' if ext in ('.bin', '.uf2', '.hex') else 'firmware.bin'
 
 
 def _klipper_commit(klipper_path):
@@ -1092,16 +1107,19 @@ def install_compile_dependencies():
 @firmware_bp.route('/api/firmware/compile', methods=['POST'])
 def compile_firmware():
     """编译Klipper固件 - 支持预设配置和自定义MCU（SSE 流式输出）"""
-    req_data = request.json  # 在请求上下文中提前捕获
+    req_data = request.get_json(silent=True) or {}  # 在请求上下文中提前捕获
     def _compile_stream():
+     if not _compile_lock.acquire(blocking=False):
+        yield f'data: {json.dumps({"error": "已有固件编译任务正在执行，请稍后再试"})}\n\n'
+        return
      try:
         data = req_data
         verbose_config_logs = _truthy(data.get('verbose_config_logs'))
-        
+
         raw_klipper_path = data.get('klipper_path', config.get('klipper_path', '~/klipper'))
         klipper_path = expand_klipper_path(raw_klipper_path)
         kconfig_klipper_path = expand_klipper_path(raw_klipper_path, force_local=True)
-        
+
         config_data = data.get('config')
         if config_data:
             mcu_arch = config_data.get('platform', config_data.get('平台', 'STM32'))
@@ -1136,7 +1154,7 @@ def compile_firmware():
         if not _is_safe_klipper_tree(klipper_path):
             yield f'data: {json.dumps({"error": f"Klipper目录不合法或不完整，已停止清理和编译: {klipper_path}"})}\n\n'
             return
-        
+
         try:
             config_lines, config_logs, mcu_info = _build_klipper_config_lines(
                 kconfig_klipper_path, mcu_arch, processor, crystal, bootloader_offset,
@@ -1149,8 +1167,9 @@ def compile_firmware():
         if verbose_config_logs:
             for log_line in config_logs:
                 yield f'data: [LOG] {log_line}\n\n'
-        
+
         if startup_pin:
+            startup_pin = _kconfig_string(startup_pin)
             is_rp2040 = 'RP2040' in processor or 'RP2350' in processor
             has_stm32_pin = bool(re.search(r'P[A-K]\d+', startup_pin, re.IGNORECASE))
             has_rp2040_pin = bool(re.search(r'gpio\d+', startup_pin, re.IGNORECASE))
@@ -1170,7 +1189,7 @@ def compile_firmware():
                 yield f'data: [LOG] 未设置启动引脚（使用空值）\n\n'
 
         run_cmd(f'cd {shlex.quote(klipper_path)} && rm -rf .config out', shell=True, capture_output=True)
-        
+
         config_content = '\n'.join(config_lines) + '\n'
         config_path = os.path.join(klipper_path, '.config')
         if is_ssh_mode():
@@ -1178,12 +1197,12 @@ def compile_firmware():
         else:
             with open(config_path, 'w') as f:
                 f.write(config_content)
-        
+
         if verbose_config_logs:
             for line in config_lines:
                 if 'INITIAL_PINS' in line or 'CONFIG_USB' in line or 'CONFIG_SERIAL' in line or 'CONFIG_CAN' in line:
                     yield f'data: [LOG] .config: {line}\n\n'
-        
+
         out_dir = os.path.join(klipper_path, 'out')
         if is_ssh_mode():
             run_cmd(f'mkdir -p {shlex.quote(out_dir)}', shell=True, capture_output=True)
@@ -1193,7 +1212,7 @@ def compile_firmware():
                 os.chmod(out_dir, 0o755)
             except:
                 pass
-        
+
         if verbose_config_logs:
             yield 'data: [LOG] 生成配置中...\n\n'
         olddefconfig_failed = False
@@ -1206,7 +1225,7 @@ def compile_firmware():
                 return
             else:
                 yield f'data: [LOG] {line}\n\n'
-        
+
         yield 'data: [LOG] 开始编译...\n\n'
         compile_ok = False
         for line in run_cmd_stream(f'cd {shlex.quote(klipper_path)} && make -j4', shell=True, timeout=300):
@@ -1217,21 +1236,21 @@ def compile_firmware():
                 return
             else:
                 yield f'data: [LOG] {line}\n\n'
-        
+
         if not compile_ok:
             yield f'data: {json.dumps({"error": "编译失败"})}\n\n'
             return
-        
+
         out_dir = os.path.join(klipper_path, 'out')
         firmware_files = ['klipper.bin', 'klipper.uf2']
         firmware_path = None
-        
+
         for fw_file in firmware_files:
             fw_path = os.path.join(out_dir, fw_file)
             if path_exists(fw_path):
                 firmware_path = fw_path
                 break
-        
+
         if firmware_path:
             try:
                 if is_ssh_mode():
@@ -1267,7 +1286,7 @@ def compile_firmware():
                             _shutil.chown(config_file, user=owner_name, group=group_name)
             except Exception as e:
                 logger.warning(f"修改文件权限失败: {e}")
-            
+
             firmware_size = get_file_size(firmware_path)
             if firmware_size < 1024:
                 size_str = f'{firmware_size} bytes'
@@ -1290,17 +1309,19 @@ def compile_firmware():
                 data, config_data, compile_values
             )
             manifest_path = _write_manifest(klipper_path, manifest)
-            
+
             yield f'data: {json.dumps({"success": True, "message": "编译成功", "firmware_path": firmware_path, "firmware_size": size_str, "firmware_size_bytes": firmware_size, "manifest_path": manifest_path, "manifest": manifest})}\n\n'
             return
         else:
             yield f'data: {json.dumps({"success": False, "error": "编译失败：未找到固件文件"})}\n\n'
             return
-            
+
      except subprocess.TimeoutExpired:
             yield f'data: {json.dumps({"error": "编译超时"})}\n\n'
      except Exception as e:
             yield f'data: {json.dumps({"error": str(e)})}\n\n'
+     finally:
+            _compile_lock.release()
     return Response(_compile_stream(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
@@ -1322,7 +1343,7 @@ def get_firmware_manifest():
 def get_firmware_flash_plan():
     """根据 manifest、设备和用户选择生成烧录推荐与预检结果"""
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
         manifest = _load_manifest(klipper_path)
         firmware_path = data.get('firmware_path') or ((manifest or {}).get('firmware') or {}).get('path', '')
@@ -1341,20 +1362,20 @@ def download_firmware():
     try:
         firmware_path = request.args.get('path', '')
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
-        
+
         if not firmware_path:
             firmware_path = os.path.join(klipper_path, 'out', 'klipper.bin')
-        
+
         firmware_path = expand_klipper_path(firmware_path)
-        
+
         if not _path_under(firmware_path, _allowed_firmware_roots(klipper_path)):
             return jsonify({'error': '非法路径'}), 403
-        
+
         if not path_exists(firmware_path):
             return jsonify({'error': '固件文件不存在'}), 404
-        
+
         local_firmware_path = download_firmware_from_remote(firmware_path)
-        return send_file(local_firmware_path, as_attachment=True, download_name='firmware.bin')
+        return send_file(local_firmware_path, as_attachment=True, download_name=_firmware_download_name(firmware_path))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1364,7 +1385,7 @@ def detect_devices():
     """检测设备"""
     try:
         devices = []
-        
+
         if is_ssh_mode():
             cmd = (
                 "echo '===BY_ID==='; ls /dev/serial/by-id/* 2>/dev/null; "
@@ -1378,7 +1399,7 @@ def detect_devices():
             )
             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=15)
             output = result.stdout or ''
-            
+
             sections = {}
             current_key = None
             current_lines = []
@@ -1393,27 +1414,27 @@ def detect_devices():
                     current_lines.append(line_s)
             if current_key:
                 sections[current_key] = current_lines
-            
+
             for line in sections.get('BY_ID', []):
                 if '/dev/serial/by-id/' in line:
                     device_id = line.strip()
                     short_name = os.path.basename(device_id)
                     devices.append({'id': device_id, 'name': short_name, 'type': 'usb_serial'})
-            
+
             for line in sections.get('ACM', []):
                 if line.strip():
                     device_id = line.strip()
                     short_name = os.path.basename(device_id)
                     if not any(d['id'] == device_id for d in devices):
                         devices.append({'id': device_id, 'name': f'{short_name} (ACM)', 'type': 'usb_acm'})
-            
+
             for line in sections.get('USB', []):
                 if line.strip():
                     device_id = line.strip()
                     short_name = os.path.basename(device_id)
                     if not any(d['id'] == device_id for d in devices):
                         devices.append({'id': device_id, 'name': f'{short_name} (USB)', 'type': 'usb_ftdi'})
-            
+
             dfu_lines = sections.get('DFU', [])
             seen_dfu = set()
             found_dfu = False
@@ -1438,13 +1459,13 @@ def detect_devices():
                     display_parts.append(f'SN:{serial}')
                 devices.append({'id': f'dfu:{vid_pid}', 'name': ' '.join(display_parts), 'type': 'dfu', 'vid_pid': vid_pid, 'serial': serial, 'devnum': devnum})
                 found_dfu = True
-            
+
             if not found_dfu:
                 for line in sections.get('LSUSB_DFU', []):
                     for vidpid, chip_name in DFU_KNOWN_DEVICES.items():
                         if vidpid in line.lower():
                             devices.append({'id': f'dfu:{vidpid}', 'name': f'DFU Device ({chip_name} {vidpid})', 'type': 'dfu', 'vid_pid': vidpid, 'serial': '', 'devnum': ''})
-            
+
             lsblk_lines = sections.get('LSBLK', [])
             if lsblk_lines:
                 for line in lsblk_lines:
@@ -1465,7 +1486,7 @@ def detect_devices():
                             device_id = line.strip()
                             short_name = os.path.basename(device_id)
                             devices.append({'id': device_id, 'name': short_name, 'type': 'usb_serial'})
-                
+
                 acm_result = run_cmd('ls /dev/ttyACM* 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
                 if acm_result.stdout:
                     for line in acm_result.stdout.strip().split('\n'):
@@ -1474,7 +1495,7 @@ def detect_devices():
                             short_name = os.path.basename(device_id)
                             if not any(d['id'] == device_id for d in devices):
                                 devices.append({'id': device_id, 'name': f'{short_name} (ACM)', 'type': 'usb_acm'})
-                
+
                 usb_result = run_cmd('ls /dev/ttyUSB* 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
                 if usb_result.stdout:
                     for line in usb_result.stdout.strip().split('\n'):
@@ -1485,7 +1506,7 @@ def detect_devices():
                                 devices.append({'id': device_id, 'name': f'{short_name} (USB)', 'type': 'usb_ftdi'})
             except:
                 pass
-            
+
             try:
                 dfu_result = run_cmd('sudo dfu-util -l 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
                 found_dfu = False
@@ -1520,7 +1541,7 @@ def detect_devices():
                             found_dfu = True
             except:
                 pass
-            
+
             try:
                 lsblk_output = run_cmd('lsblk -o NAME,MODEL 2>/dev/null | grep -i "RP2"', shell=True, capture_output=True, text=True)
                 if lsblk_output.stdout.strip():
@@ -1533,7 +1554,7 @@ def detect_devices():
                         devices.append({'id': 'rp2040_boot', 'name': 'RP2040 UF2 (USB 2e8a)'})
             except:
                 pass
-        
+
         return jsonify({'devices': _annotate_devices(devices)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1552,8 +1573,11 @@ def scan_can_devices():
 @firmware_bp.route('/api/firmware/flash', methods=['POST'])
 def flash_firmware():
     """烧录固件（SSE 流式输出）"""
-    req_data = request.json
+    req_data = request.get_json(silent=True) or {}
     def _flash_stream():
+     if not _flash_lock.acquire(blocking=False):
+        yield f'data: {json.dumps({"error": "已有固件烧录任务正在执行，请稍后再试"})}\n\n'
+        return
      try:
         data = req_data
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
@@ -1572,7 +1596,7 @@ def flash_firmware():
         can_iface = data.get('can_iface', 'can0')
         if not _is_valid_can_iface(can_iface):
             can_iface = 'can0'
-        
+
         if not firmware_path:
             firmware_uf2 = os.path.join(klipper_path, 'out', 'klipper.uf2')
             firmware_bin = os.path.join(klipper_path, 'out', 'klipper.bin')
@@ -1592,21 +1616,21 @@ def flash_firmware():
             return
         for warning in plan.get('warnings', []):
             yield f'data: [LOG] 预检提示: {warning}\n\n'
-        
+
         if not path_exists(firmware_path):
             yield f'data: {json.dumps({"error": f"固件文件不存在: {firmware_path}"})}\n\n'
             return
         if not _path_under(firmware_path, _allowed_firmware_roots(klipper_path)):
             yield f'data: {json.dumps({"error": "固件路径不在允许目录内"})}\n\n'
             return
-        
+
         if is_ssh_mode() and os.path.exists(firmware_path):
             firmware_path = upload_bl_firmware_for_remote(firmware_path)
-        
+
         if flash_mode == 'TF':
             yield f'data: {json.dumps({"success": True, "message": "TF卡模式: 请下载固件并复制到TF卡", "download_url": "/api/firmware/download", "mode": "tf_card"})}\n\n'
             return
-        
+
         if flash_mode == 'DFU':
             if device == 'rp2040_boot':
                 flash_mode = 'UF2'
@@ -1658,19 +1682,19 @@ def flash_firmware():
                 flash_result = _run_dfu()
                 output = flash_result.stdout + flash_result.stderr
                 returncode = flash_result.returncode
-                
+
                 if returncode == 0:
                     yield f'data: {json.dumps({"success": True, "message": "烧录成功", "output": output})}\n\n'
                     return
                 else:
                     yield f'data: {json.dumps({"success": False, "error": "烧录失败", "output": output})}\n\n'
                     return
-        
+
         if flash_mode in ('KAT', 'CAN'):
             klipper_owner, home_dir = get_klipper_owner()
             python_bin = get_klipper_python_bin(home_dir)
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
-            
+
             import logging
             _prefix = f'{can_iface}:'
             _is_can_uuid = bool(re.match(r'^[a-fA-F0-9]{8,32}$', device.replace(_prefix, '').replace('can0:', '')))
@@ -1680,7 +1704,7 @@ def flash_firmware():
                     if pfx in can_uuid:
                         can_uuid = can_uuid.replace(pfx, '')
                         break
-                
+
                 if is_fast_ssh_mode():
                     logging.info('FAST-SSH 模式：使用 CAN 直接烧录')
                     fast_flashtool = os.path.join(home_dir, 'klipper', 'lib', 'katapult', 'flashtool.py')
@@ -1716,7 +1740,7 @@ def flash_firmware():
                             if katapult_device:
                                 break
                         logging.info(f'轮询中... ({_+1}/20)')
-                    
+
                     if katapult_device:
                         new_device = katapult_device
                         logging.info(f'找到设备：{new_device}')
@@ -1741,11 +1765,11 @@ def flash_firmware():
                 cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -d {shlex.quote(usb_device)} -f {shlex.quote(firmware_path)}'
                 logging.info(f'USB 烧录命令：{cmd}')
                 result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
-                    
+
             output = result.stdout + result.stderr
             returncode = result.returncode
             logging.info(f'烧录结果：returncode={returncode}, output={output[:200]}')
-            
+
         elif flash_mode == 'UF2':
             rp2040_flash_tool = os.path.join(klipper_path, 'lib/rp2040_flash/rp2040_flash')
             if not path_exists(rp2040_flash_tool):
@@ -1762,18 +1786,20 @@ def flash_firmware():
         else:
             yield f'data: {json.dumps({"error": f"不支持的烧录方式: {flash_mode}"})}\n\n'
             return
-        
+
         if returncode == 0:
             yield f'data: {json.dumps({"success": True, "message": "烧录成功", "output": output})}\n\n'
             return
         else:
             yield f'data: {json.dumps({"success": False, "error": "烧录失败", "output": output})}\n\n'
             return
-            
+
      except subprocess.TimeoutExpired:
             yield f'data: {json.dumps({"error": "烧录超时"})}\n\n'
      except Exception as e:
             yield f'data: {json.dumps({"error": str(e)})}\n\n'
+     finally:
+            _flash_lock.release()
     return Response(_flash_stream(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
@@ -1781,8 +1807,11 @@ def flash_firmware():
 @firmware_bp.route('/api/firmware/install-host', methods=['POST'])
 def install_host_firmware():
     """安装固件到主板 MCU（通过 HOST 设备烧录）（SSE 流式输出）"""
-    req_data = request.json
+    req_data = request.get_json(silent=True) or {}
     def _install_stream():
+     if not _flash_lock.acquire(blocking=False):
+        yield f'data: {json.dumps({"error": "已有固件烧录任务正在执行，请稍后再试"})}\n\n'
+        return
      try:
         data = req_data
         firmware_path = data.get('firmware_path', '')
@@ -1797,7 +1826,7 @@ def install_host_firmware():
         if not path_exists(firmware_path):
             yield f'data: {json.dumps({"error": f"固件文件不存在: {firmware_path}"})}\n\n'
             return
-        
+
         if is_fast_ssh_mode():
             flash_cmd = f'fly-flash -d auto -h -f {shlex.quote(firmware_path)}'
             logger.info(f'HOST 烧录命令: {flash_cmd}')
@@ -1812,7 +1841,7 @@ def install_host_firmware():
                 logger.warning(f'Klipper 重启失败: {restart_output}')
             yield f'data: {json.dumps({"success": True, "message": f"固件烧录成功: {firmware_path}", "flash_output": output, "restart_output": restart_output, "method": "fly-flash"})}\n\n'
             return
-        
+
         target_path = os.path.join(klipper_path, 'out', 'klipper.bin')
         if is_ssh_mode():
             run_cmd(f'mkdir -p {shlex.quote(os.path.dirname(target_path))}', shell=True, capture_output=True)
@@ -1824,12 +1853,14 @@ def install_host_firmware():
             import shutil
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             shutil.copy2(firmware_path, target_path)
-        
+
         yield f'data: {json.dumps({"success": True, "message": f"固件已复制到 {target_path}", "target_path": target_path, "method": "copy"})}\n\n'
         return
-        
+
      except Exception as e:
             yield f'data: {json.dumps({"error": str(e)})}\n\n'
+     finally:
+            _flash_lock.release()
     return Response(_install_stream(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
@@ -1843,7 +1874,7 @@ def get_host_firmware_info():
         bl_offset = request.args.get('bl_offset', '')
         firmware_dir = '/usr/lib/firmware/klipper'
         firmware_files = []
-        
+
         if is_ssh_mode():
             result = run_cmd(f'ls -la {shlex.quote(firmware_dir)}/ 2>/dev/null', shell=True, capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
@@ -1864,7 +1895,7 @@ def get_host_firmware_info():
                         except:
                             size = 0
                         firmware_files.append({'name': name, 'path': full_path, 'size': size})
-        
+
         for fw in firmware_files:
             m = re.match(r'^([a-z0-9]+)-(\d+)k-(\w+?)(?:-(\w+))?\.bin$', fw['name'])
             if m:
@@ -1874,12 +1905,12 @@ def get_host_firmware_info():
                 fw['fw_speed'] = m.group(4) or ''
             else:
                 fw['fw_mcu'] = fw['fw_bl'] = fw['fw_comm'] = fw['fw_speed'] = ''
-        
+
         best_match = None
         best_score = 0
         comm_map = {'usb': 'usb', 'serial': 'serial', 'can': 'usbcan', 'usbcanbridge': 'usbcan'}
         target_comm = comm_map.get(comm_type, comm_type)
-        
+
         for fw in firmware_files:
             if not fw.get('fw_mcu'):
                 continue
@@ -1895,7 +1926,7 @@ def get_host_firmware_info():
             if score > best_score:
                 best_score = score
                 best_match = fw
-        
+
         return jsonify({
             'firmware_dir': firmware_dir,
             'firmware_files': firmware_files,
@@ -1917,7 +1948,7 @@ def remote_browse():
                 path = '~'
             else:
                 path = os.path.expanduser('~')
-        
+
         if path.startswith('~'):
             if is_ssh_mode():
                 manager = SSHManager.get_instance()
@@ -1930,7 +1961,7 @@ def remote_browse():
 
         if not _path_under(path, _allowed_browse_roots()):
             return jsonify({'error': '非法路径'}), 403
-        
+
         entries = []
         if is_ssh_mode():
             manager = SSHManager.get_instance()
@@ -1965,10 +1996,10 @@ def remote_browse():
                     full_path = os.path.join(abs_path, name)
                     is_dir = os.path.isdir(full_path)
                     entries.append({'name': name, 'is_dir': is_dir, 'size': os.path.getsize(full_path) if not is_dir else 0, 'path': full_path})
-        
+
         entries.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
         parent = os.path.dirname(path.rstrip('/')) if path != '/' and path != '~' else None
-        
+
         return jsonify({'path': path, 'parent': parent, 'entries': entries})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2027,7 +2058,7 @@ def get_bl_address_options():
 def flash_bl_firmware():
     """烧录BL固件 (Katapult/Bootloader)"""
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True) or {}
         bl_firmware_path = data.get('bl_firmware_path', '')
         device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
@@ -2039,7 +2070,7 @@ def flash_bl_firmware():
 
         if dfu_offset:
             dfu_address = _application_address(platform_key, dfu_offset)
-        
+
         if not bl_firmware_path or not os.path.exists(bl_firmware_path):
             return jsonify({'error': f'BL固件文件不存在: {bl_firmware_path}'}), 400
         if not _path_under(bl_firmware_path, [os.path.join(BASE_DIR, 'board_configs')]):
@@ -2047,10 +2078,10 @@ def flash_bl_firmware():
 
         if flash_mode in ('DFU', 'st-flash', 'openocd') and not _valid_flash_address(dfu_address):
             return jsonify({'error': f'烧录地址无效: {dfu_address}'}), 400
-        
+
         if is_ssh_mode():
             bl_firmware_path = upload_bl_firmware_for_remote(bl_firmware_path)
-        
+
         if flash_mode == 'DFU':
             if device and device != 'dfu':
                 dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
@@ -2115,7 +2146,7 @@ def flash_bl_firmware():
                 return None, r
 
             _, result = _run_dfu_flash()
-            
+
         elif flash_mode == 'UF2':
             klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
             rp2040_flash_tool = os.path.join(klipper_path, 'lib/rp2040_flash/rp2040_flash')
@@ -2127,7 +2158,7 @@ def flash_bl_firmware():
             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
             if result.returncode == 0 and 'No rp2040 in BOOTSEL mode was found' in (result.stdout + result.stderr):
                 return jsonify({'success': False, 'error': '未找到处于 BOOTSEL 模式的 RP2040 设备', 'output': result.stdout + result.stderr}), 500
-            
+
         elif flash_mode == 'KAT':
             klipper_owner, home_dir = get_klipper_owner()
             python_bin = get_klipper_python_bin(home_dir)
@@ -2139,23 +2170,23 @@ def flash_bl_firmware():
                 f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -f {shlex.quote(bl_firmware_path)}'
             )
             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
-            
+
         elif flash_mode == 'st-flash':
             stflash_cmd = f'sudo st-flash --reset write {shlex.quote(bl_firmware_path)} {shlex.quote(dfu_address)}'
             result = run_cmd(stflash_cmd, shell=True, capture_output=True, text=True, timeout=60)
-            
+
         elif flash_mode == 'openocd':
             openocd_program = f'program {bl_firmware_path} {dfu_address} verify reset exit'
             openocd_cmd = f'sudo openocd -f interface/stlink.cfg -f target/stm32f1x.cfg -c {shlex.quote(openocd_program)}'
             result = run_cmd(openocd_cmd, shell=True, capture_output=True, text=True, timeout=120)
-            
+
         else:
             return jsonify({'error': f'不支持的BL烧录方式: {flash_mode}'}), 400
-        
+
         if result.returncode == 0:
             return jsonify({'success': True, 'message': 'BL固件烧录成功', 'output': result.stdout + result.stderr})
         else:
             return jsonify({'success': False, 'error': 'BL固件烧录失败', 'output': result.stdout + result.stderr}), 500
-            
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500

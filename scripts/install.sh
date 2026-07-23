@@ -34,20 +34,20 @@ if [ "$IS_FAST" = true ]; then
         exit 1
     fi
     CURRENT_USER="root"
-    
+
     # Fast系统必须安装到/data目录
     PROJECT_DIR="/data/Firmware-Tool"
     echo -e "${YELLOW}Fast系统: 项目将安装到 $PROJECT_DIR${NC}"
 else
     # 普通系统
     PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-    
+
     # 检查root权限
     if [ "$EUID" -ne 0 ]; then
         echo -e "${RED}请使用sudo运行此脚本${NC}"
         exit 1
     fi
-    
+
     # 获取当前用户（非root）
     CURRENT_USER=${SUDO_USER:-$USER}
     if [ "$CURRENT_USER" = "root" ]; then
@@ -101,9 +101,16 @@ cat > "$PROJECT_DIR/data/config.json" << EOF
   "port": $PORT,
   "bind_host": "0.0.0.0",
   "klipper_path": "~/klipper",
+  "katapult_path": "~/katapult",
   "json_repo_url": "",
   "last_json_update": null,
+  "moonraker_host": "127.0.0.1",
+  "moonraker_port": 7125,
   "connection_mode": "local",
+  "ssh_host": "",
+  "ssh_port": 22,
+  "ssh_user": "",
+  "sudo_mode": "password",
   "allowed_origins": [],
   "api_token": "$API_TOKEN",
   "require_csrf": true
@@ -193,11 +200,18 @@ echo "检查 Python 源文件语法..."
 SYNTAX_OK=true
 for pyfile in "$PROJECT_DIR"/src/*.py; do
     [ -f "$pyfile" ] || continue
-    $PYTHON3_BIN -c "import ast; ast.parse(open('$pyfile').read())" 2>/dev/null || {
+    if ! $PYTHON3_BIN - "$pyfile" 2>/dev/null <<'PY'
+import ast
+import sys
+
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    ast.parse(f.read(), filename=sys.argv[1])
+PY
+    then
         echo -e "${RED}语法错误: $pyfile${NC}"
         $PYTHON3_BIN -m py_compile "$pyfile" 2>&1 || true
         SYNTAX_OK=false
-    }
+    fi
 done
 if [ "$SYNTAX_OK" = false ]; then
     echo -e "${RED}存在语法错误，请修复后重试。常见原因: Python < 3.12 不支持 f-string 内使用 \\n${NC}"

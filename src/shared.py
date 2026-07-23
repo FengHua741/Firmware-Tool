@@ -86,8 +86,11 @@ DEFAULT_CONFIG = {
     'port': 9999,
     'bind_host': '0.0.0.0',
     'klipper_path': '~/klipper',
+    'katapult_path': '~/katapult',
     'json_repo_url': '',  # JSON配置仓库地址
     'last_json_update': None,
+    'moonraker_host': '127.0.0.1',
+    'moonraker_port': 7125,
     # SSH 远程连接配置
     'connection_mode': 'local',  # 'local', 'ssh' 或 'fast-ssh'
     'ssh_host': '',
@@ -104,7 +107,7 @@ def load_config():
     """加载配置"""
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH, 'r') as f:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 # 合并默认配置
                 for key, value in DEFAULT_CONFIG.items():
@@ -118,8 +121,8 @@ def load_config():
 def save_config(config):
     """保存配置"""
     try:
-        with open(CONFIG_PATH, 'w') as f:
-            json.dump(config, f, indent=2)
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
         logger.error(f"保存配置失败: {e}")
@@ -156,7 +159,7 @@ def require_api_token():
 
     token = os.environ.get('FIRMWARE_TOOL_API_TOKEN') or config.get('api_token') or ''
     supplied = request.headers.get('X-API-Token') or request.args.get('token') or ''
-    if token and supplied == token:
+    if token and secrets.compare_digest(supplied, token):
         return None
 
     require_csrf = config.get('require_csrf', True)
@@ -227,7 +230,7 @@ def get_klipper_owner(klipper_path=None):
         if ssh_user == 'root':
             return 'root', '/root'
         return ssh_user, f'/home/{ssh_user}'
-    
+
     # 本地模式
     if klipper_path.startswith('~'):
         # /data/klipper 优先：FAST/嵌入式系统的常见安装路径
@@ -267,7 +270,7 @@ def get_klipper_owner(klipper_path=None):
 
 def expand_klipper_path(path, force_local=False):
     """展开 Klipper 路径，处理 systemd root 运行时 ~ 扩展问题
-    
+
     Args:
         path: 路径字符串，支持 ~ 前缀
         force_local: 强制使用本地路径解析（用于 Kconfig 解析等需要本地文件的场景）
@@ -372,16 +375,16 @@ def sudo_write_file(path, content):
         manager = SSHManager.get_instance()
         from ssh_manager import load_credential
         sudo_pwd = load_credential('sudo_password') or load_credential('ssh_password') or ''
-        tmp_path = '/tmp/fwtool_write_tmp'
+        tmp_path = f'/tmp/fwtool_write_{secrets.token_hex(12)}'
         # 第1步：写入临时文件（无需sudo）
-        manager.exec_command(f'echo {encoded} | base64 -d > {tmp_path}', timeout=10, inject_sudo=False)
+        manager.exec_command(f'echo {shlex.quote(encoded)} | base64 -d > {shlex.quote(tmp_path)}', timeout=10, inject_sudo=False)
         # 第2步：sudo cp 到目标
         if sudo_pwd:
-            result = manager.exec_command(f'echo {shlex.quote(sudo_pwd)} | sudo -S cp {tmp_path} {shlex.quote(path)}', timeout=10, inject_sudo=False)
+            result = manager.exec_command(f'echo {shlex.quote(sudo_pwd)} | sudo -S cp {shlex.quote(tmp_path)} {shlex.quote(path)}', timeout=10, inject_sudo=False)
         else:
-            result = manager.exec_command(f'sudo cp {tmp_path} {shlex.quote(path)}', timeout=10, inject_sudo=False)
+            result = manager.exec_command(f'sudo cp {shlex.quote(tmp_path)} {shlex.quote(path)}', timeout=10, inject_sudo=False)
         # 清理临时文件
-        manager.exec_command(f'rm -f {tmp_path}', timeout=5, inject_sudo=False)
+        manager.exec_command(f'rm -f {shlex.quote(tmp_path)}', timeout=5, inject_sudo=False)
         if result.returncode != 0:
             raise Exception(f'写入文件失败 {path}: {result.stderr}')
     else:

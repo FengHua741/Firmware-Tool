@@ -113,7 +113,7 @@ def get_klipper_platforms():
             'mcu_count': len(data['mcus']),
             'flash_modes': data.get('flash_modes', [])
         })
-    
+
     return jsonify({
         'success': True,
         'platforms': platforms
@@ -140,14 +140,14 @@ def get_klipper_mcus(platform):
                     'success': False,
                     'error': f'未找到平台: {platform}'
                 }), 404
-    
+
     platform = platform_key
     if platform not in klipper_mcu_db:
         return jsonify({
             'success': False,
             'error': f'未找到平台: {platform}'
         }), 404
-    
+
     data = klipper_mcu_db[platform]
     mcus = []
     for mcu_id, mcu_info in data['mcus'].items():
@@ -158,7 +158,7 @@ def get_klipper_mcus(platform):
             'bl_offsets': mcu_info.get('bl_offsets', []),
             'connections': mcu_info.get('connections', [])
         })
-    
+
     return jsonify({
         'success': True,
         'platform': platform,
@@ -175,7 +175,7 @@ def get_klipper_mcu_info(mcu_id):
     """获取特定 MCU 的详细信息"""
     init_klipper_mcu_db()
     mcu_id = mcu_id.lower()
-    
+
     for platform, data in klipper_mcu_db.items():
         if mcu_id in data['mcus']:
             mcu = data['mcus'][mcu_id]
@@ -188,7 +188,7 @@ def get_klipper_mcu_info(mcu_id):
                 'flash_modes': data.get('flash_modes', []),
                 'connections': data.get('connections', [])
             })
-    
+
     return jsonify({
         'success': False,
         'error': f'未找到 MCU: {mcu_id}'

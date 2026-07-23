@@ -52,7 +52,7 @@
                 <div class="page-header">
                     <h2>系统资源</h2>
                 </div>
-                
+
                 <div class="resource-grid">
                     <!-- SSH 连接状态栏 -->
                     <div id="sshConnectionBar" style="display:none; grid-column: 1 / -1; margin-bottom: 8px;">
@@ -220,7 +220,7 @@
                                     </select>
                                 </div>
                             </div>
-                            
+
                             <!-- 预设配置的高级选项 -->
                             <div id="compilePresetAdvanced" style="display:none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #e9ecef;">
                                 <div class="form-row">
@@ -282,7 +282,7 @@
                                     </select>
                                 </div>
                             </div>
-                            
+
                             <!-- 启动引脚 -->
                             <div class="form-row">
                                 <div class="form-group" style="flex: 2;">
@@ -299,7 +299,7 @@
                             <button class="btn btn-success btn-lg" onclick="compileFirmware()">🔨 编译固件</button>
                             <button class="btn btn-secondary" onclick="resetCompileForm()">🔄 重置</button>
                         </div>
-                        
+
                         <!-- 编译结果 -->
                         <div id="compileResult" class="compile-result" style="display:none; margin-top: 15px;">
                             <div class="result-box"></div>
@@ -337,7 +337,7 @@
                                 </select>
                             </div>
                         </div>
-                        
+
                         <!-- TF卡烧录提示 -->
                         <div id="tfCardSection" class="tf-card-info" style="display:none; margin: 15px 0; padding: 15px; background: #e3f2fd; border-radius: 8px; border-left: 4px solid #2196f3;">
                             <h4 style="margin: 0 0 10px 0; color: #1976d2;">💾 TF卡烧录说明</h4>
@@ -346,7 +346,7 @@
                             <p style="margin: 5px 0; color: #424242;">3. 将 TF 卡插入主板，重新上电即可自动烧录</p>
                             <button class="btn btn-primary" onclick="downloadFirmwareForTF()" style="margin-top: 10px;">📥 下载 firmware.bin</button>
                         </div>
-                        
+
                         <!-- HOST 固件源选择 (仅在HOST烧录模式显示) -->
                         <div id="hostFirmwareSourceCard" style="display:none; margin: 15px 0; padding: 15px; background: #e8f5e9; border-radius: 8px; border-left: 4px solid #4caf50;">
                             <h4 style="margin: 0 0 12px 0; color: #2e7d32;">HOST 固件源</h4>
@@ -378,7 +378,7 @@
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div class="form-row" style="margin-top: 15px;">
                             <div id="flashPlanHint" style="display:none; width:100%; padding:10px 12px; border-radius:6px; background:#eef7ff; border-left:4px solid #2196f3; color:#263238; font-size:13px;"></div>
                         </div>
@@ -386,7 +386,7 @@
                         <div class="form-row" style="margin-top: 15px;">
                             <button class="btn btn-primary btn-lg" onclick="flashFirmware()" id="flashFirmwareBtn">⚡ 烧录固件</button>
                         </div>
-                        
+
                         <div id="flashResult" class="flash-result" style="display:none; margin-top: 15px;">
                             <div class="result-box"></div>
                         </div>
@@ -453,7 +453,7 @@
                 <div class="page-header">
                     <h2>🔄 固件批量更新</h2>
                 </div>
-                
+
                 <!-- 主板配置选择 -->
                 <div class="card">
                     <div class="card-header">
@@ -485,7 +485,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- 可更新配置列表 -->
                 <div class="card">
                     <div class="card-header">
@@ -513,7 +513,7 @@
                                 <button class="btn btn-primary btn-lg" onclick="flashAllSelected()">⚡ 一键更新</button>
                             </div>
                         </div>
-                        
+
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">📋 已选中 (<span id="selectedUpdateCount">0</span>)</label>
@@ -538,7 +538,7 @@
                             </div>
                             <p id="batchUpdateStatus">准备更新...</p>
                         </div>
-                        
+
                         <div id="batchUpdateResults" class="update-results">
                             <!-- 动态生成更新结果 -->
                         </div>
@@ -556,10 +556,10 @@
                             <input type="hidden" id="updateSettingConfigId">
                             <input type="hidden" id="updateSettingBoardConfigId">
                             <input type="hidden" id="updateSettingManufacturer">
-                            
+
                             <!-- 关联的主板配置信息 -->
                             <div id="linkedBoardConfigInfo"></div>
-                            
+
                             <div class="form-row">
                                 <div class="form-group">
                                     <label class="form-label">启用固件更新</label>
@@ -569,7 +569,7 @@
                                     </select>
                                 </div>
                             </div>
-                            
+
                             <div id="updateSettingOptions">
                                 <div class="form-row">
                                     <div class="form-group" style="flex: 2;">
@@ -587,7 +587,7 @@
                                         <p class="help-text" id="modeHelpText" style="margin-top:5px;font-size:12px;color:#6c757d;"></p>
                                     </div>
                                 </div>
-                                
+
                                 <div class="form-row" id="deviceIdRow">
                                     <div class="form-group" style="flex: 2;">
                                         <label class="form-label">设备 ID / 路径</label>
@@ -600,7 +600,7 @@
                                         </p>
                                     </div>
                                 </div>
-                                
+
                                 <div class="form-row" id="katapultSerialRow" style="display:none;">
                                     <div class="form-group" style="flex: 2;">
                                         <label class="form-label">Katapult 串口路径</label>
@@ -611,7 +611,7 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div class="form-row" style="margin-top: 20px;">
                                 <button class="btn btn-primary" onclick="saveUpdateSettings()">💾 保存设置</button>
                                 <button class="btn btn-secondary" onclick="closeUpdateSettingsModal()">取消</button>

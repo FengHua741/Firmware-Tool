@@ -560,36 +560,36 @@ body {
     .sidebar {
         width: 60px;
     }
-    
+
     .sidebar-header h1 {
         display: none;
     }
-    
+
     .nav-item span:last-child {
         display: none;
     }
-    
+
     .main-content {
         margin-left: 60px;
     }
-    
+
     .grid-2 {
         grid-template-columns: 1fr;
     }
-    
+
     .id-search-tabs {
         flex-wrap: wrap;
     }
-    
+
     .id-tab {
         padding: 6px 12px;
         font-size: 12px;
     }
-    
+
     .form-row {
         flex-direction: column;
     }
-    
+
     .network-item {
         flex-direction: column;
         align-items: flex-start;
@@ -1058,16 +1058,16 @@ body {
         align-items: flex-start;
         gap: 10px;
     }
-    
+
     .config-item-actions {
         width: 100%;
         justify-content: flex-end;
     }
-    
+
     #page-config .form-row {
         flex-direction: column;
     }
-    
+
     #page-config .form-group {
         width: 100%;
     }

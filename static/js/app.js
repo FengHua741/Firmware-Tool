@@ -14,19 +14,41 @@ let compileParams = {
 
 // 可选 API Token：访问 /?token=xxx 后写入本地存储，后续 fetch 自动带上请求头。
 (function setupApiTokenFetch() {
+    function getStoredToken() {
+        try {
+            return localStorage.getItem('firmwareToolApiToken') || '';
+        } catch (error) {
+            return '';
+        }
+    }
+    function setStoredToken(token) {
+        try {
+            localStorage.setItem('firmwareToolApiToken', token);
+        } catch (error) {
+            console.warn('API Token 无法写入本地存储:', error);
+        }
+    }
     const params = new URLSearchParams(window.location.search);
     const tokenFromUrl = params.get('token');
     if (tokenFromUrl) {
-        localStorage.setItem('firmwareToolApiToken', tokenFromUrl);
+        setStoredToken(tokenFromUrl);
+        params.delete('token');
+        const cleanQuery = params.toString();
+        const cleanUrl = `${window.location.pathname}${cleanQuery ? `?${cleanQuery}` : ''}${window.location.hash}`;
+        window.history.replaceState({}, document.title, cleanUrl);
     }
     function readCookie(name) {
         const prefix = `${name}=`;
         const found = document.cookie.split(';').map(v => v.trim()).find(v => v.startsWith(prefix));
-        return found ? decodeURIComponent(found.slice(prefix.length)) : '';
+        try {
+            return found ? decodeURIComponent(found.slice(prefix.length)) : '';
+        } catch (error) {
+            return '';
+        }
     }
     const originalFetch = window.fetch.bind(window);
     window.fetch = function(resource, options = {}) {
-        const apiToken = localStorage.getItem('firmwareToolApiToken') || '';
+        const apiToken = getStoredToken();
         const headers = new Headers(options.headers || (resource instanceof Request ? resource.headers : undefined));
         if (apiToken) headers.set('X-API-Token', apiToken);
         const csrf = readCookie('firmware_tool_csrf');
@@ -38,7 +60,7 @@ let compileParams = {
 // ==================== 页面切换 ====================
 function switchPage(pageId) {
     currentPage = pageId;
-    
+
     // 更新导航
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.remove('active');
@@ -46,13 +68,13 @@ function switchPage(pageId) {
             item.classList.add('active');
         }
     });
-    
+
     // 更新页面
     document.querySelectorAll('.page').forEach(page => {
         page.classList.remove('active');
     });
     document.getElementById(`page-${pageId}`).classList.add('active');
-    
+
     // 页面特定初始化
     if (pageId === 'resources') {
         startResourceMonitoring();
@@ -105,9 +127,9 @@ function startResourceMonitoring() {
 function setProgressFill(elementId, percent) {
     const el = document.getElementById(elementId);
     if (!el) return;
-    
+
     el.style.width = Math.min(percent, 100) + '%';
-    
+
     // 获取当前颜色类
     const prevClass = el.dataset.prevColor || 'green';
     let newClass;
@@ -118,7 +140,7 @@ function setProgressFill(elementId, percent) {
     } else {
         newClass = 'green';
     }
-    
+
     // 2% 迟滞：只有当变化超过阈值时才切换
     if (newClass !== prevClass) {
         const threshold = newClass === 'green' ? 68 : (newClass === 'yellow' ? 70 : 88);
@@ -133,7 +155,7 @@ function setProgressFill(elementId, percent) {
 
 function updateNetworkDisplay(network) {
     const container = document.getElementById('networkInterfaces');
-    
+
     if (network && network.interfaces && network.interfaces.length > 0) {
         let html = '<div class="network-list">';
         network.interfaces.forEach(iface => {
@@ -579,14 +601,14 @@ function fallbackCopyToClipboard(text) {
         textarea.style.left = '-9999px';
         textarea.style.top = '0';
         document.body.appendChild(textarea);
-        
+
         // 选择并复制
         textarea.focus();
         textarea.select();
-        
+
         const successful = document.execCommand('copy');
         document.body.removeChild(textarea);
-        
+
         if (successful) {
             showSuccess('已复制到剪贴板');
         } else {
@@ -633,7 +655,7 @@ async function loadSettings() {
     try {
         const response = await fetch('/api/settings/config');
         const config = await response.json();
-        
+
         if (config) {
             const kp = document.getElementById('settingsKlipperPath');
             if (kp) kp.value = config.klipper_path || '~/klipper';
@@ -645,13 +667,13 @@ async function loadSettings() {
             _savedMoonrakerHost = config.moonraker_host || '127.0.0.1';
             const mrPort = document.getElementById('settingsMoonrakerPort');
             if (mrPort) mrPort.value = config.moonraker_port || 7125;
-            
+
             // 加载连接模式
             const mode = config.connection_mode || 'local';
             _loadedConnectionMode = mode;  // 记录加载时的模式
             const radios = document.querySelectorAll('input[name="connectionMode"]');
             radios.forEach(r => r.checked = r.value === mode);
-            
+
             // 标准 SSH 字段
             const sshHost = document.getElementById('settingsSshHost');
             if (sshHost) sshHost.value = config.ssh_host || '';
@@ -661,13 +683,13 @@ async function loadSettings() {
             if (sshUser) sshUser.value = config.ssh_user || '';
             const sudoMode = document.getElementById('settingsSudoMode');
             if (sudoMode) sudoMode.value = config.sudo_mode || 'password';
-            
+
             // FAST-SSH IP 地址
             const fastSshHost = document.getElementById('settingsFastSshHost');
             if (fastSshHost) fastSshHost.value = config.ssh_host || '';
-            
+
             toggleSshConfig();
-            
+
             // 加载凭据状态（仅标准 SSH 模式显示）
             if (mode === 'ssh') {
                 try {
@@ -694,18 +716,18 @@ async function saveSettings() {
     const ktp = document.getElementById('settingsKatapultPath');
     const mrHost = document.getElementById('settingsMoonrakerHost');
     const mrPort = document.getElementById('settingsMoonrakerPort');
-    
+
     // 获取连接模式
     const modeRadio = document.querySelector('input[name="connectionMode"]:checked');
     const connectionMode = modeRadio ? modeRadio.value : 'local';
-    
+
     // 根据模式收集 SSH 配置
     const sshHost = document.getElementById('settingsSshHost');
     const sshPort = document.getElementById('settingsSshPort');
     const sshUser = document.getElementById('settingsSshUser');
     const sudoMode = document.getElementById('settingsSudoMode');
     const fastSshHost = document.getElementById('settingsFastSshHost');
-    
+
     const settings = {
         klipper_path: kp ? kp.value : '~/klipper',
         katapult_path: ktp ? ktp.value : '~/katapult',
@@ -713,7 +735,7 @@ async function saveSettings() {
         moonraker_port: mrPort ? parseInt(mrPort.value) || 7125 : 7125,
         connection_mode: connectionMode,
     };
-    
+
     if (connectionMode === 'ssh') {
         settings.ssh_host = sshHost ? sshHost.value : '';
         settings.ssh_port = sshPort ? parseInt(sshPort.value) || 22 : 22;
@@ -729,16 +751,16 @@ async function saveSettings() {
         settings.ssh_port = sshPort ? parseInt(sshPort.value) || 22 : 22;
         settings.ssh_user = '';
     }
-    
+
     try {
         const response = await fetch('/api/settings/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings)
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             // 标准 SSH 模式保存凭据（如果有输入）
             if (connectionMode === 'ssh') {
@@ -759,7 +781,7 @@ async function saveSettings() {
             }
             // FAST-SSH 模式凭据由后端自动保存，前端无需处理
             showSuccess('设置已保存');
-            
+
             // 模式切换时刷新页面，确保后台线程和前端状态同步
             if (connectionMode !== _loadedConnectionMode) {
                 setTimeout(() => { location.reload(); }, 800);
@@ -779,7 +801,7 @@ function toggleSshConfig() {
     const sshSection = document.getElementById('sshConfigSection');
     const fastSshSection = document.getElementById('fastSshConfigSection');
     const localSection = document.getElementById('localConfigSection');
-    
+
     // 标准 SSH 配置区
     if (sshSection) {
         sshSection.style.display = mode === 'ssh' ? 'block' : 'none';
@@ -792,7 +814,7 @@ function toggleSshConfig() {
     if (localSection) {
         localSection.style.display = mode === 'local' ? 'block' : 'none';
     }
-    
+
     // 联动 Moonraker 地址
     updateMoonrakerHostFromSsh();
     // 更新路径解析提示
@@ -805,12 +827,12 @@ async function updatePathHints() {
     const ktpInput = document.getElementById('settingsKatapultPath');
     const kpHint = document.getElementById('klipperPathHint');
     const ktpHint = document.getElementById('katapultPathHint');
-    
+
     if (!kpInput || !kpHint) return;
-    
+
     const kpVal = kpInput.value || '~/klipper';
     const ktpVal = ktpInput ? ktpInput.value : '~/katapult';
-    
+
     // 如果路径不含 ~，直接显示原路径无提示
     if (!kpVal.startsWith('~')) {
         kpHint.textContent = '';
@@ -818,29 +840,29 @@ async function updatePathHints() {
     if (!ktpVal.startsWith('~')) {
         if (ktpHint) ktpHint.textContent = '';
     }
-    
+
     // 从后端解析实际路径
     try {
         const params = new URLSearchParams();
         params.append('path', kpVal);
         if (ktpVal && ktpVal !== kpVal) params.append('path', ktpVal);
-        
+
         const resp = await fetch('/api/settings/resolve-paths?' + params.toString());
         const data = await resp.json();
-        
+
         if (data.resolved) {
             const resolvedKp = data.resolved[kpVal];
             const resolvedKtp = data.resolved[ktpVal];
             const mode = data.mode || 'local';
             const modeLabel = mode === 'local' ? '本地' : mode.toUpperCase();
-            
+
             if (resolvedKp && kpVal.startsWith('~')) {
                 kpHint.textContent = `${modeLabel} 模式实际路径: ${resolvedKp}`;
                 kpHint.style.color = mode === 'local' ? '#888' : '#1976D2';
             } else if (kpHint) {
                 kpHint.textContent = '';
             }
-            
+
             if (ktpHint && resolvedKtp && ktpVal.startsWith('~')) {
                 ktpHint.textContent = `${modeLabel} 模式实际路径: ${resolvedKtp}`;
                 ktpHint.style.color = mode === 'local' ? '#888' : '#1976D2';
@@ -862,9 +884,9 @@ function updateMoonrakerHostFromSsh() {
     const mrHost = document.getElementById('settingsMoonrakerHost');
     const sshHost = document.getElementById('settingsSshHost');
     const fastSshHost = document.getElementById('settingsFastSshHost');
-    
+
     if (!mrHost) return;
-    
+
     // 确定当前远程主机 IP
     let remoteHost = '';
     if (mode === 'ssh') {
@@ -872,7 +894,7 @@ function updateMoonrakerHostFromSsh() {
     } else if (mode === 'fast-ssh') {
         remoteHost = fastSshHost ? fastSshHost.value : '';
     }
-    
+
     if ((mode === 'ssh' || mode === 'fast-ssh') && remoteHost) {
         // 首次进入远程模式时记住原始地址
         if (!_savedMoonrakerHost) {
@@ -932,7 +954,7 @@ async function testLocalConnection() {
 async function testSshConnection() {
     const modeRadio = document.querySelector('input[name="connectionMode"]:checked');
     const mode = modeRadio ? modeRadio.value : 'local';
-    
+
     // 根据模式选择结果显示元素
     let resultEl, btnEl;
     if (mode === 'fast-ssh') {
@@ -943,14 +965,14 @@ async function testSshConnection() {
         btnEl = document.getElementById('btnTestSsh');
     }
     if (!resultEl) return;
-    
+
     resultEl.textContent = '连接测试中...';
     resultEl.style.color = '#888';
     if (btnEl) btnEl.disabled = true;
-    
+
     // 先保存当前设置（后端会自动设置 FAST-SSH 凭据）
     await saveSettings();
-    
+
     try {
         const response = await fetch('/api/settings/ssh-test', { method: 'POST' });
         const data = await response.json();
@@ -991,7 +1013,7 @@ function showError(message) {
 document.addEventListener('DOMContentLoaded', () => {
     // 加载初始页面
     switchPage('resources');
-    
+
 });
 
 // 更新资源显示
@@ -1002,16 +1024,16 @@ async function updateResources() {
     try {
         const response = await fetch('/api/system/resources');
         const data = await response.json();
-        
+
         const current = data.current || data;
         const cpu = current.cpu || {};
         const memory = current.memory || {};
         const disk = current.disk || {};
-        
+
         const cpuPercent = cpu.percent || 0;
         const memPercent = memory.percent || 0;
         const diskPercent = disk.percent || 0;
-        
+
         // 更新 CPU
         document.getElementById('cpuPercentText').textContent = cpuPercent.toFixed(1) + '%';
         const cpuDetail = document.getElementById('cpuDetailText');
@@ -1020,31 +1042,31 @@ async function updateResources() {
             const freq = cpu.freq ? cpu.freq.toFixed(2) + ' GHz' : '--';
             cpuDetail.textContent = cores + ' 核 @ ' + freq;
         }
-        
+
         // 更新内存
         document.getElementById('memPercentText').textContent = memPercent.toFixed(1) + '%';
         const memDetail = document.getElementById('memDetailText');
         if (memDetail && memory.used !== undefined && memory.total !== undefined) {
             memDetail.textContent = memory.used.toFixed(1) + ' / ' + memory.total.toFixed(1) + ' GB';
         }
-        
+
         // 更新磁盘
         document.getElementById('diskPercentText').textContent = diskPercent.toFixed(1) + '%';
         const diskDetail = document.getElementById('diskDetailText');
         if (diskDetail && disk.used !== undefined && disk.total !== undefined) {
             diskDetail.textContent = disk.used.toFixed(1) + ' / ' + disk.total.toFixed(1) + ' GB';
         }
-        
+
         // 更新进度条
         setProgressFill('cpuProgressFill', cpuPercent);
         setProgressFill('memProgressFill', memPercent);
         setProgressFill('diskProgressFill', diskPercent);
-        
+
         // 更新网络状态
         if (current.network) {
             updateNetworkDisplay(current.network);
         }
-        
+
         // 更新 FlyOS 版本信息（仅 FAST-SSH 模式显示）
         const flyosBar = document.getElementById('flyosVersionBar');
         const flyosText = document.getElementById('flyosVersionText');
@@ -1075,7 +1097,7 @@ async function updateResources() {
             _sshStatusCheckInterval = 0;
             updateSshConnectionStatus();
         }
-        
+
     } catch (error) {
         console.error('获取系统资源失败:', error);
     }
@@ -1219,9 +1241,9 @@ async function controlService(serviceName, action) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ service: serviceName, action: action })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             if (isSelfRestart) {
                 showSuccess('firmware-tool 正在重启，请稍候...');
@@ -1250,7 +1272,7 @@ async function controlService(serviceName, action) {
 async function loadAvailableServices() {
     const container = document.getElementById('serviceList');
     if (!container) return;
-    
+
     try {
         const response = await fetch('/api/system/services');
         const data = await response.json();
@@ -1265,12 +1287,12 @@ async function loadAvailableServices() {
 function renderServiceButtons(services) {
     const container = document.getElementById('serviceList');
     if (!container) return;
-    
+
     if (services.length === 0) {
         container.innerHTML = '<p class="text-muted">未检测到可用服务</p>';
         return;
     }
-    
+
     container.innerHTML = '';
     services.forEach(service => {
         const statusText = service.active ? '运行中' : '已停止';
@@ -1279,7 +1301,7 @@ function renderServiceButtons(services) {
         const displayName = escapeHtml(service.name || '');
         const controlName = service.control_name || service.name || '';
         const controlArg = escapeJsString(controlName);
-        
+
         // firmware-tool 是自身服务，只显示重启按钮
         let buttonsHtml;
         if (isSelf) {
@@ -1299,7 +1321,7 @@ function renderServiceButtons(services) {
                 </div>
             `;
         }
-        
+
         const div = document.createElement('div');
         div.className = 'service-item';
         div.innerHTML = `
@@ -1315,7 +1337,7 @@ async function loadVersionInfo() {
     try {
         const response = await fetch('/api/system/versions');
         const data = await response.json();
-        
+
         const klipperVersionEl = document.getElementById('klipperVersion');
         if (klipperVersionEl) {
             klipperVersionEl.textContent = data.klipper_version || '未安装';
@@ -1336,19 +1358,19 @@ let updateInfo = null;
 async function checkForUpdates() {
     const statusDiv = document.getElementById('updateStatus');
     const updateBtn = document.getElementById('updateBtn');
-    
+
     statusDiv.textContent = '正在检查更新...';
     updateBtn.style.display = 'none';
-    
+
     try {
         const response = await fetch('/api/system/check-update');
         const data = await response.json();
-        
+
         if (data.error) {
             statusDiv.textContent = '检查更新失败: ' + data.error;
             return;
         }
-        
+
         if (data.has_update) {
             updateAvailable = true;
             updateInfo = data;
@@ -1369,37 +1391,37 @@ async function updateProject() {
         showError('没有可用的更新');
         return;
     }
-    
+
     const logDiv = document.getElementById('updateLog');
     const logPre = logDiv.querySelector('pre');
     const updateBtn = document.getElementById('updateBtn');
-    
+
     logDiv.style.display = 'block';
     logPre.textContent = '开始更新...\n';
     updateBtn.disabled = true;
     updateBtn.textContent = '更新中...';
-    
+
     try {
         const response = await fetch('/api/system/update', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
-        
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        
+
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            
+
             const text = decoder.decode(value, { stream: true });
             logPre.textContent += text;
             logPre.scrollTop = logPre.scrollHeight;
         }
-        
+
         logPre.textContent += '\n\n✅ 更新完成！请刷新页面。';
         showSuccess('项目更新成功！请刷新页面');
-        
+
     } catch (error) {
         logPre.textContent += '\n\n❌ 更新失败: ' + error.message;
         showError('更新失败: ' + error.message);

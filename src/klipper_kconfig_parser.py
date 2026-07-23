@@ -35,7 +35,7 @@ class KlipperKconfigParser:
         self.klipper_path = klipper_path
         self.src_path = os.path.join(self.klipper_path, 'src')
         self.mcu_database = {}
-        
+
     def parse_all_platforms(self):
         """解析所有平台的 Kconfig"""
         for platform_dir, platform_info in self.PLATFORM_DEFINITIONS.items():
@@ -44,9 +44,9 @@ class KlipperKconfigParser:
                 self.mcu_database[platform_info['name']] = self._parse_kconfig(
                     kconfig_path, platform_dir, platform_info
                 )
-        
+
         return self.mcu_database
-    
+
     def _parse_kconfig(self, kconfig_path, platform_dir, platform_info=None):
         """解析单个 Kconfig 文件"""
         try:
@@ -60,7 +60,7 @@ class KlipperKconfigParser:
                 'flash_modes': [],
                 'default_connections': []
             }
-        
+
         result = {
             'platform': platform_dir,
             'platform_name': (platform_info or {}).get('name', platform_dir),
@@ -69,24 +69,24 @@ class KlipperKconfigParser:
             'flash_modes': [],
             'default_connections': []
         }
-        
+
         # 解析 MCU 型号
         result['mcus'] = self._parse_mcus(content)
-        
+
         # 解析晶振选项
         self._parse_clock_options(content, result['mcus'])
-        
+
         # 解析 Bootloader 偏移
         self._parse_bootloader_options(content, result['mcus'])
-        
+
         # 解析连接方式
         result['connections'] = self._parse_connections(content)
-        
+
         # 解析烧录模式
         result['flash_modes'] = self._infer_flash_modes(platform_dir)
-        
+
         return result
-    
+
     def _iter_config_blocks(self, content):
         """遍历 Kconfig 中的 config 块。"""
         lines = content.splitlines()
@@ -160,7 +160,7 @@ class KlipperKconfigParser:
             capabilities = self._select_closure(mcu['config_name'], select_graph)
             mcu['selects'] = sorted(capabilities)
             mcu['capabilities'] = sorted(set(capabilities) | {mcu['config_name']})
-        
+
         return mcus
 
     def _strip_outer_parens(self, expr):
@@ -234,24 +234,24 @@ class KlipperKconfigParser:
 
         # 不支持的比较表达式保守视为不匹配，避免展示/写入错误选项。
         return False
-    
+
     def _parse_clock_options(self, content, mcus):
         """解析晶振选项 - 支持多种格式"""
         crystals = []
-        
+
         # 格式1: CLOCK_REF_8M (STM32)
         clock_pattern1 = r'config \w+_CLOCK_REF_(\d+)M\s+bool "(\d+) MHz crystal"'
         for match in re.finditer(clock_pattern1, content):
             freq_hz = int(match.group(1)) * 1000000
             crystals.append(str(freq_hz))
-        
+
         # 格式2: CLOCK_REF_X8M (HC32F460)
         clock_pattern2 = r'config \w+_CLOCK_REF_X(\d+)M\s+bool "[^"]*(\d+)\s*MHz[^"]*"'
         for match in re.finditer(clock_pattern2, content):
             freq_hz = int(match.group(1)) * 1000000
             if str(freq_hz) not in crystals:
                 crystals.append(str(freq_hz))
-        
+
         # 格式3: ATSAMD 的特殊格式
         # CLOCK_REF_X32K -> 32768 Hz
         if 'CLOCK_REF_X32K' in content:
@@ -262,7 +262,7 @@ class KlipperKconfigParser:
         # CLOCK_REF_X25M -> 25000000 Hz
         if 'CLOCK_REF_X25M' in content:
             crystals.append('25000000')
-        
+
         # 格式4: 从 CLOCK_REF_8 等提取
         clock_pattern4 = r'config CLOCK_REF_(\d+)(?:\s|$)'
         for match in re.finditer(clock_pattern4, content):
@@ -271,7 +271,7 @@ class KlipperKconfigParser:
                 freq_hz = int(freq_mhz) * 1000000
                 if str(freq_hz) not in crystals:
                     crystals.append(str(freq_hz))
-        
+
         clock_options = self._parse_choice_options(content, 'Clock Reference')
         if clock_options:
             for mcu in mcus.values():
@@ -373,7 +373,7 @@ class KlipperKconfigParser:
         multiplier = 1000 if unit == 'k' else 1000000
         freq = int(value * multiplier)
         return str(freq)
-    
+
     def _parse_bootloader_options(self, content, mcus):
         """解析 Bootloader 偏移选项 - 支持多种平台"""
         choice_options = self._parse_choice_options(content, 'Bootloader offset')
@@ -399,20 +399,20 @@ class KlipperKconfigParser:
             return
 
         bl_options = []
-        
+
         # 匹配带条件的 Bootloader offset 选项
         bl_pattern_with_if = r'config (\w+)_FLASH_START_(\w+)\s+bool "([^"]+)"(?:\s+depends on\s+([^\n]+))?\s*(?:if\s+([^\n]+))?'
-        
+
         for match in re.finditer(bl_pattern_with_if, content):
             platform_prefix = match.group(1)
             offset_hex = match.group(2)
             description = match.group(3)
             depends_cond = match.group(4) or ''
             if_cond = match.group(5) or ''
-            
+
             # 合并条件
             condition = if_cond if if_cond else depends_cond
-            
+
             # 转换十六进制到十进制
             try:
                 offset_dec = int(offset_hex, 16)
@@ -425,7 +425,7 @@ class KlipperKconfigParser:
                 })
             except ValueError:
                 continue
-        
+
         # 如果没有找到带条件的选项，尝试查找无条件的选项
         if not bl_options:
             bl_pattern_simple = r'config (\w+)_FLASH_START_(\w+)\s+bool "([^"]+)"'
@@ -433,7 +433,7 @@ class KlipperKconfigParser:
                 platform_prefix = match.group(1)
                 offset_hex = match.group(2)
                 description = match.group(3)
-                
+
                 try:
                     offset_dec = int(offset_hex, 16)
                     bl_options.append({
@@ -445,7 +445,7 @@ class KlipperKconfigParser:
                     })
                 except ValueError:
                     continue
-        
+
         # 根据 MCU 类型分配 BL 选项
         for mcu_id, mcu in mcus.items():
             mcu['bl_offsets'] = []
@@ -458,7 +458,7 @@ class KlipperKconfigParser:
                 else:
                     # 无条件限制，添加到所有 MCU
                     should_add = True
-                
+
                 # RP2040 特殊处理：0100 (256 bytes) 是 stage2，不是真正的 bootloader
                 if should_add:
                     # 过滤掉异常的 131584 (0x20200, 128.5KiB)，这不是标准的 bootloader 偏移
@@ -472,7 +472,7 @@ class KlipperKconfigParser:
                         mcu['bl_offsets'].append('0')
                     else:
                         mcu['bl_offsets'].append(bl['offset'])
-            
+
             # RP2040 特殊处理：确保只有 256 和 16384 两个选项
             if mcu_id == 'rp2040':
                 # RP2040 只有 256 bytes (stage2) 和 16KB bootloader
@@ -480,7 +480,7 @@ class KlipperKconfigParser:
             elif mcu_id == 'rp2350':
                 # RP2350 有 0 (no bootloader) 和 16KB bootloader
                 mcu['bl_offsets'] = ['0', '16384']
-    
+
     def _check_condition(self, condition, mcu):
         """检查条件是否匹配 MCU"""
         if not condition:
@@ -493,10 +493,10 @@ class KlipperKconfigParser:
         config_name = mcu['config_name']
         base_name = config_name.replace('MACH_', '')
         mcu_id = mcu.get('id', '').lower()
-        
+
         # 处理条件中的 || 和 &&
         conditions = [c.strip() for c in condition.split('||')]
-        
+
         for cond in conditions:
             # 移除括号
             cond = cond.strip('()')
@@ -527,7 +527,7 @@ class KlipperKconfigParser:
                    base_name.startswith('stm32f415') or base_name.startswith('stm32f417') or \
                    base_name.startswith('stm32f427') or base_name.startswith('stm32f429') or \
                    base_name.startswith('stm32f437') or base_name.startswith('stm32f439') or \
-                   mcu_id in ['stm32f405', 'stm32f407', 'stm32f415', 'stm32f417', 
+                   mcu_id in ['stm32f405', 'stm32f407', 'stm32f415', 'stm32f417',
                              'stm32f427', 'stm32f429', 'stm32f437', 'stm32f439']:
                     return True
             # MACH_STM32F0x2 匹配 F042, F072 等
@@ -535,7 +535,7 @@ class KlipperKconfigParser:
                 if base_name.startswith('stm32f042') or base_name.startswith('stm32f072') or \
                    mcu_id in ['stm32f042', 'stm32f072']:
                     return True
-        
+
         return False
 
     def get_mcu_info(self, mcu_id):
@@ -588,27 +588,27 @@ class KlipperKconfigParser:
         if platform_norm:
             return self.resolve_mcu_info(mcu_id)
         return None
-    
+
     def _parse_connections(self, content):
         """解析连接方式"""
         connections = []
-        
+
         # USB 连接
         if 'USBSERIAL' in content or 'USB' in content:
             connections.append({'type': 'USB', 'name': 'USB'})
-        
+
         # CAN 连接
         if 'CANBUS' in content or 'CAN' in content:
             connections.append({'type': 'CAN', 'name': 'CAN Bus'})
-        
+
         # Serial 连接
         serial_pattern = r'bool "Serial \(([^)]+)\)"'
         for match in re.finditer(serial_pattern, content):
             serial_name = match.group(1)
             connections.append({'type': 'SERIAL', 'name': f'Serial ({serial_name})'})
-        
+
         return connections
-    
+
     def _infer_flash_modes(self, platform_dir):
         """根据平台推断烧录模式"""
         flash_modes_map = {
@@ -621,14 +621,14 @@ class KlipperKconfigParser:
             'avr': ['DFU']
         }
         return flash_modes_map.get(platform_dir, ['DFU'])
-    
+
     def save_database(self, output_path=None):
         """保存数据库到 JSON 文件"""
         if output_path is None:
             output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'mcu_database.json')
         with open(output_path, 'w') as f:
             json.dump(self.mcu_database, f, indent=2)
-    
+
     def load_database(self, input_path=None):
         """从 JSON 文件加载数据库"""
         if input_path is None:
@@ -642,7 +642,7 @@ class KlipperKconfigParser:
 if __name__ == '__main__':
     parser = KlipperKconfigParser()
     database = parser.parse_all_platforms()
-    
+
     # 打印统计信息
     print("=== Klipper MCU 数据库 ===")
     for platform, data in database.items():
@@ -651,7 +651,7 @@ if __name__ == '__main__':
             print(f"  - {mcu_id}: {mcu['name']}")
             print(f"    晶振: {mcu['crystals']}")
             print(f"    BL偏移: {mcu['bl_offsets'][:3]}...")  # 只显示前3个
-    
+
     # 保存数据库
     parser.save_database()
     print("\n✓ 数据库已保存到 mcu_database.json")

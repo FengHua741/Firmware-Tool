@@ -27,7 +27,7 @@ def _load_config_file():
     """直接从配置文件读取配置（避免 from app import config 的循环导入）"""
     try:
         if os.path.exists(_CONFIG_FILE):
-            with open(_CONFIG_FILE, 'r') as f:
+            with open(_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
     except Exception:
         pass
@@ -41,6 +41,14 @@ KEY_PATH = '/etc/firmware-tool/ssh_key'
 
 _fernet_instance = None
 _fernet_lock = threading.Lock()
+
+
+def _ensure_credentials_dir():
+    os.makedirs(CREDENTIALS_DIR, exist_ok=True)
+    try:
+        os.chmod(CREDENTIALS_DIR, 0o700)
+    except PermissionError:
+        pass
 
 
 def _get_fernet():
@@ -67,7 +75,7 @@ def _get_fernet():
                         key = f.read()
                 else:
                     key = Fernet.generate_key()
-                    os.makedirs(CREDENTIALS_DIR, exist_ok=True)
+                    _ensure_credentials_dir()
                     with open(fallback_key_path, 'wb') as f:
                         f.write(key)
                     os.chmod(fallback_key_path, 0o600)
@@ -80,7 +88,7 @@ def _get_fernet():
                 os.chmod(KEY_PATH, 0o600)
             except PermissionError:
                 # 非 root 用户无法写入 /etc，回退到用户目录
-                os.makedirs(CREDENTIALS_DIR, exist_ok=True)
+                _ensure_credentials_dir()
                 with open(fallback_key_path, 'wb') as f:
                     f.write(key)
                 os.chmod(fallback_key_path, 0o600)
@@ -102,7 +110,7 @@ def save_credential(field, value):
     creds = _load_creds_encrypted(fernet) or {}
     creds[field] = value
     encrypted = fernet.encrypt(json.dumps(creds).encode())
-    os.makedirs(CREDENTIALS_DIR, exist_ok=True)
+    _ensure_credentials_dir()
     with open(CREDENTIALS_PATH, 'wb') as f:
         f.write(encrypted)
     try:
@@ -151,7 +159,7 @@ def _load_creds_raw():
     if not os.path.exists(raw_path):
         return {}
     try:
-        with open(raw_path, 'r') as f:
+        with open(raw_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
         return {}
@@ -160,9 +168,9 @@ def _load_creds_raw():
 def _save_creds_raw(creds):
     """保存明文凭据（回退方案）"""
     raw_path = os.path.join(CREDENTIALS_DIR, 'ssh_credentials.json')
-    os.makedirs(CREDENTIALS_DIR, exist_ok=True)
-    with open(raw_path, 'w') as f:
-        json.dump(creds, f)
+    _ensure_credentials_dir()
+    with open(raw_path, 'w', encoding='utf-8') as f:
+        json.dump(creds, f, ensure_ascii=False)
     try:
         os.chmod(raw_path, 0o600)
     except PermissionError:

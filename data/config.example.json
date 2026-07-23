@@ -1,6 +1,6 @@
 {
   "port": 9999,
-  "bind_host": "0.0.0.0",
+  "bind_host": "127.0.0.1",
   "klipper_path": "~/klipper",
   "katapult_path": "~/katapult",
   "json_repo_url": "",

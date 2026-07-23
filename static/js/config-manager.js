@@ -30,7 +30,6 @@ const FLASH_MODE_LABELS = {
 // ==================== 初始化 ====================
 
 function initConfigManager() {
-    console.log('[ConfigManager] 初始化...');
     loadKlipperMcuDatabase().then(() => {
         refreshConfigTree();
     });

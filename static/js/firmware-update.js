@@ -19,9 +19,79 @@ function fuEscapeJsString(value) {
         .replace(/\r/g, '\\r');
 }
 
+function fuUpdateConfigKey(config) {
+    return `${config?._manufacturer || config?.manufacturer || ''}::${config?.id || ''}`;
+}
+
+function fuPruneSelectedUpdateConfigs() {
+    const validKeys = new Set(updateableConfigs.map(fuUpdateConfigKey));
+    selectedUpdateConfigs.forEach(key => {
+        if (!validKeys.has(key)) selectedUpdateConfigs.delete(key);
+    });
+}
+
+async function fuReadSseJson(response, onLog) {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        return response.json();
+    }
+    if (!response.body || !response.body.getReader) {
+        const text = await response.text();
+        throw new Error(text || '浏览器不支持读取流式响应');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResult = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+
+        for (const eventText of events) {
+            const dataLines = eventText.split('\n')
+                .filter(line => line.startsWith('data:'))
+                .map(line => line.slice(5).trimStart());
+            if (!dataLines.length) continue;
+            const payload = dataLines.join('\n');
+            if (payload.startsWith('[LOG]')) {
+                if (onLog) onLog(payload.replace(/^\[LOG\]\s*/, ''));
+                continue;
+            }
+            try {
+                finalResult = JSON.parse(payload);
+            } catch (error) {
+                if (onLog) onLog(payload);
+            }
+        }
+    }
+
+    if (buffer.trim()) {
+        const payload = buffer.split('\n')
+            .filter(line => line.startsWith('data:'))
+            .map(line => line.slice(5).trimStart())
+            .join('\n');
+        if (payload && !payload.startsWith('[LOG]')) {
+            try {
+                finalResult = JSON.parse(payload);
+            } catch (error) {
+                if (onLog) onLog(payload);
+            }
+        }
+    }
+
+    if (!finalResult) {
+        throw new Error('流式响应未返回结果');
+    }
+    return finalResult;
+}
+
 // 初始化固件更新页面
 async function initFirmwareUpdatePage() {
-    console.log('初始化固件更新页面...');
     await loadUpdateBoardManufacturers();
     await loadFirmwareUpdateConfigs();
 }
@@ -31,10 +101,10 @@ async function loadUpdateBoardManufacturers() {
     try {
         const response = await fetch('/api/config/manufacturers');
         const data = await response.json();
-        
+
         const select = document.getElementById('updateBoardManufacturer');
         select.innerHTML = '<option value="">-- 选择厂家 --</option>';
-        
+
         if (data.manufacturers) {
             data.manufacturers.forEach(mfr => {
                 select.innerHTML += `<option value="${mfr}">${mfr}</option>`;
@@ -50,24 +120,24 @@ async function onUpdateBoardManufacturerChange() {
     const manufacturer = document.getElementById('updateBoardManufacturer').value;
     const typeSelect = document.getElementById('updateBoardType');
     const modelSelect = document.getElementById('updateBoardModel');
-    
+
     typeSelect.innerHTML = '<option value="">-- 选择类型 --</option>';
     typeSelect.disabled = true;
     modelSelect.innerHTML = '<option value="">-- 先选择类型 --</option>';
     modelSelect.disabled = true;
     currentBoardConfig = null;
-    
+
     if (!manufacturer) return;
-    
+
     try {
-        const response = await fetch(`/api/config/list/${manufacturer}`);
+        const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
         const data = await response.json();
         updateBoardConfigs = data.configs || [];
-        
+
         // 提取类型
         const types = [...new Set(updateBoardConfigs.map(c => c.type))];
         types.forEach(type => {
-            const label = type === 'mainboard' ? '主板' : 
+            const label = type === 'mainboard' ? '主板' :
                          type === 'toolboard' ? '工具板' : '扩展板';
             typeSelect.innerHTML += `<option value="${type}">${label}</option>`;
         });
@@ -81,16 +151,16 @@ async function onUpdateBoardManufacturerChange() {
 function onUpdateBoardTypeChange() {
     const type = document.getElementById('updateBoardType').value;
     const modelSelect = document.getElementById('updateBoardModel');
-    
+
     modelSelect.innerHTML = '<option value="">-- 选择型号 --</option>';
     modelSelect.disabled = true;
     currentBoardConfig = null;
-    
+
     if (!type) return;
-    
+
     const configs = updateBoardConfigs.filter(c => c.type === type);
     configs.forEach(config => {
-        modelSelect.innerHTML += `<option value="${config.id}">${config.name}</option>`;
+        modelSelect.innerHTML += `<option value="${fuEscapeHtml(config.id)}">${fuEscapeHtml(config.name)}</option>`;
     });
     modelSelect.disabled = false;
 }
@@ -99,15 +169,15 @@ function onUpdateBoardTypeChange() {
 async function onUpdateBoardModelChange() {
     const manufacturer = document.getElementById('updateBoardManufacturer').value;
     const configId = document.getElementById('updateBoardModel').value;
-    
+
     currentBoardConfig = null;
-    
+
     if (!configId) return;
-    
+
     try {
-        const response = await fetch(`/api/config/get/${manufacturer}/${configId}`);
+        const response = await fetch(`/api/config/get/${encodeURIComponent(manufacturer)}/${encodeURIComponent(configId)}`);
         const config = await response.json();
-        
+
         if (config && !config.error) {
             currentBoardConfig = config;
         }
@@ -122,7 +192,7 @@ async function createFirmwareUpdateConfig() {
         showError('请先选择主板配置');
         return;
     }
-    
+
     // 打开设置弹窗，传入主板配置信息
     openUpdateSettingsForNewConfig(currentBoardConfig);
 }
@@ -131,13 +201,14 @@ async function createFirmwareUpdateConfig() {
 async function loadFirmwareUpdateConfigs() {
     const listDiv = document.getElementById('updateableConfigsList');
     listDiv.innerHTML = '<p class="empty">加载中...</p>';
-    
+
     try {
         const response = await fetch('/api/firmware-update/configs');
         const data = await response.json();
-        
+
         if (data.success) {
             updateableConfigs = data.configs || [];
+            fuPruneSelectedUpdateConfigs();
             document.getElementById('updateableCount').textContent = updateableConfigs.length;
             renderUpdateableConfigs();
         } else {
@@ -153,16 +224,16 @@ async function loadFirmwareUpdateConfigs() {
 async function loadUpdateableConfigs() {
     const manufacturer = document.getElementById('updateManufacturerFilter').value;
     const type = document.getElementById('updateTypeFilter').value;
-    
+
     const listDiv = document.getElementById('updateableConfigsList');
     listDiv.innerHTML = '<p class="empty">加载中...</p>';
-    
+
     try {
         let configs = [];
-        
+
         if (manufacturer) {
             // 加载特定厂家的配置
-            const response = await fetch(`/api/config/list/${manufacturer}`);
+            const response = await fetch(`/api/config/list/${encodeURIComponent(manufacturer)}`);
             const data = await response.json();
             configs = data.configs || [];
         } else {
@@ -171,20 +242,21 @@ async function loadUpdateableConfigs() {
             const data = await response.json();
             configs = data.configs || [];
         }
-        
+
         // 类型筛选
         if (type) {
             configs = configs.filter(c => c.type === type);
         }
-        
+
         updateableConfigs = configs;
-        
+        fuPruneSelectedUpdateConfigs();
+
         // 更新计数
         document.getElementById('updateableCount').textContent = configs.length;
-        
+
         // 渲染列表
         renderUpdateableConfigs();
-        
+
     } catch (error) {
         console.error('加载配置失败:', error);
         listDiv.innerHTML = '<p class="empty">加载失败</p>';
@@ -194,19 +266,20 @@ async function loadUpdateableConfigs() {
 // 渲染可更新配置列表
 function renderUpdateableConfigs() {
     const listDiv = document.getElementById('updateableConfigsList');
-    
+
     if (updateableConfigs.length === 0) {
         listDiv.innerHTML = '<p class="empty">暂无固件更新配置，请先选择主板配置并创建</p>';
         return;
     }
-    
+
     let html = '';
     updateableConfigs.forEach(config => {
-        const isSelected = selectedUpdateConfigs.has(config.id);
+        const configKey = fuUpdateConfigKey(config);
+        const isSelected = selectedUpdateConfigs.has(configKey);
         const updateEnabled = config.enabled !== false;
         const deviceId = config.device_id || '';
         const mode = config.mode || '';
-        
+
         // 模式简称
         const modeShortNames = {
             'CAN': 'CAN',
@@ -218,11 +291,11 @@ function renderUpdateableConfigs() {
             'TF': 'TF卡',
             'HOST': 'HOST'
         };
-        
+
         html += `
-            <div class="config-card ${isSelected ? 'selected' : ''}" data-id="${fuEscapeHtml(config.id)}">
-                <input type="checkbox" ${isSelected ? 'checked' : ''} 
-                       onchange="toggleUpdateSelection('${fuEscapeJsString(config.id)}')">
+            <div class="config-card ${isSelected ? 'selected' : ''}" data-id="${fuEscapeHtml(configKey)}">
+                <input type="checkbox" ${isSelected ? 'checked' : ''}
+                       onchange="toggleUpdateSelection('${fuEscapeJsString(configKey)}')">
                 <div class="info">
                     <div class="name">${fuEscapeHtml(config.id)}</div>
                     <div class="details">
@@ -235,7 +308,7 @@ function renderUpdateableConfigs() {
                     <span class="status-badge ${updateEnabled ? 'enabled' : 'disabled'}">
                         ${updateEnabled ? '已启用' : '未启用'}
                     </span>
-                    <button class="btn btn-sm btn-secondary" onclick="openUpdateSettings('${fuEscapeJsString(config.id)}')">
+                    <button class="btn btn-sm btn-secondary" onclick="openUpdateSettings('${fuEscapeJsString(configKey)}')">
                         ⚙️ 设置
                     </button>
                     <button class="btn btn-sm btn-danger" onclick="deleteFirmwareUpdateConfig('${fuEscapeJsString(config._manufacturer)}', '${fuEscapeJsString(config.id)}')">
@@ -245,7 +318,7 @@ function renderUpdateableConfigs() {
             </div>
         `;
     });
-    
+
     listDiv.innerHTML = html;
 }
 
@@ -254,14 +327,14 @@ async function deleteFirmwareUpdateConfig(manufacturer, configId) {
     if (!confirm('确定要删除这个固件更新配置吗？')) {
         return;
     }
-    
+
     try {
-        const response = await fetch(`/api/firmware-update/config/${manufacturer}/${configId}`, {
+        const response = await fetch(`/api/firmware-update/config/${encodeURIComponent(manufacturer)}/${encodeURIComponent(configId)}`, {
             method: 'DELETE'
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             showSuccess('配置已删除');
             loadFirmwareUpdateConfigs(); // 刷新列表
@@ -281,7 +354,7 @@ function toggleUpdateSelection(configId) {
     } else {
         selectedUpdateConfigs.add(configId);
     }
-    
+
     renderUpdateableConfigs();
     updateSelectedUpdateList();
 }
@@ -291,13 +364,13 @@ function selectAllUpdateable(select) {
     if (select) {
         updateableConfigs.forEach(c => {
             if (c.enabled !== false) {
-                selectedUpdateConfigs.add(c.id);
+                selectedUpdateConfigs.add(fuUpdateConfigKey(c));
             }
         });
     } else {
         selectedUpdateConfigs.clear();
     }
-    
+
     renderUpdateableConfigs();
     updateSelectedUpdateList();
 }
@@ -306,27 +379,27 @@ function selectAllUpdateable(select) {
 function updateSelectedUpdateList() {
     const countSpan = document.getElementById('selectedUpdateCount');
     const listDiv = document.getElementById('selectedUpdateList');
-    
+
     countSpan.textContent = selectedUpdateConfigs.size;
-    
+
     if (selectedUpdateConfigs.size === 0) {
         listDiv.innerHTML = '<p class="empty">暂无选中的配置</p>';
         return;
     }
-    
+
     let html = '';
-    selectedUpdateConfigs.forEach(id => {
-        const config = updateableConfigs.find(c => c.id === id);
+    selectedUpdateConfigs.forEach(key => {
+        const config = updateableConfigs.find(c => fuUpdateConfigKey(c) === key);
         if (config) {
             html += `
                 <span class="selected-item">
-                    ${config.name || config.id}
-                    <span class="remove" onclick="toggleUpdateSelection('${id}')">×</span>
+                    ${fuEscapeHtml(config.name || config.id)}
+                    <span class="remove" onclick="toggleUpdateSelection('${fuEscapeJsString(key)}')">×</span>
                 </span>
             `;
         }
     });
-    
+
     listDiv.innerHTML = html;
 }
 
@@ -370,7 +443,7 @@ function inferUpdateMode(boardConfig) {
 function openUpdateSettingsForNewConfig(boardConfig) {
     // 生成固件更新配置ID
     const updateConfigId = `update_${boardConfig.id}`;
-    
+
     document.getElementById('updateSettingConfigId').value = updateConfigId;
     document.getElementById('updateSettingBoardConfigId').value = boardConfig.id;
     document.getElementById('updateSettingManufacturer').value = boardConfig.manufacturer || 'FLY';
@@ -378,7 +451,7 @@ function openUpdateSettingsForNewConfig(boardConfig) {
     document.getElementById('updateSettingMode').value = inferUpdateMode(boardConfig);
     document.getElementById('updateSettingDeviceId').value = '';
     document.getElementById('updateSettingKatapultSerial').value = '';
-    
+
     // 显示关联的主板配置信息
     document.getElementById('linkedBoardConfigInfo').innerHTML = `
         <div style="background:#e3f2fd;padding:10px;border-radius:8px;margin-bottom:15px;">
@@ -386,19 +459,19 @@ function openUpdateSettingsForNewConfig(boardConfig) {
             <small>${boardConfig.platform} ${boardConfig.mcu} | ${boardConfig.type}</small>
         </div>
     `;
-    
+
     // 根据启用状态显示/隐藏选项
     toggleUpdateModeOptions();
     onUpdateModeChange();
-    
+
     document.getElementById('updateSettingsModal').style.display = 'flex';
 }
 
 // 打开更新设置弹窗（用于编辑现有配置）
-async function openUpdateSettings(configId) {
-    const config = updateableConfigs.find(c => c.id === configId);
+async function openUpdateSettings(configKey) {
+    const config = updateableConfigs.find(c => fuUpdateConfigKey(c) === configKey);
     if (!config) return;
-    
+
     document.getElementById('updateSettingConfigId').value = config.id;
     document.getElementById('updateSettingBoardConfigId').value = config.board_config_id || '';
     document.getElementById('updateSettingManufacturer').value = config.manufacturer || 'FLY';
@@ -406,7 +479,7 @@ async function openUpdateSettings(configId) {
     document.getElementById('updateSettingMode').value = config.mode || 'CAN';
     document.getElementById('updateSettingDeviceId').value = config.device_id || '';
     document.getElementById('updateSettingKatapultSerial').value = config.katapult_serial || '';
-    
+
     // 显示关联的主板配置信息
     const linkedInfoDiv = document.getElementById('linkedBoardConfigInfo');
     if (config.board_config) {
@@ -421,7 +494,7 @@ async function openUpdateSettings(configId) {
         linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#666;">加载关联配置信息...</div>`;
         try {
             const mfr = config._manufacturer || config.manufacturer;
-            const bcResponse = await fetch(`/api/config/get/${mfr}/${config.board_config_id}`);
+            const bcResponse = await fetch(`/api/config/get/${encodeURIComponent(mfr)}/${encodeURIComponent(config.board_config_id)}`);
             const boardConfig = await bcResponse.json();
             if (boardConfig && !boardConfig.error) {
                 linkedInfoDiv.innerHTML = `
@@ -439,11 +512,11 @@ async function openUpdateSettings(configId) {
     } else {
         linkedInfoDiv.innerHTML = '';
     }
-    
+
     // 根据启用状态显示/隐藏选项
     toggleUpdateModeOptions();
     onUpdateModeChange();
-    
+
     document.getElementById('updateSettingsModal').style.display = 'flex';
 }
 
@@ -460,7 +533,7 @@ function onUpdateModeChange() {
     const deviceIdRow = document.getElementById('deviceIdRow');
     const katapultSerialRow = document.getElementById('katapultSerialRow');
     const helpText = document.getElementById('modeHelpText');
-    
+
     // 模式说明
     const modeDescriptions = {
         'CAN': '主板通过CAN总线连接，Klipper通讯接口为CAN，BootLoader为Katapult',
@@ -472,9 +545,9 @@ function onUpdateModeChange() {
         'TF': '下载firmware.bin到本地，手动复制到TF卡烧录',
         'HOST': '上位机Linux进程，无需设备ID'
     };
-    
+
     helpText.textContent = modeDescriptions[mode] || '';
-    
+
     // 根据模式显示/隐藏字段
     if (mode === 'HOST') {
         deviceIdRow.style.display = 'none';
@@ -495,9 +568,9 @@ function onUpdateModeChange() {
 async function scanDeviceIdForUpdate() {
     const mode = document.getElementById('updateSettingMode').value;
     const deviceIdInput = document.getElementById('updateSettingDeviceId');
-    
+
     deviceIdInput.placeholder = '扫描中...';
-    
+
     try {
         if (mode === 'CAN') {
             // 扫描CAN设备 — 使用与资源页相同的 /api/system/can-uuid
@@ -564,7 +637,7 @@ async function saveUpdateSettings() {
     const configId = document.getElementById('updateSettingConfigId').value;
     const manufacturer = document.getElementById('updateSettingManufacturer').value;
     const boardConfigId = document.getElementById('updateSettingBoardConfigId').value;
-    
+
     // 构建固件更新配置（简化版，只包含必要信息）
     const updateConfig = {
         id: configId,
@@ -575,16 +648,16 @@ async function saveUpdateSettings() {
         device_id: document.getElementById('updateSettingDeviceId').value,
         katapult_serial: document.getElementById('updateSettingKatapultSerial').value
     };
-    
+
     try {
-        const response = await fetch(`/api/firmware-update/config/${manufacturer}/${configId}`, {
+        const response = await fetch(`/api/firmware-update/config/${encodeURIComponent(manufacturer)}/${encodeURIComponent(configId)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updateConfig)
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             showSuccess('固件更新配置已保存');
             closeUpdateSettingsModal();
@@ -604,51 +677,51 @@ async function compileAllSelected() {
         showError('请先选择要编译的配置');
         return;
     }
-    
-    const configs = updateableConfigs.filter(c => selectedUpdateConfigs.has(c.id));
-    
+
+    const configs = updateableConfigs.filter(c => selectedUpdateConfigs.has(fuUpdateConfigKey(c)));
+
     // 显示进度
     showBatchProgress();
     const resultsDiv = document.getElementById('batchUpdateResults');
     resultsDiv.innerHTML = '';
-    
+
     let completed = 0;
     const total = configs.length;
-    
+
     for (const config of configs) {
         const displayName = config.name || config.id;
         updateBatchStatus(`正在编译: ${displayName}...`);
         addBatchResult(displayName, 'running', '编译中...');
-        
+
         if (!config.board_config_id) {
             addBatchResult(displayName, 'error', '未关联主板配置，无法编译');
             completed++;
             updateBatchProgress(completed, total);
             continue;
         }
-        
+
         try {
             // 先获取完整的主板配置
             const mfr = config._manufacturer || config.manufacturer;
-            const bcResponse = await fetch(`/api/config/get/${mfr}/${config.board_config_id}`);
+            const bcResponse = await fetch(`/api/config/get/${encodeURIComponent(mfr)}/${encodeURIComponent(config.board_config_id)}`);
             const boardConfig = await bcResponse.json();
-            
+
             if (boardConfig.error) {
                 addBatchResult(displayName, 'error', '获取主板配置失败: ' + boardConfig.error);
                 completed++;
                 updateBatchProgress(completed, total);
                 continue;
             }
-            
+
             // 使用完整的主板配置进行编译
             const compileResponse = await fetch('/api/firmware/compile', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ config: boardConfig })
             });
-            
-            const result = await compileResponse.json();
-            
+
+            const result = await fuReadSseJson(compileResponse);
+
             if (result.success) {
                 addBatchResult(displayName, 'success', '编译成功');
             } else {
@@ -657,11 +730,11 @@ async function compileAllSelected() {
         } catch (error) {
             addBatchResult(displayName, 'error', error.message);
         }
-        
+
         completed++;
         updateBatchProgress(completed, total);
     }
-    
+
     updateBatchStatus('编译完成');
     setTimeout(hideBatchProgress, 3000);
 }
@@ -672,72 +745,72 @@ async function flashAllSelected() {
         showError('请先选择要更新的配置');
         return;
     }
-    
-    const configs = updateableConfigs.filter(c => 
-        selectedUpdateConfigs.has(c.id) && c.enabled !== false
+
+    const configs = updateableConfigs.filter(c =>
+        selectedUpdateConfigs.has(fuUpdateConfigKey(c)) && c.enabled !== false
     );
-    
+
     if (configs.length === 0) {
         showError('选中的配置中，没有启用固件更新的');
         return;
     }
-    
+
     // 确认
     if (!confirm(`确定要更新 ${configs.length} 个配置吗？`)) {
         return;
     }
-    
+
     // 显示进度
     showBatchProgress();
     const resultsDiv = document.getElementById('batchUpdateResults');
     resultsDiv.innerHTML = '';
-    
+
     let completed = 0;
     const total = configs.length;
-    
+
     for (const config of configs) {
         const mode = config.mode || 'CAN';
         const displayName = config.name || config.id;
-        
+
         updateBatchStatus(`正在更新: ${displayName}...`);
         addBatchResult(displayName, 'running', '编译中...');
-        
+
         if (!config.board_config_id) {
             addBatchResult(displayName, 'error', '未关联主板配置，无法编译');
             completed++;
             updateBatchProgress(completed, total);
             continue;
         }
-        
+
         try {
             // 1. 先获取完整的主板配置
             const mfr = config._manufacturer || config.manufacturer;
-            const bcResponse = await fetch(`/api/config/get/${mfr}/${config.board_config_id}`);
+            const bcResponse = await fetch(`/api/config/get/${encodeURIComponent(mfr)}/${encodeURIComponent(config.board_config_id)}`);
             const boardConfig = await bcResponse.json();
-            
+
             if (boardConfig.error) {
                 addBatchResult(displayName, 'error', '获取主板配置失败: ' + boardConfig.error);
                 completed++;
                 updateBatchProgress(completed, total);
                 continue;
             }
-            
+
             // 2. 使用完整的主板配置进行编译
             const compileResponse = await fetch('/api/firmware/compile', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ config: boardConfig })
             });
-            
-            const compileResult = await compileResponse.json();
-            
+
+            const compileResult = await fuReadSseJson(compileResponse);
+
             if (!compileResult.success) {
                 addBatchResult(displayName, 'error', '编译失败: ' + (compileResult.error || '未知错误'));
                 completed++;
                 updateBatchProgress(completed, total);
                 continue;
             }
-            
+
             // 3. 根据模式处理
             if (mode === 'TF') {
                 // TF卡模式：提供下载
@@ -757,7 +830,7 @@ async function flashAllSelected() {
                         firmware_path: compileResult.firmware_path
                     })
                 });
-                const flashResult = await flashResponse.json();
+                const flashResult = await fuReadSseJson(flashResponse);
                 if (flashResult.success) {
                     addBatchResult(displayName, 'success', 'UF2烧录成功');
                 } else {
@@ -774,7 +847,7 @@ async function flashAllSelected() {
                         auto_restart: true
                     })
                 });
-                const installResult = await installResponse.json();
+                const installResult = await fuReadSseJson(installResponse);
                 if (installResult.success) {
                     const msg = installResult.message || '安装成功';
                     addBatchResult(displayName, 'success', msg);
@@ -784,7 +857,7 @@ async function flashAllSelected() {
             } else {
                 // 其他模式：烧录
                 addBatchResult(displayName, 'running', '烧录中...');
-                
+
                 // 将新模式映射到旧的flash_mode
                 const modeToFlashMode = {
                     'CAN': 'CAN',
@@ -794,7 +867,7 @@ async function flashAllSelected() {
                     'CAN_BRIDGE_DFU': 'DFU',
                     'CAN_BRIDGE_KATAPULT': 'KAT'
                 };
-                
+
                 const flashResponse = await fetch('/api/firmware/flash', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -805,24 +878,24 @@ async function flashAllSelected() {
                         katapult_serial: config.katapult_serial || ''
                     })
                 });
-                
-                const flashResult = await flashResponse.json();
-                
+
+                const flashResult = await fuReadSseJson(flashResponse);
+
                 if (flashResult.success) {
                     addBatchResult(displayName, 'success', '更新成功');
                 } else {
                     addBatchResult(displayName, 'error', '烧录失败: ' + (flashResult.error || '未知错误'));
                 }
             }
-            
+
         } catch (error) {
             addBatchResult(displayName, 'error', error.message);
         }
-        
+
         completed++;
         updateBatchProgress(completed, total);
     }
-    
+
     updateBatchStatus('更新完成');
     setTimeout(hideBatchProgress, 5000);
 }
@@ -853,7 +926,7 @@ function updateBatchStatus(status) {
 // 添加批量结果
 function addBatchResult(name, status, message) {
     const resultsDiv = document.getElementById('batchUpdateResults');
-    
+
     // 查找是否已有该配置的结果，有则更新
     const existingItem = Array.from(resultsDiv.querySelectorAll('.update-result-item'))
         .find(el => el.dataset.name === String(name));
@@ -870,7 +943,7 @@ function addBatchResult(name, status, message) {
         `;
         return;
     }
-    
+
     // 添加新结果
     const item = document.createElement('div');
     item.className = 'update-result-item';
@@ -884,7 +957,7 @@ function addBatchResult(name, status, message) {
             <div style="font-size:13px;color:#6c757d;">${fuEscapeHtml(message)}</div>
         </div>
     `;
-    
+
     resultsDiv.insertBefore(item, resultsDiv.firstChild);
 }
 

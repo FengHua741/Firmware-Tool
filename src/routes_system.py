@@ -36,23 +36,13 @@ resource_history = {
 
 # 服务列表
 SERVICES = ['klipper', 'moonraker', 'nginx', 'crowsnest', 'KlipperScreen']
-SERVICE_CONTROL_DENYLIST = {
-    '',
-    'dbus',
-    'polkit',
-    'systemd',
-    'systemd-logind',
-    'networking',
-    'network-manager',
-    'ssh',
-    'sshd',
-}
 SERVICE_CONTROL_ALIASES = {
     'klipper': 'klipper',
     'moonraker': 'moonraker',
     'nginx': 'nginx',
     'crowsnest': 'crowsnest',
     'klipperscreen': 'KlipperScreen',
+    'helixscreen': 'Helixscreen',
     'firmware-tool': 'firmware-tool',
     'mainsail': 'nginx',
     'fluidd': 'nginx',
@@ -63,19 +53,6 @@ def _normalize_service_name(service_name):
     key = str(service_name or '').strip().lower()
     if key in SERVICE_CONTROL_ALIASES:
         return SERVICE_CONTROL_ALIASES[key]
-    if key in SERVICE_CONTROL_DENYLIST:
-        return ''
-    if not re.match(r'^[a-zA-Z0-9_.@-]+$', key):
-        return ''
-    try:
-        result = run_cmd(
-            ['systemctl', 'list-unit-files', f'{key}.service'],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0 and f'{key}.service' in (result.stdout or ''):
-            return key
-    except Exception:
-        pass
     return ''
 
 # 远程资源采集缓存
@@ -811,7 +788,7 @@ def read_printer_cfg_direct():
         manager = SSHManager.get_instance()
         for path in candidates:
             try:
-                result = manager.exec_command(f'cat "{path}" 2>/dev/null', timeout=5, inject_sudo=False)
+                result = manager.exec_command(f'cat {shlex.quote(path)} 2>/dev/null', timeout=5, inject_sudo=False)
                 if result.returncode == 0 and result.stdout.strip():
                     uuids = read_mcu_uuids_from_printer_cfg(result.stdout)
                     if uuids:
@@ -825,7 +802,7 @@ def read_printer_cfg_direct():
     for path in candidates:
         if os.path.exists(path):
             try:
-                with open(path) as f:
+                with open(path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
                 uuids = read_mcu_uuids_from_printer_cfg(content)
                 if uuids:
@@ -987,7 +964,7 @@ def verify_mcu_connection_status(uuids):
 @system_bp.route('/api/system/can-uuid', methods=['POST'])
 def search_can_uuid():
     """通过指定CAN接口搜索UUID"""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     iface = data.get('iface', 'can0')
     if not _is_valid_can_iface(iface):
         return jsonify({'uuids': [], 'error': '无效的CAN接口'})
@@ -1043,14 +1020,14 @@ def get_video_devices():
         try:
             name_path = f'/sys/class/video4linux/{video_name}/name'
             if os.path.exists(name_path):
-                with open(name_path) as f:
+                with open(name_path, 'r', encoding='utf-8', errors='replace') as f:
                     name = f.read().strip()
         except Exception:
             pass
         try:
             index_path = f'/sys/class/video4linux/{video_name}/index'
             if os.path.exists(index_path):
-                with open(index_path) as f:
+                with open(index_path, 'r', encoding='utf-8', errors='replace') as f:
                     index = f.read().strip()
         except Exception:
             pass
@@ -1357,7 +1334,7 @@ def get_available_services():
 @system_bp.route('/api/system/service', methods=['POST'])
 def control_service():
     """控制服务（启动/停止/重启）"""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     requested_service = data.get('service')
     service_name = _normalize_service_name(requested_service)
     action = data.get('action')
@@ -1470,8 +1447,26 @@ def update_project():
             yield "保存当前配置...\n"
             config_backup = None
             if os.path.exists(CONFIG_PATH):
-                with open(CONFIG_PATH, 'r') as f:
+                with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
                     config_backup = f.read()
+
+            status_result = run_cmd(
+                ['git', '-C', BASE_DIR, 'status', '--porcelain'],
+                capture_output=True, text=True, timeout=10, env=env
+            )
+            if status_result.returncode != 0:
+                yield f"错误: 无法检查工作区状态: {status_result.stderr}\n"
+                return
+            dirty_lines = [
+                line for line in (status_result.stdout or '').splitlines()
+                if not line.endswith('data/config.json')
+            ]
+            if dirty_lines:
+                yield "错误: 工作区存在未提交修改，已停止自动更新以避免覆盖本地文件。\n"
+                yield "\n".join(dirty_lines[:20]) + "\n"
+                if len(dirty_lines) > 20:
+                    yield f"... 还有 {len(dirty_lines) - 20} 项\n"
+                return
 
             yield "拉取最新代码...\n"
             result = run_cmd(
@@ -1488,7 +1483,7 @@ def update_project():
 
             if config_backup:
                 yield "恢复配置...\n"
-                with open(CONFIG_PATH, 'w') as f:
+                with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
                     f.write(config_backup)
 
             yield "重启服务...\n"
