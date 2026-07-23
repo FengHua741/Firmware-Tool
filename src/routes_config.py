@@ -16,6 +16,7 @@ board_config_bp = Blueprint('board_config', __name__, url_prefix='/api/config')
 # 预设厂家列表
 PRESET_MANUFACTURERS = ["FLY", "BTT", "MKS", "Creality", "Prusa", "Voron", "自定义"]
 ALLOWED_BOARD_TYPES = {'mainboard', 'toolboard', 'expansion'}
+MAX_UPLOAD_CONFIG_SIZE = 512 * 1024
 
 
 def _normalize_board_type(board_type):
@@ -218,6 +219,8 @@ def create_config(manufacturer):
         os.makedirs(type_dir, exist_ok=True)
 
         filepath = os.path.join(type_dir, f"{config_id}.json")
+        if os.path.exists(filepath):
+            return jsonify({'error': '配置 ID 已存在'}), 409
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
 
@@ -290,8 +293,21 @@ def upload_config():
                     errors.append(msg)
                     logger.warning(msg)
                     continue
+                if file.content_length and file.content_length > MAX_UPLOAD_CONFIG_SIZE:
+                    msg = f"配置文件过大: {safe_filename}"
+                    errors.append(msg)
+                    logger.warning(msg)
+                    continue
 
                 try:
+                    file.stream.seek(0, os.SEEK_END)
+                    size = file.stream.tell()
+                    file.stream.seek(0)
+                    if size > MAX_UPLOAD_CONFIG_SIZE:
+                        msg = f"配置文件过大: {safe_filename}"
+                        errors.append(msg)
+                        logger.warning(msg)
+                        continue
                     cfg_data = json.load(file.stream)
                 except Exception as e:
                     msg = f"JSON 解析失败 {safe_filename}: {e}"
@@ -385,6 +401,8 @@ def create_manufacturer():
             return jsonify({'success': False, 'error': '厂家名称不能为空'}), 400
 
         mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
+        if not _path_in_board_configs(mfr_dir):
+            return jsonify({'success': False, 'error': '非法路径'}), 403
 
         if os.path.exists(mfr_dir):
             return jsonify({'success': False, 'error': '厂家已存在'}), 400

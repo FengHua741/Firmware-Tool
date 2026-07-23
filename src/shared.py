@@ -14,13 +14,9 @@ import json
 import secrets
 import time
 import psutil
-import glob
 import shutil
-import requests
 import threading
-import urllib.parse
 from datetime import datetime
-from collections import deque
 import logging
 import sys
 
@@ -168,7 +164,7 @@ def require_api_token():
 
     csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME, '')
     csrf_header = request.headers.get(CSRF_HEADER_NAME, '')
-    if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+    if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
         return jsonify({'success': False, 'error': '未授权或页面令牌已过期，请刷新页面'}), 401
     return None
 
@@ -268,6 +264,13 @@ def get_klipper_owner(klipper_path=None):
     return 'fenghua', '/home/fenghua'
 
 
+def get_moonraker_base_url():
+    """获取 Moonraker HTTP API 基础 URL"""
+    host = config.get('moonraker_host') or ('127.0.0.1' if not is_ssh_mode() else config.get('ssh_host', '127.0.0.1'))
+    port = config.get('moonraker_port', 7125)
+    return f'http://{host}:{port}'
+
+
 def expand_klipper_path(path, force_local=False):
     """展开 Klipper 路径，处理 systemd root 运行时 ~ 扩展问题
 
@@ -346,7 +349,6 @@ def sanitize_manufacturer(mfr):
     # 移除路径遍历字符和特殊字符
     safe = os.path.basename(os.path.normpath(mfr))
     # 只允许字母、数字、连字符、下划线
-    import re
     safe = re.sub(r'[^a-zA-Z0-9_-]', '', safe)
     return safe
 
@@ -354,7 +356,6 @@ def sanitize_config_id(cid):
     """清理配置ID，防止路径遍历"""
     if not cid:
         return ''
-    import re
     # 只允许字母、数字、连字符、下划线、点（不含路径分隔符）
     safe = re.sub(r'[^a-zA-Z0-9_.\-]', '', cid)
     # 禁止以点开头（防止 .. 或 .）

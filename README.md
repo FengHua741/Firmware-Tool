@@ -346,6 +346,7 @@ Firmware-Tool/
 │   ├── routes_klipper.py         # Klipper MCU 数据库蓝图 - Kconfig 解析
 │   ├── routes_update.py          # 固件更新蓝图 - 更新配置管理
 │   ├── ssh_manager.py            # SSH 远程执行管理
+│   ├── board_config_loader.py    # 主板配置加载器 - 三级结构解析与标准化
 │   ├── kconfig_can_parser.py     # Klipper Kconfig CAN 解析
 │   └── klipper_kconfig_parser.py # Klipper Kconfig 全平台解析
 ├── data/                         # 数据文件

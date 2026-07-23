@@ -24,14 +24,13 @@ from shared import (
     load_all_boards, load_board_config, get_manufacturers, get_bl_firmwares,
     SSHManager,
 )
-from routes_system import _scan_can_uuids
+from routes_system import _scan_can_uuids, _is_valid_can_iface
 from klipper_kconfig_parser import KlipperKconfigParser
 from kconfig_can_parser import parse_can_options
 
 firmware_bp = Blueprint('firmware', __name__)
 MANIFEST_FILENAME = 'firmware-tool-manifest.json'
 DEFAULT_CANBUS_FREQUENCY = '1000000'
-CAN_IFACE_RE = re.compile(r'^can[\w.-]*$')
 _compile_lock = threading.Lock()
 _flash_lock = threading.Lock()
 
@@ -62,7 +61,7 @@ def _umount_rp2040_boot():
                             f'sudo umount {shlex.quote(mount_point)} 2>/dev/null || true',
                             shell=True, capture_output=True, timeout=10
                         )
-    except:
+    except Exception:
         pass
     time.sleep(0.5)
 
@@ -95,10 +94,6 @@ def _truthy(value):
     if isinstance(value, bool):
         return value
     return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
-
-
-def _is_valid_can_iface(iface):
-    return bool(iface and CAN_IFACE_RE.match(str(iface)))
 
 
 def _normalize_canbus_frequency(value):
@@ -1195,7 +1190,7 @@ def compile_firmware():
         if is_ssh_mode():
             sudo_write_file(config_path, config_content)
         else:
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 f.write(config_content)
 
         if verbose_config_logs:
@@ -1210,7 +1205,7 @@ def compile_firmware():
             os.makedirs(out_dir, exist_ok=True)
             try:
                 os.chmod(out_dir, 0o755)
-            except:
+            except Exception:
                 pass
 
         if verbose_config_logs:
@@ -1504,7 +1499,7 @@ def detect_devices():
                             short_name = os.path.basename(device_id)
                             if not any(d['id'] == device_id for d in devices):
                                 devices.append({'id': device_id, 'name': f'{short_name} (USB)', 'type': 'usb_ftdi'})
-            except:
+            except Exception:
                 pass
 
             try:
@@ -1539,7 +1534,7 @@ def detect_devices():
                         if lsusb_result.stdout and vidpid in lsusb_result.stdout:
                             devices.append({'id': f'dfu:{vidpid}', 'name': f'DFU Device ({chip_name} {vidpid})', 'type': 'dfu', 'vid_pid': vidpid, 'serial': '', 'devnum': ''})
                             found_dfu = True
-            except:
+            except Exception:
                 pass
 
             try:
@@ -1552,7 +1547,7 @@ def detect_devices():
                     lsusb_output = run_cmd('lsusb | grep -i "2e8a:" 2>/dev/null || echo ""', shell=True, capture_output=True, text=True)
                     if lsusb_output.stdout.strip() and '2e8a:' in lsusb_output.stdout:
                         devices.append({'id': 'rp2040_boot', 'name': 'RP2040 UF2 (USB 2e8a)'})
-            except:
+            except Exception:
                 pass
 
         return jsonify({'devices': _annotate_devices(devices)})
@@ -1695,7 +1690,6 @@ def flash_firmware():
             python_bin = get_klipper_python_bin(home_dir)
             flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
 
-            import logging
             _prefix = f'{can_iface}:'
             _is_can_uuid = bool(re.match(r'^[a-fA-F0-9]{8,32}$', device.replace(_prefix, '').replace('can0:', '')))
             if _prefix in device or 'can0:' in device or _is_can_uuid:
@@ -1706,15 +1700,15 @@ def flash_firmware():
                         break
 
                 if is_fast_ssh_mode():
-                    logging.info('FAST-SSH 模式：使用 CAN 直接烧录')
+                    logger.info('FAST-SSH 模式：使用 CAN 直接烧录')
                     fast_flashtool = os.path.join(home_dir, 'klipper', 'lib', 'katapult', 'flashtool.py')
                     fast_flash_can = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
                     if path_exists(fast_flashtool):
                         cmd = f'{shlex.quote(python_bin)} {shlex.quote(fast_flashtool)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
-                        logging.info(f'FAST-SSH 新版烧录命令 (katapult/flashtool.py, {can_iface}): {cmd}')
+                        logger.info(f'FAST-SSH 新版烧录命令 (katapult/flashtool.py, {can_iface}): {cmd}')
                     elif path_exists(fast_flash_can):
                         cmd = f'{shlex.quote(python_bin)} {shlex.quote(fast_flash_can)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
-                        logging.info(f'FAST-SSH 旧版烧录命令 (canboot/flash_can.py, {can_iface}): {cmd}')
+                        logger.info(f'FAST-SSH 旧版烧录命令 (canboot/flash_can.py, {can_iface}): {cmd}')
                     else:
                         _err_msg = f"未找到烧录工具。请确认 Klipper 已安装。\n查找路径:\n  {fast_flashtool}\n  {fast_flash_can}"
                         yield f'data: {json.dumps({"error": _err_msg})}\n\n'
@@ -1722,9 +1716,9 @@ def flash_firmware():
                     result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
                 else:
                     reset_cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -i {shlex.quote(can_iface)} -r -u {shlex.quote(can_uuid)}'
-                    logging.info(f'CAN 重置命令：{reset_cmd}')
+                    logger.info(f'CAN 重置命令：{reset_cmd}')
                     run_cmd(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
-                    logging.info('等待设备重新枚举...')
+                    logger.info('等待设备重新枚举...')
                     katapult_device = None
                     for _ in range(20):
                         time.sleep(0.5)
@@ -1739,36 +1733,36 @@ def flash_firmware():
                                 katapult_device = lines[0]
                             if katapult_device:
                                 break
-                        logging.info(f'轮询中... ({_+1}/20)')
+                        logger.info(f'轮询中... ({_+1}/20)')
 
                     if katapult_device:
                         new_device = katapult_device
-                        logging.info(f'找到设备：{new_device}')
+                        logger.info(f'找到设备：{new_device}')
                         cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -d {shlex.quote(new_device)} -f {shlex.quote(firmware_path)}'
-                        logging.info(f'USB 烧录命令：{cmd}')
+                        logger.info(f'USB 烧录命令：{cmd}')
                         result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
                     else:
-                        logging.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
+                        logger.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
                         flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
                         if path_exists(flash_can_script):
                             cmd = f'{shlex.quote(python_bin)} {shlex.quote(flash_can_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
-                            logging.info(f'CAN 烧录命令 ({can_iface}): {cmd}')
+                            logger.info(f'CAN 烧录命令 ({can_iface}): {cmd}')
                             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
                         else:
-                            logging.warning(f'flash_can.py 不存在: {flash_can_script}，回退到 flashtool.py CAN 模式')
+                            logger.warning(f'flash_can.py 不存在: {flash_can_script}，回退到 flashtool.py CAN 模式')
                             cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
-                            logging.info(f'flashtool CAN 烧录命令 ({can_iface}): {cmd}')
+                            logger.info(f'flashtool CAN 烧录命令 ({can_iface}): {cmd}')
                             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
             else:
                 usb_device = katapult_serial if katapult_serial else device
-                logging.info(f'USB 烧录命令：device={usb_device}')
+                logger.info(f'USB 烧录命令：device={usb_device}')
                 cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -d {shlex.quote(usb_device)} -f {shlex.quote(firmware_path)}'
-                logging.info(f'USB 烧录命令：{cmd}')
+                logger.info(f'USB 烧录命令：{cmd}')
                 result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
 
             output = result.stdout + result.stderr
             returncode = result.returncode
-            logging.info(f'烧录结果：returncode={returncode}, output={output[:200]}')
+            logger.info(f'烧录结果：returncode={returncode}, output={output[:200]}')
 
         elif flash_mode == 'UF2':
             rp2040_flash_tool = os.path.join(klipper_path, 'lib/rp2040_flash/rp2040_flash')
@@ -1892,7 +1886,7 @@ def get_host_firmware_info():
                         full_path = os.path.join(firmware_dir, name)
                         try:
                             size = os.path.getsize(full_path)
-                        except:
+                        except Exception:
                             size = 0
                         firmware_files.append({'name': name, 'path': full_path, 'size': size})
 

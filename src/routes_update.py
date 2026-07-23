@@ -15,6 +15,7 @@ firmware_update_bp = Blueprint('firmware_update', __name__, url_prefix='/api/fir
 
 
 def _firmware_update_dir(manufacturer):
+    manufacturer = sanitize_manufacturer(manufacturer)
     return os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'firmware_update')
 
 
@@ -34,6 +35,9 @@ def list_firmware_update_configs():
 
         if os.path.exists(BOARD_CONFIGS_DIR):
             for manufacturer in os.listdir(BOARD_CONFIGS_DIR):
+                manufacturer = sanitize_manufacturer(manufacturer)
+                if not manufacturer:
+                    continue
                 mfr_dir = os.path.join(BOARD_CONFIGS_DIR, manufacturer)
                 if not os.path.isdir(mfr_dir) or manufacturer.startswith('.'):
                     continue
@@ -118,7 +122,8 @@ def save_firmware_update_config(manufacturer, config_id):
             return jsonify({'success': False, 'error': '请求体必须是 JSON 对象'}), 400
 
         update_dir = _firmware_update_dir(manufacturer)
-        os.makedirs(update_dir, exist_ok=True)
+        if not _path_in_update_dir(update_dir, manufacturer):
+            return jsonify({'success': False, 'error': '非法路径'}), 403
 
         config_data['id'] = config_id
         config_data['manufacturer'] = manufacturer
@@ -126,6 +131,7 @@ def save_firmware_update_config(manufacturer, config_id):
         filepath = os.path.join(update_dir, f"{config_id}.json")
         if not _path_in_update_dir(filepath, manufacturer):
             return jsonify({'success': False, 'error': '非法路径'}), 403
+        os.makedirs(update_dir, exist_ok=True)
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(config_data, f, ensure_ascii=False, indent=2)
 

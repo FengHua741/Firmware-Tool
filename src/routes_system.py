@@ -20,6 +20,7 @@ from shared import (
     DFU_KNOWN_DEVICES, DFU_KNOWN_VIDPIDS,
     run_cmd, run_cmd_check, path_exists, list_dir, is_ssh_mode, is_fast_ssh_mode,
     SSHManager, get_klipper_owner, get_klipper_python_bin, expand_klipper_path,
+    get_moonraker_base_url,
     CSRF_COOKIE_NAME, new_csrf_token,
 )
 
@@ -327,8 +328,8 @@ def resource_monitor():
                             manager.disconnect()
                             manager.get_connection()
                             logger.info("SSH 自动重连成功")
-                        except Exception as re:
-                            logger.debug(f"SSH 自动重连失败: {re}")
+                        except Exception as reconn_err:
+                            logger.debug(f"SSH 自动重连失败: {reconn_err}")
                     time.sleep(5)
                 else:
                     time.sleep(2)
@@ -403,7 +404,6 @@ def get_system_resources():
                             iface_lower.startswith('wlan') or
                             iface_lower.startswith('wlo')):
                         continue
-                    iface_lower = iface_name.lower()
                     if iface_lower.startswith('eth') or iface_lower.startswith('en'):
                         display_name = '网线'
                     elif iface_lower.startswith('wlan') or iface_lower.startswith('wlo'):
@@ -416,11 +416,11 @@ def get_system_resources():
                             iface_info['ips'].append(addr.address)
                     if iface_info['ips']:
                         net_info['interfaces'].append(iface_info)
-            except:
+            except Exception:
                 try:
                     hostname = socket.gethostname()
                     net_info['interfaces'] = [{'name': 'default', 'ips': [socket.gethostbyname(hostname)]}]
-                except:
+                except Exception:
                     net_info['interfaces'] = []
 
         service_status = {}
@@ -501,8 +501,7 @@ def get_serial_devices():
     try:
         return _get_serial_devices()
     except Exception as e:
-        import logging
-        logging.error(f'获取串口设备失败: {e}')
+        logger.error(f'获取串口设备失败: {e}')
         return jsonify({'devices': [], 'error': str(e)})
 
 
@@ -743,17 +742,6 @@ def read_mcu_uuids_from_printer_cfg(content):
     return uuids
 
 
-def get_moonraker_base_url():
-    """获取 Moonraker HTTP API 的基础 URL
-    本地模式：始终使用 127.0.0.1 查询本机 Moonraker
-    SSH模式：使用 ssh_host 查询被控机器的 Moonraker
-    """
-    if is_ssh_mode():
-        host = config.get('ssh_host', '127.0.0.1')
-    else:
-        host = '127.0.0.1'
-    port = config.get('moonraker_port', 7125)
-    return f'http://{host}:{port}'
 
 
 def query_moonraker_printer_cfg():
@@ -807,7 +795,7 @@ def read_printer_cfg_direct():
                 uuids = read_mcu_uuids_from_printer_cfg(content)
                 if uuids:
                     return uuids, True
-            except:
+            except Exception:
                 continue
     return [], False
 
@@ -1069,7 +1057,7 @@ def get_all_ids():
                         formatted = f"serial: {device_id}"
                         result['usb'].append({'raw': device_id, 'formatted': formatted})
                         result['kat_usb'].append({'raw': device_id, 'formatted': f'USB: {device_id}'})
-        except:
+        except Exception:
             pass
 
         try:
@@ -1095,7 +1083,7 @@ def get_all_ids():
                     dfu_devices.append({'raw': f'dfu:{vid_pid}', 'formatted': label})
                 if dfu_devices:
                     result['dfu'] = dfu_devices
-        except:
+        except Exception:
             pass
 
         try:
@@ -1106,8 +1094,7 @@ def get_all_ids():
             if error:
                 result['can_error'] = error
         except Exception as e:
-            import logging
-            logging.error(f'CAN设备检测失败：{e}')
+            logger.error(f'CAN设备检测失败：{e}')
 
         try:
             output = run_cmd(
@@ -1118,7 +1105,7 @@ def get_all_ids():
                 for line in output.stdout.strip().split('\n'):
                     if '/dev/video' in line:
                         result['camera'].append(line.strip())
-        except:
+        except Exception:
             pass
 
         try:
@@ -1143,7 +1130,7 @@ def get_all_ids():
                         'raw': 'rp2040_boot',
                         'formatted': 'RP2040 BOOT设备 (USB 2e8a)'
                     })
-        except:
+        except Exception:
             pass
 
         return jsonify(result)

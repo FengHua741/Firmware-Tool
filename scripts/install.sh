@@ -74,11 +74,19 @@ echo ""
 # 读取端口配置（默认9999）
 read -p "请输入服务端口号 [默认: 9999]: " PORT
 PORT=${PORT:-9999}
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    echo -e "${RED}端口号必须是 1-65535 的数字${NC}"
+    exit 1
+fi
 
 echo -e "${GREEN}使用端口: $PORT${NC}"
 echo ""
 
 PYTHON_FOR_TOKEN=$(command -v python3 2>/dev/null || echo /usr/bin/python3)
+if [ ! -x "$PYTHON_FOR_TOKEN" ]; then
+    echo -e "${RED}未找到可用的 python3，无法生成 API Token${NC}"
+    exit 1
+fi
 API_TOKEN="$($PYTHON_FOR_TOKEN - <<'PY'
 import secrets
 print(secrets.token_urlsafe(32))

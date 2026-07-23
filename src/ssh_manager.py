@@ -696,15 +696,9 @@ def get_fast_ssh_credentials():
 
 def is_ssh_mode():
     """判断当前是否为 SSH 远程模式（含标准 SSH 和 FAST-SSH）"""
-    # 避免循环导入: 直接读取配置文件，不通过 from app import config
     try:
-        import json, os
-        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'config.json')
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                cfg = json.load(f)
-                return cfg.get('connection_mode') in ('ssh', 'fast-ssh')
-        return False
+        cfg = _load_config_file()
+        return cfg.get('connection_mode') in ('ssh', 'fast-ssh')
     except Exception:
         return False
 

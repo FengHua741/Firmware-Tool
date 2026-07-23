@@ -54,6 +54,10 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${RED}目录不像 Firmware-Tool 项目，已停止删除: $PROJECT_DIR${NC}"
         exit 1
     fi
+    if [ -L "$PROJECT_DIR" ]; then
+        echo -e "${RED}拒绝删除符号链接目录: $PROJECT_DIR${NC}"
+        exit 1
+    fi
     echo -e "${YELLOW}删除项目目录...${NC}"
     rm -rf "$PROJECT_DIR"
     echo -e "${GREEN}项目目录已删除${NC}"

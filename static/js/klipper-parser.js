@@ -119,11 +119,12 @@ function klipperParserParseConfig(config) {
 
 function klipperParserFormatPinValue(pinData) {
     if (!pinData || !pinData.value) return '<span class="pin-value">未配置</span>';
-    if (pinData.type === 'virtual') return `<span class="virtual-pin">${pinData.value}</span>`;
-    if (pinData.type === 'host') return `<span class="host-pin">${pinData.value}</span>`;
-    if (pinData.type === 'toolboard') return `<span class="toolboard-name">${pinData.board}</span>:<span class="pin-number">${pinData.pin}</span> <span class="toolboard-hint">工具板</span>`;
-    if (pinData.value.includes('cs_pin') || pinData.value.includes('uart_pin')) return `<span class="driver-pin">${pinData.value}</span>`;
-    return `<span class="pin-value">${pinData.value}</span>`;
+    const value = kpEscapeHtml(pinData.value);
+    if (pinData.type === 'virtual') return `<span class="virtual-pin">${value}</span>`;
+    if (pinData.type === 'host') return `<span class="host-pin">${value}</span>`;
+    if (pinData.type === 'toolboard') return `<span class="toolboard-name">${kpEscapeHtml(pinData.board)}</span>:<span class="pin-number">${kpEscapeHtml(pinData.pin)}</span> <span class="toolboard-hint">工具板</span>`;
+    if (pinData.value.includes('cs_pin') || pinData.value.includes('uart_pin')) return `<span class="driver-pin">${value}</span>`;
+    return `<span class="pin-value">${value}</span>`;
 }
 
 function klipperParserBuildResultHTML(result, checkReport) {
@@ -134,20 +135,20 @@ function klipperParserBuildResultHTML(result, checkReport) {
     }
     if (result.toolboards && result.toolboards.length > 0) {
         html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-toolbox" style="margin-right:10px;"></i> 工具板配置</h3><div class="toolboard-section">';
-        result.toolboards.forEach(tb => { html += `<div class="toolboard-card"><i class="fas fa-microchip"></i><div><strong>${tb}</strong><div class="toolboard-pin">已配置工具板引脚</div></div></div>`; });
+        result.toolboards.forEach(tb => { html += `<div class="toolboard-card"><i class="fas fa-microchip"></i><div><strong>${kpEscapeHtml(tb)}</strong><div class="toolboard-pin">已配置工具板引脚</div></div></div>`; });
         html += '</div></div><hr>';
     }
     if (result.axes.length > 0) {
         html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-arrows-alt" style="margin-right:10px;"></i> 步进电机轴配置</h3>';
         result.axes.forEach(axis => {
-            html += `<div class="axis-config"><h4><i class="fas fa-arrows-alt-h"></i> ${axis.name.toUpperCase()}轴</h4><ul>`;
+            html += `<div class="axis-config"><h4><i class="fas fa-arrows-alt-h"></i> ${kpEscapeHtml(axis.name.toUpperCase())}轴</h4><ul>`;
             if (axis.step_pin) html += `<li><strong>STEP引脚</strong>: ${klipperParserFormatPinValue(axis.step_pin)}</li>`;
             if (axis.dir_pin) html += `<li><strong>DIR引脚</strong>: ${klipperParserFormatPinValue(axis.dir_pin)}</li>`;
             if (axis.enable_pin) html += `<li><strong>EN引脚</strong>: ${klipperParserFormatPinValue(axis.enable_pin)}</li>`;
             if (axis.endstop_pin) html += `<li><strong>限位开关引脚</strong>: ${klipperParserFormatPinValue(axis.endstop_pin)}</li>`;
             if (axis.driver_cs_pin) html += `<li><strong>CS引脚</strong>: ${klipperParserFormatPinValue(axis.driver_cs_pin)}</li>`;
             if (axis.driver_uart_pin) html += `<li><strong>UART引脚</strong>: ${klipperParserFormatPinValue(axis.driver_uart_pin)}</li>`;
-            if (axis.driver_type) html += `<li><strong>驱动类型</strong>: ${axis.driver_type}</li>`;
+            if (axis.driver_type) html += `<li><strong>驱动类型</strong>: ${kpEscapeHtml(axis.driver_type)}</li>`;
             html += `</ul></div>`;
         });
         html += '</div><hr>';
@@ -155,7 +156,7 @@ function klipperParserBuildResultHTML(result, checkReport) {
     if (result.extruders.length > 0) {
         html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-fire" style="margin-right:10px;"></i> 挤出机配置</h3>';
         result.extruders.forEach(extruder => {
-            html += `<div class="extruder-config"><h4><i class="fas fa-temperature-high"></i> ${extruder.name}</h4><ul>`;
+            html += `<div class="extruder-config"><h4><i class="fas fa-temperature-high"></i> ${kpEscapeHtml(extruder.name)}</h4><ul>`;
             if (extruder.step_pin) html += `<li><strong>STEP引脚</strong>: ${klipperParserFormatPinValue(extruder.step_pin)}</li>`;
             if (extruder.dir_pin) html += `<li><strong>DIR引脚</strong>: ${klipperParserFormatPinValue(extruder.dir_pin)}</li>`;
             if (extruder.enable_pin) html += `<li><strong>EN引脚</strong>: ${klipperParserFormatPinValue(extruder.enable_pin)}</li>`;
@@ -163,7 +164,7 @@ function klipperParserBuildResultHTML(result, checkReport) {
             if (extruder.sensor_pin) html += `<li><strong>热敏引脚</strong>: ${klipperParserFormatPinValue(extruder.sensor_pin)}</li>`;
             if (extruder.driver_cs_pin) html += `<li><strong>CS引脚</strong>: ${klipperParserFormatPinValue(extruder.driver_cs_pin)}</li>`;
             if (extruder.driver_uart_pin) html += `<li><strong>UART引脚</strong>: ${klipperParserFormatPinValue(extruder.driver_uart_pin)}</li>`;
-            if (extruder.driver_type) html += `<li><strong>驱动类型</strong>: ${extruder.driver_type}</li>`;
+            if (extruder.driver_type) html += `<li><strong>驱动类型</strong>: ${kpEscapeHtml(extruder.driver_type)}</li>`;
             html += `</ul></div>`;
         });
         html += '</div><hr>';
@@ -252,7 +253,7 @@ function initKlipperParser() {
         files.forEach((file, index) => {
             totalSizeBytes += file.size;
             const sizeKB = (file.size / 1024).toFixed(1);
-            fileListHTML += `<div class="file-item"><div class="file-name">${file.name}</div><div class="file-size">${sizeKB} KB</div><div class="remove-file" data-index="${index}"><i class="fas fa-times"></i></div></div>`;
+            fileListHTML += `<div class="file-item"><div class="file-name">${kpEscapeHtml(file.name)}</div><div class="file-size">${kpEscapeHtml(sizeKB)} KB</div><div class="remove-file" data-index="${index}"><i class="fas fa-times"></i></div></div>`;
         });
         fileList.innerHTML = fileListHTML;
         fileCount.textContent = `${files.length} 个文件已选择`;
@@ -287,7 +288,7 @@ function initKlipperParser() {
             return;
         }
         try {
-            const result = parseKlipperConfig(config);
+            const result = klipperParserParseConfig(config);
 
             // 运行三项配置检查
             const sections = parseMergedSections(config);
@@ -295,9 +296,9 @@ function initKlipperParser() {
             const conflicts = checkPinConflicts(config);
             const macroCheck = checkMacroModifications(config, _mainsailBaseline);
 
-            displayResult(result, { duplicates, conflicts, macroCheck });
+            resultOutput.innerHTML = klipperParserBuildResultHTML(result, { duplicates, conflicts, macroCheck });
         } catch (error) {
-            resultOutput.innerHTML = `<div class="error-msg"><i class="fas fa-exclamation-circle"></i> 解析错误: ${error.message}</div>`;
+            resultOutput.innerHTML = `<div class="error-msg"><i class="fas fa-exclamation-circle"></i> 解析错误: ${kpEscapeHtml(error.message)}</div>`;
         }
     });
 
@@ -308,170 +309,6 @@ function initKlipperParser() {
         updateFileList();
         resultOutput.innerHTML = '<p style="text-align:center; color:var(--text-secondary); padding:30px 0;">解析结果将显示在这里...</p>';
     });
-
-    function processPinValue(value) {
-        let cleanValue = value.split('#')[0].trim();
-        if (cleanValue.toLowerCase() === 'host:none') return { value: 'host:None', cleanedValue: 'host:None', type: 'host' };
-        if (cleanValue.toLowerCase().includes('virtual_endstop')) return { value: '虚拟引脚', type: 'virtual' };
-        if (cleanValue.includes(':')) {
-            const parts = cleanValue.split(':');
-            const cleanedPin = parts[1].replace(/^[!^]/, '');
-            return { value: cleanValue, cleanedValue: `${parts[0]}:${cleanedPin}`, type: 'toolboard', board: parts[0], pin: cleanedPin };
-        }
-        const cleanedValue = cleanValue.replace(/^[!^]/, '');
-        return { value: cleanValue, cleanedValue: cleanedValue, type: 'standard' };
-    }
-
-    function parseKlipperConfig(config) {
-        const lines = config.split('\n');
-        let currentSection = '';
-        const results = {
-            axes: [], extruders: [], heaterBed: null, probe: null, fans: [],
-            toolboards: [], drivers: {},
-            pinAliases: { steppers: {}, heaters: {}, sensors: {}, fans: [], endstops: {}, bltouch: {}, drivers: {} }
-        };
-
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-                currentSection = trimmed.slice(1, -1);
-                if (currentSection.toLowerCase().startsWith('mcu') && !currentSection.toLowerCase().endsWith('mcu') && !results.toolboards.includes(currentSection))
-                    results.toolboards.push(currentSection);
-                continue;
-            }
-            if (trimmed.startsWith('#') || trimmed === '') continue;
-            const lineWithoutComment = trimmed.split('#')[0].trim();
-            const parts = lineWithoutComment.split(':');
-            if (parts.length < 2) continue;
-            const key = parts[0].trim();
-            const value = parts.slice(1).join(':').trim();
-            const pinData = processPinValue(value);
-
-            if (currentSection.match(/stepper_([xyz]\d*)/i)) {
-                const match = currentSection.match(/stepper_([xyz]\d*)/i);
-                const axisType = match[1].toLowerCase();
-                let axis = results.axes.find(a => a.name === axisType);
-                if (!axis) { axis = { name: axisType, section: currentSection }; results.axes.push(axis); }
-                if (key === 'step_pin') { axis.step_pin = pinData; results.pinAliases.steppers[`${axisType.toUpperCase()}_STEP`] = pinData.cleanedValue; }
-                if (key === 'dir_pin') { axis.dir_pin = pinData; results.pinAliases.steppers[`${axisType.toUpperCase()}_DIR`] = pinData.cleanedValue; }
-                if (key === 'enable_pin') { axis.enable_pin = pinData; results.pinAliases.steppers[`${axisType.toUpperCase()}_EN`] = pinData.cleanedValue; }
-                if (key === 'endstop_pin') { axis.endstop_pin = pinData; results.pinAliases.endstops[`${axisType.toUpperCase()}_STOP`] = pinData.cleanedValue; }
-            }
-            if (currentSection.match(/extruder(\d*)/i)) {
-                const match = currentSection.match(/extruder(\d*)/i);
-                const extruderNum = match[1] || '';
-                const extruderName = extruderNum ? `挤出机${extruderNum}` : '挤出机';
-                let extruder = results.extruders.find(e => e.name === extruderName);
-                if (!extruder) { extruder = { name: extruderName, section: currentSection }; results.extruders.push(extruder); }
-                if (key === 'step_pin') { extruder.step_pin = pinData; results.pinAliases.steppers['E_STEP'] = pinData.cleanedValue; }
-                if (key === 'dir_pin') { extruder.dir_pin = pinData; results.pinAliases.steppers['E_DIR'] = pinData.cleanedValue; }
-                if (key === 'enable_pin') { extruder.enable_pin = pinData; results.pinAliases.steppers['E_EN'] = pinData.cleanedValue; }
-                if (key === 'heater_pin') { extruder.heater_pin = pinData; results.pinAliases.heaters['HEAT'] = pinData.cleanedValue; }
-                if (key === 'sensor_pin') { extruder.sensor_pin = pinData; results.pinAliases.sensors['HEAT_TEMP'] = pinData.cleanedValue; }
-            }
-            if (currentSection === 'heater_bed') {
-                if (!results.heaterBed) results.heaterBed = { section: currentSection };
-                if (key === 'heater_pin') { results.heaterBed.heater_pin = pinData; results.pinAliases.heaters['BED_OUT'] = pinData.cleanedValue; }
-                if (key === 'sensor_pin') { results.heaterBed.sensor_pin = pinData; results.pinAliases.sensors['BED_TEMP'] = pinData.cleanedValue; }
-            }
-            if (currentSection === 'probe' || currentSection === 'bltouch') {
-                if (!results.probe) results.probe = { type: currentSection, section: currentSection };
-                if (key === 'pin' || key === 'sensor_pin') { results.probe.sensor_pin = pinData; results.pinAliases.bltouch['PROBE'] = pinData.cleanedValue; }
-                if (key === 'control_pin') { results.probe.control_pin = pinData; results.pinAliases.bltouch['SERVO'] = pinData.cleanedValue; }
-            }
-            if (currentSection === 'fan' || currentSection.startsWith('heater_fan')) {
-                let fan = results.fans.find(f => f.section === currentSection);
-                if (!fan) {
-                    fan = { name: currentSection === 'fan' ? '主风扇' : currentSection, section: currentSection, type: currentSection.startsWith('heater_fan') ? '加热器风扇' : '冷却风扇' };
-                    results.fans.push(fan);
-                }
-                if (key === 'pin') { const pd = processPinValue(value); fan.pin = pd; results.pinAliases.fans.push(pd.cleanedValue); }
-            }
-            if (currentSection.startsWith('tmc')) {
-                const parts2 = currentSection.split(' ');
-                if (parts2.length > 1) {
-                    const driverType = parts2[0]; const targetAxis = parts2[1];
-                    if (!results.drivers[targetAxis]) results.drivers[targetAxis] = { type: driverType };
-                    if (key === 'cs_pin') { results.drivers[targetAxis].cs_pin = pinData; const at = targetAxis.split('_')[1] || 'E'; results.pinAliases.drivers[`${at.toUpperCase()}_CS`] = pinData.cleanedValue; }
-                    if (key === 'uart_pin') { results.drivers[targetAxis].uart_pin = pinData; const at = targetAxis.split('_')[1] || 'E'; results.pinAliases.drivers[`${at.toUpperCase()}_UART`] = pinData.cleanedValue; }
-                }
-            }
-        }
-        for (const [axisSection, driverData] of Object.entries(results.drivers)) {
-            let targetAxis = results.axes.find(a => a.section === axisSection);
-            if (!targetAxis) targetAxis = results.extruders.find(e => e.section === axisSection);
-            if (targetAxis) {
-                targetAxis.driver_cs_pin = driverData.cs_pin;
-                targetAxis.driver_uart_pin = driverData.uart_pin;
-                targetAxis.driver_type = driverData.type;
-            }
-        }
-        return results;
-    }
-
-    function displayResult(result, checkReport) {
-        let html = '';
-
-        // 配置检查报告（顶部）
-        if (checkReport) {
-            html += buildCheckReportHTML(checkReport.duplicates, checkReport.conflicts, checkReport.macroCheck);
-            html += '<hr style="margin:20px 0;">';
-        }
-
-        if (result.toolboards && result.toolboards.length > 0) {
-            html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-toolbox" style="margin-right:10px;"></i> 工具板配置</h3><div class="toolboard-section">';
-            result.toolboards.forEach(tb => { html += `<div class="toolboard-card"><i class="fas fa-microchip"></i><div><strong>${tb}</strong><div class="toolboard-pin">已配置工具板引脚</div></div></div>`; });
-            html += '</div></div><hr>';
-        }
-        if (result.axes.length > 0) {
-            html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-arrows-alt" style="margin-right:10px;"></i> 步进电机轴配置</h3>';
-            result.axes.forEach(axis => {
-                html += `<div class="axis-config"><h4><i class="fas fa-arrows-alt-h"></i> ${axis.name.toUpperCase()}轴</h4><ul>`;
-                if (axis.step_pin) html += `<li><strong>STEP引脚</strong>: ${formatPinValue(axis.step_pin)}</li>`;
-                if (axis.dir_pin) html += `<li><strong>DIR引脚</strong>: ${formatPinValue(axis.dir_pin)}</li>`;
-                if (axis.enable_pin) html += `<li><strong>EN引脚</strong>: ${formatPinValue(axis.enable_pin)}</li>`;
-                if (axis.endstop_pin) html += `<li><strong>限位开关引脚</strong>: ${formatPinValue(axis.endstop_pin)}</li>`;
-                if (axis.driver_cs_pin) html += `<li><strong>CS引脚</strong>: ${formatPinValue(axis.driver_cs_pin)}</li>`;
-                if (axis.driver_uart_pin) html += `<li><strong>UART引脚</strong>: ${formatPinValue(axis.driver_uart_pin)}</li>`;
-                if (axis.driver_type) html += `<li><strong>驱动类型</strong>: ${axis.driver_type}</li>`;
-                html += `</ul></div>`;
-            });
-            html += '</div><hr>';
-        }
-        if (result.extruders.length > 0) {
-            html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-fire" style="margin-right:10px;"></i> 挤出机配置</h3>';
-            result.extruders.forEach(extruder => {
-                html += `<div class="extruder-config"><h4><i class="fas fa-temperature-high"></i> ${extruder.name}</h4><ul>`;
-                if (extruder.step_pin) html += `<li><strong>STEP引脚</strong>: ${formatPinValue(extruder.step_pin)}</li>`;
-                if (extruder.dir_pin) html += `<li><strong>DIR引脚</strong>: ${formatPinValue(extruder.dir_pin)}</li>`;
-                if (extruder.enable_pin) html += `<li><strong>EN引脚</strong>: ${formatPinValue(extruder.enable_pin)}</li>`;
-                if (extruder.heater_pin) html += `<li><strong>加热引脚</strong>: ${formatPinValue(extruder.heater_pin)}</li>`;
-                if (extruder.sensor_pin) html += `<li><strong>热敏引脚</strong>: ${formatPinValue(extruder.sensor_pin)}</li>`;
-                if (extruder.driver_cs_pin) html += `<li><strong>CS引脚</strong>: ${formatPinValue(extruder.driver_cs_pin)}</li>`;
-                if (extruder.driver_uart_pin) html += `<li><strong>UART引脚</strong>: ${formatPinValue(extruder.driver_uart_pin)}</li>`;
-                if (extruder.driver_type) html += `<li><strong>驱动类型</strong>: ${extruder.driver_type}</li>`;
-                html += `</ul></div>`;
-            });
-            html += '</div><hr>';
-        }
-        if (result.heaterBed) {
-            html += '<div style="margin-bottom:20px; padding-bottom:15px; border-bottom:1px solid var(--border-color);"><h3 style="display:flex; align-items:center; color:var(--primary-color); margin-bottom:15px; font-size:1.2rem;"><i class="fas fa-bed" style="margin-right:10px;"></i> 热床配置</h3><div class="heater-config-result"><h4><i class="fas fa-temperature-high"></i> 热床加热器</h4><ul>';
-            if (result.heaterBed.heater_pin) html += `<li><strong>加热引脚</strong>: ${formatPinValue(result.heaterBed.heater_pin)}</li>`;
-            if (result.heaterBed.sensor_pin) html += `<li><strong>热敏引脚</strong>: ${formatPinValue(result.heaterBed.sensor_pin)}</li>`;
-            html += `</ul></div></div><hr>`;
-        }
-        if (!html) html = '<p style="text-align:center; color:var(--text-secondary); padding:30px 0;">未找到可解析的配置信息</p>';
-        resultOutput.innerHTML = html;
-    }
-
-    function formatPinValue(pinData) {
-        if (!pinData || !pinData.value) return '<span class="pin-value">未配置</span>';
-        if (pinData.type === 'virtual') return `<span class="virtual-pin">${pinData.value}</span>`;
-        if (pinData.type === 'host') return `<span class="host-pin">${pinData.value}</span>`;
-        if (pinData.type === 'toolboard') return `<span class="toolboard-name">${pinData.board}</span>:<span class="pin-number">${pinData.pin}</span> <span class="toolboard-hint">工具板</span>`;
-        if (pinData.value.includes('cs_pin') || pinData.value.includes('uart_pin')) return `<span class="driver-pin">${pinData.value}</span>`;
-        return `<span class="pin-value">${pinData.value}</span>`;
-    }
 }
 
 // ==================== 远程加载配置 ====================
@@ -501,10 +338,11 @@ async function loadRemoteConfigList() {
 
         const files = data.files || [];
         const sourceLabels = { moonraker: 'Moonraker', ssh: 'SSH', local: '本地' };
-        const sourceLabel = sourceLabels[data.source] || data.source;
+        const sourceLabel = sourceLabels[data.source] || data.source || '未知';
+        const safeSourceLabel = kpEscapeHtml(sourceLabel);
 
         if (files.length === 0) {
-            status.innerHTML = `<span style="color:var(--warning-color)"><i class="fas fa-exclamation-triangle"></i> 未找到配置文件 (来源: ${sourceLabel})</span>`;
+            status.innerHTML = `<span style="color:var(--warning-color)"><i class="fas fa-exclamation-triangle"></i> 未找到配置文件 (来源: ${safeSourceLabel})</span>`;
             return;
         }
 
@@ -521,7 +359,7 @@ async function loadRemoteConfigList() {
             });
         }
         if (cfgFiles.length > 0) {
-            html += `<div style="padding:6px 8px; font-size:12px; color:var(--text-secondary); border-bottom:1px solid var(--border-color);">📄 配置文件 (${cfgFiles.length} 个, 来源: ${sourceLabel})</div>`;
+            html += `<div style="padding:6px 8px; font-size:12px; color:var(--text-secondary); border-bottom:1px solid var(--border-color);">📄 配置文件 (${cfgFiles.length} 个, 来源: ${safeSourceLabel})</div>`;
             cfgFiles.forEach(f => {
                 const sizeStr = f.size ? `${(f.size / 1024).toFixed(1)} KB` : '';
                 const isPrinterCfg = f.name === 'printer.cfg';
@@ -538,7 +376,7 @@ async function loadRemoteConfigList() {
             status.innerHTML = '<span style="color:var(--primary-color)"><i class="fas fa-spinner fa-spin"></i> 找到 printer.cfg，正在加载主配置及 include 文件...</span>';
             await loadPrinterCfgWithIncludes(printerCfg.path, sourceLabel);
         } else {
-            status.innerHTML = `<span style="color:var(--warning-color)"><i class="fas fa-exclamation-triangle"></i> 未找到 printer.cfg，请手动选择配置文件 (来源: ${sourceLabel})</span>`;
+            status.innerHTML = `<span style="color:var(--warning-color)"><i class="fas fa-exclamation-triangle"></i> 未找到 printer.cfg，请手动选择配置文件 (来源: ${safeSourceLabel})</span>`;
         }
     } catch (err) {
         status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 请求失败: ${kpEscapeHtml(err.message)}</span>`;
@@ -722,7 +560,7 @@ async function loadPrinterCfgWithIncludes(printerCfgPath, sourceLabel) {
         const parseBtn = document.getElementById('parseBtn');
         if (parseBtn) parseBtn.click();
 
-        status.innerHTML = `<span style="color:var(--success-color)"><i class="fas fa-check-circle"></i> 已加载 printer.cfg 及所有 include 文件 (来源: ${sourceLabel})</span>`;
+        status.innerHTML = `<span style="color:var(--success-color)"><i class="fas fa-check-circle"></i> 已加载 printer.cfg 及所有 include 文件 (来源: ${kpEscapeHtml(sourceLabel)})</span>`;
     } catch (err) {
         status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 加载失败: ${kpEscapeHtml(err.message)}</span>`;
     }
@@ -773,7 +611,7 @@ async function updateMainsailBaseline() {
         const data = await resp.json();
 
         if (data.success) {
-            status.innerHTML = `<span style="color:var(--success-color)"><i class="fas fa-check-circle"></i> ${data.message}，包含 ${data.macro_count} 个宏</span>`;
+            status.innerHTML = `<span style="color:var(--success-color)"><i class="fas fa-check-circle"></i> ${kpEscapeHtml(data.message)}，包含 ${kpEscapeHtml(data.macro_count)} 个宏</span>`;
             // 重新加载基准到内存
             const msResp = await fetch('/api/tools/mainsail-config');
             const msData = await msResp.json();
@@ -781,10 +619,10 @@ async function updateMainsailBaseline() {
                 _mainsailBaseline = msData.content;
             }
         } else {
-            status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> ${data.error}</span>`;
+            status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> ${kpEscapeHtml(data.error)}</span>`;
         }
     } catch (err) {
-        status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 请求失败: ${err.message}</span>`;
+        status.innerHTML = `<span style="color:var(--danger-color)"><i class="fas fa-exclamation-circle"></i> 请求失败: ${kpEscapeHtml(err.message)}</span>`;
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-sync-alt"></i> 更新宏基准';
@@ -1032,7 +870,8 @@ function buildCheckReportHTML(duplicates, conflicts, macroCheck) {
         duplicates.forEach(d => {
             const statusCls = d.sameContent ? 'check-warn' : 'check-err';
             const statusText = d.sameContent ? '内容相同' : '内容不一致';
-            html += `<li class="${statusCls}"><strong>[${d.name}]</strong> 出现 ${d.count} 次 (${statusText})<br><span class="check-files">来源: ${d.files.join(', ')}</span></li>`;
+            const files = (d.files || []).map(kpEscapeHtml).join(', ');
+            html += `<li class="${statusCls}"><strong>[${kpEscapeHtml(d.name)}]</strong> 出现 ${kpEscapeHtml(d.count)} 次 (${statusText})<br><span class="check-files">来源: ${files}</span></li>`;
         });
         html += '</ul></div>';
     }
@@ -1046,9 +885,11 @@ function buildCheckReportHTML(duplicates, conflicts, macroCheck) {
         html += `<div class="check-header check-error"><i class="fas fa-times-circle"></i> 引脚/资源冲突检查：发现 ${conflicts.length} 个冲突 <button class="check-toggle" onclick="this.parentElement.parentElement.querySelector('.check-detail').classList.toggle('open')">查看详情</button></div>`;
         html += '<div class="check-detail"><ul class="check-list">';
         conflicts.forEach(c => {
-            const icon = c.type === 'pin' ? '🔌' : '📡';
+            const icon = c.type === 'pin' ? '引脚' : 'UART';
             const typeLabel = c.type === 'pin' ? '引脚' : 'UART';
-            html += `<li class="check-err">${icon} <strong>${c.pin}</strong> (${typeLabel}) 被多个 section 占用: ${c.sections.join(' | ')}<br><span class="check-files">来源: ${c.files.join(', ')}</span></li>`;
+            const sections = (c.sections || []).map(kpEscapeHtml).join(' | ');
+            const files = (c.files || []).map(kpEscapeHtml).join(', ');
+            html += `<li class="check-err">${icon} <strong>${kpEscapeHtml(c.pin)}</strong> (${typeLabel}) 被多个 section 占用: ${sections}<br><span class="check-files">来源: ${files}</span></li>`;
         });
         html += '</ul></div>';
     }
@@ -1057,7 +898,7 @@ function buildCheckReportHTML(duplicates, conflicts, macroCheck) {
     // === 宏修改检查 ===
     html += '<div class="check-item">';
     if (macroCheck.skipped) {
-        html += `<div class="check-header check-warn"><i class="fas fa-exclamation-triangle"></i> 宏修改检查：跳过 <span class="check-desc">${macroCheck.reason}</span></div>`;
+        html += `<div class="check-header check-warn"><i class="fas fa-exclamation-triangle"></i> 宏修改检查：跳过 <span class="check-desc">${kpEscapeHtml(macroCheck.reason)}</span></div>`;
     } else {
         const modified = macroCheck.results.filter(r => r.status === 'modified');
         const missing = macroCheck.results.filter(r => r.status === 'missing');
@@ -1073,17 +914,18 @@ function buildCheckReportHTML(duplicates, conflicts, macroCheck) {
                 let diffHtml = '';
                 if (m.diff.totalAdded > 0) diffHtml += `<span style="color:var(--success-color)">+${m.diff.totalAdded}行</span> `;
                 if (m.diff.totalRemoved > 0) diffHtml += `<span style="color:var(--danger-color)">-${m.diff.totalRemoved}行</span>`;
-                html += `<li class="check-warn">📝 <strong>[${m.name}]</strong> 已被修改 (${diffHtml})`;
-                if (m.diff.added.length > 0) html += `<br><span class="check-diff">新增: ${m.diff.added.map(l => `<code>${l.substring(0, 60)}</code>`).join(', ')}</span>`;
-                if (m.diff.removed.length > 0) html += `<br><span class="check-diff">移除: ${m.diff.removed.map(l => `<code>${l.substring(0, 60)}</code>`).join(', ')}</span>`;
+                html += `<li class="check-warn">宏 <strong>[${kpEscapeHtml(m.name)}]</strong> 已被修改 (${diffHtml})`;
+                if (m.diff.added.length > 0) html += `<br><span class="check-diff">新增: ${m.diff.added.map(l => `<code>${kpEscapeHtml(l.substring(0, 60))}</code>`).join(', ')}</span>`;
+                if (m.diff.removed.length > 0) html += `<br><span class="check-diff">移除: ${m.diff.removed.map(l => `<code>${kpEscapeHtml(l.substring(0, 60))}</code>`).join(', ')}</span>`;
                 html += '</li>';
             });
             missing.forEach(m => {
-                html += `<li class="check-err">❌ <strong>[${m.name}]</strong> 在用户配置中缺失</li>`;
+                html += `<li class="check-err">缺失 <strong>[${kpEscapeHtml(m.name)}]</strong> 在用户配置中缺失</li>`;
             });
             html += '</ul>';
             if (macroCheck.extraCount > 0) {
-                html += `<div class="check-extra-info"><i class="fas fa-plus-circle"></i> 用户额外定义了 ${macroCheck.extraCount} 个自定义宏: ${macroCheck.extraNames.join(', ')}${macroCheck.extraCount > 10 ? '...' : ''}</div>`;
+                const extraNames = (macroCheck.extraNames || []).map(kpEscapeHtml).join(', ');
+                html += `<div class="check-extra-info"><i class="fas fa-plus-circle"></i> 用户额外定义了 ${kpEscapeHtml(macroCheck.extraCount)} 个自定义宏: ${extraNames}${macroCheck.extraCount > 10 ? '...' : ''}</div>`;
             }
             html += '</div>';
         }

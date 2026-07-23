@@ -257,18 +257,24 @@ def get_bl_firmwares(manufacturer, board_type=None):
             for root, dirs, files in os.walk(type_dir):
                 for filename in files:
                     if filename.lower().endswith(('.bin', '.uf2', '.hex')):
+                        fw_path = os.path.join(root, filename)
+                        if not _path_in_configs(fw_path):
+                            continue
                         firmwares.append({
                             'name': filename,
-                            'path': os.path.join(root, filename)
+                            'path': fw_path
                         })
     else:
         # 未指定类型，递归扫描所有子目录
         for root, dirs, files in os.walk(bl_dir):
             for filename in files:
                 if filename.lower().endswith(('.bin', '.uf2', '.hex')):
+                    fw_path = os.path.join(root, filename)
+                    if not _path_in_configs(fw_path):
+                        continue
                     firmwares.append({
                         'name': filename,
-                        'path': os.path.join(root, filename)
+                        'path': fw_path
                     })
 
     # 按文件名排序

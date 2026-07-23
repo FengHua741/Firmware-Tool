@@ -12,10 +12,31 @@ import urllib.parse
 import requests
 from flask import Blueprint, jsonify, request, send_from_directory
 
-from shared import config, logger, expand_klipper_path
+from shared import config, logger, expand_klipper_path, get_moonraker_base_url
 from ssh_manager import run_cmd, is_ssh_mode
 
 tools_bp = Blueprint('tools_api', __name__)
+ALLOWED_CONFIG_EXTENSIONS = ('.cfg', '.conf', '.txt', '.cfg.mainsail', '.cfg.fluidd')
+MAX_CONFIG_CONTENT_BYTES = 2 * 1024 * 1024
+
+
+def _safe_data_id(value):
+    return bool(re.match(r'^[A-Za-z0-9_.-]{1,120}$', str(value or ''))) and not str(value).startswith('.')
+
+
+def _is_allowed_config_name(path):
+    return str(path or '').lower().endswith(ALLOWED_CONFIG_EXTENSIONS)
+
+
+def _normalize_moonraker_config_path(path):
+    if not path or not path.startswith('config/'):
+        return ''
+    rel_path = posixpath.normpath(path[len('config/'):])
+    if rel_path in ('', '.') or rel_path.startswith('../') or rel_path.startswith('/'):
+        return ''
+    if not _is_allowed_config_name(rel_path):
+        return ''
+    return f'config/{rel_path}'
 
 
 def _path_under_local(path, root):
@@ -23,13 +44,6 @@ def _path_under_local(path, root):
         return os.path.commonpath([os.path.realpath(path), os.path.realpath(root)]) == os.path.realpath(root)
     except ValueError:
         return False
-
-
-def get_moonraker_base_url():
-    """获取 Moonraker HTTP API 基础 URL"""
-    host = config.get('moonraker_host') or ('127.0.0.1' if not is_ssh_mode() else config.get('ssh_host', '127.0.0.1'))
-    port = config.get('moonraker_port', 7125)
-    return f'http://{host}:{port}'
 
 
 def get_klipper_config_dir():
@@ -82,7 +96,7 @@ def _path_under(path, roots):
 def _validate_config_file_path(file_path):
     if not file_path or '..' in file_path:
         return False
-    if not file_path.lower().endswith(('.cfg', '.conf', '.txt', '.cfg.mainsail', '.cfg.fluidd')):
+    if not _is_allowed_config_name(file_path):
         return False
     return _path_under(file_path, get_klipper_config_dir())
 
@@ -236,9 +250,13 @@ def list_wildcard_files():
     返回: { success, files: [{name, path}] }
     """
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error': '请求体必须是 JSON 对象'}), 400
     pattern = data.get('pattern', '').strip()
     if not pattern:
         return jsonify({'success': False, 'error': '未指定通配符模式'})
+    if len(pattern) > 500:
+        return jsonify({'success': False, 'error': '通配符模式过长'})
     if '..' in pattern:
         return jsonify({'success': False, 'error': '非法路径'})
 
@@ -303,9 +321,13 @@ def list_wildcard_files():
 def validate_klipper_config():
     """校验生成的 Klipper 配置。"""
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error': '请求体必须是 JSON 对象'}), 400
     content = data.get('content', '')
     if not content.strip():
         return jsonify({'success': False, 'error': '配置内容为空'})
+    if len(content.encode('utf-8', errors='ignore')) > MAX_CONFIG_CONTENT_BYTES:
+        return jsonify({'success': False, 'error': '配置内容过大'}), 413
     result = _static_validate_klipper_config(content)
     return jsonify({'success': True, **result})
 
@@ -319,6 +341,8 @@ def read_config_content():
     返回: { success, content, filename, source }
     """
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error': '请求体必须是 JSON 对象'}), 400
     file_path = data.get('path', '').strip()
     if not file_path:
         return jsonify({'success': False, 'error': '未指定文件路径'})
@@ -329,11 +353,16 @@ def read_config_content():
 
     # 方案1: Moonraker API 读取 (path 以 "config/" 开头)
     if file_path.startswith('config/'):
+        file_path = _normalize_moonraker_config_path(file_path)
+        if not file_path:
+            return jsonify({'success': False, 'error': '非法路径'})
         base = get_moonraker_base_url()
         encoded_path = urllib.parse.quote(file_path, safe='/')
         try:
             r = requests.get(f'{base}/server/files/{encoded_path}', timeout=10)
             if r.status_code == 200:
+                if len(r.content) > MAX_CONFIG_CONTENT_BYTES:
+                    return jsonify({'success': False, 'error': '配置文件过大'}), 413
                 return jsonify({
                     'success': True,
                     'content': r.text,
@@ -353,6 +382,14 @@ def read_config_content():
     if not _validate_config_file_path(file_path):
         return jsonify({'success': False, 'error': '非法路径'})
     if is_ssh_mode():
+        size_cmd = f'stat -c %s {shlex.quote(file_path)} 2>/dev/null || wc -c < {shlex.quote(file_path)} 2>/dev/null'
+        size_result = run_cmd(size_cmd, shell=True, capture_output=True, text=True, timeout=10)
+        try:
+            remote_size = int((size_result.stdout or '').strip().splitlines()[0])
+        except (ValueError, IndexError):
+            remote_size = 0
+        if remote_size > MAX_CONFIG_CONTENT_BYTES:
+            return jsonify({'success': False, 'error': '配置文件过大'}), 413
         cmd = f'cat {shlex.quote(file_path)} 2>&1'
         result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
@@ -368,6 +405,8 @@ def read_config_content():
         expanded = os.path.expanduser(file_path)
         if not os.path.isfile(expanded):
             return jsonify({'success': False, 'error': '文件不存在'})
+        if os.path.getsize(expanded) > MAX_CONFIG_CONTENT_BYTES:
+            return jsonify({'success': False, 'error': '配置文件过大'}), 413
         try:
             with open(expanded, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
@@ -467,7 +506,6 @@ def update_mainsail_baseline():
         with open(baseline_path, 'w', encoding='utf-8') as f:
             f.write(content)
         # 统计宏数量
-        import re
         macro_count = len(re.findall(r'\[gcode_macro\s+', content, re.IGNORECASE))
         return jsonify({'success': True, 'message': f'基准已更新 (来源: {source})', 'macro_count': macro_count})
     except Exception as e:
@@ -487,6 +525,8 @@ def get_board_image(board_id):
     返回: 图片文件
     """
     try:
+        if not _safe_data_id(board_id):
+            return 'Invalid board id', 400
         index = _load_boards_index()
         board_info = None
         for brand, data in index.items():
@@ -584,6 +624,8 @@ def get_board_mapping(board_id):
     返回: { success, mapping, layout, board_info }
     """
     try:
+        if not _safe_data_id(board_id):
+            return jsonify({'success': False, 'error': '非法板卡 ID'}), 400
         index = _load_boards_index()
         # 在所有品牌中查找该 board_id
         board_info = None
@@ -599,6 +641,8 @@ def get_board_mapping(board_id):
 
         if not board_info:
             return jsonify({'success': False, 'error': f'未找到板卡: {board_id}'})
+        if not mapping_dir:
+            return jsonify({'success': False, 'error': '板卡映射目录为空'})
 
         mapping_file = os.path.join(BOARDS_BASE_DIR, mapping_dir, 'klipper_Mapping.json')
         if not _path_under_local(mapping_file, BOARDS_BASE_DIR):
@@ -672,9 +716,11 @@ def get_machine_preset(machine_id):
     返回: { success, preset: {...} }
     """
     try:
-        if not re.match(r'^[A-Za-z0-9_.-]+$', machine_id or '') or machine_id.startswith('.'):
+        if not _safe_data_id(machine_id):
             return jsonify({'success': False, 'error': '非法ID'})
         fpath = os.path.join(MACHINES_DIR, f'{machine_id}.json')
+        if not _path_under_local(fpath, MACHINES_DIR):
+            return jsonify({'success': False, 'error': '非法路径'}), 403
         if not os.path.isfile(fpath):
             return jsonify({'success': False, 'error': f'未找到机型预设: {machine_id}'})
         with open(fpath, 'r', encoding='utf-8') as f:

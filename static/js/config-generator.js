@@ -1616,7 +1616,7 @@ function cgParserGetBaseline() {
 }
 
 function cgParserSetBaseline(value) {
-    try { _mainsailBaseline = value || ''; } catch (e) {}
+    try { _mainsailBaseline = value || ''; } catch (e) { console.warn('设置 Mainsail 基准失败:', e); }
 }
 
 function cgParserSetInput(text) {
@@ -2079,7 +2079,7 @@ async function detectMcuDevices() {
             const r = await fetch('/api/tools/detect-mcus');
             const d = await r.json();
             if (d.success && d.devices) devices = d.devices;
-        } catch(e) {}
+        } catch(e) { console.warn('MCU 设备检测请求失败:', e); }
         if (!devices.length) {
             cgShowToast('未检测到设备，请在MCU serial框手动输入', 'warning');
             return;

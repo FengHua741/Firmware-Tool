@@ -47,5 +47,4 @@ data/config.json
 *.orig
 *~
 *.test
-data/config.json
 AGENTS.md

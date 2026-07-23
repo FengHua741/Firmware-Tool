@@ -18,6 +18,37 @@ const CAN_BITRATE_LABELS = {
     '250000': '250K',
 };
 
+async function processSSEStream(resp, logEl) {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let lastResult = null;
+
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const msg = line.slice(6);
+            if (msg.startsWith('[LOG] ')) {
+                if (logEl) { logEl.textContent += msg.slice(6) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+            } else {
+                try {
+                    const data = JSON.parse(msg);
+                    lastResult = data;
+                    if (data.error) {
+                        if (logEl) { logEl.textContent += (data.detail || data.error) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+                    }
+                } catch { if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; } }
+            }
+        }
+    }
+    return lastResult;
+}
+
 // 初始化固件编译页面
 async function initFirmwarePage() {
     await loadCompileMcuDatabase();
@@ -1095,33 +1126,7 @@ async function compileFirmware() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(compileParams)
         });
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        let lastResult = null;
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const lines = buf.split('\n');
-            buf = lines.pop();
-            for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const msg = line.slice(6);
-                if (msg.startsWith('[LOG] ')) {
-                    if (logEl) { logEl.textContent += msg.slice(6) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
-                } else {
-                    try {
-                        const data = JSON.parse(msg);
-                        lastResult = data;
-                        if (data.error) {
-                            if (logEl) { logEl.textContent += (data.detail || data.error) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
-                        }
-                    } catch { if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; } }
-                }
-            }
-        }
+        const lastResult = await processSSEStream(resp, logEl);
 
         if (lastResult && lastResult.success) {
             compiledFirmwarePath = lastResult.firmware_path;
@@ -1536,33 +1541,7 @@ async function flashFirmware() {
                 can_iface: canIface
             })
         });
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        let lastResult = null;
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const lines = buf.split('\n');
-            buf = lines.pop();
-            for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const msg = line.slice(6);
-                if (msg.startsWith('[LOG] ')) {
-                    if (logEl) { logEl.textContent += msg.slice(6) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
-                } else {
-                    try {
-                        const data = JSON.parse(msg);
-                        lastResult = data;
-                        if (data.error) {
-                            if (logEl) { logEl.textContent += data.error + '\n'; logEl.scrollTop = logEl.scrollHeight; }
-                        }
-                    } catch { if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; } }
-                }
-            }
-        }
+        const lastResult = await processSSEStream(resp, logEl);
 
         if (lastResult && lastResult.success) {
             statusMsg.textContent = '✅ 烧录成功！';
@@ -1602,33 +1581,7 @@ async function flashHostFirmware(firmwarePath) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ firmware_path: firmwarePath })
         });
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        let lastResult = null;
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const lines = buf.split('\n');
-            buf = lines.pop();
-            for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const msg = line.slice(6);
-                if (msg.startsWith('[LOG] ')) {
-                    if (logEl) { logEl.textContent += msg.slice(6) + '\n'; logEl.scrollTop = logEl.scrollHeight; }
-                } else {
-                    try {
-                        const data = JSON.parse(msg);
-                        lastResult = data;
-                        if (data.error) {
-                            if (logEl) { logEl.textContent += data.error + '\n'; logEl.scrollTop = logEl.scrollHeight; }
-                        }
-                    } catch { if (logEl) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; } }
-                }
-            }
-        }
+        const lastResult = await processSSEStream(resp, logEl);
 
         if (lastResult && lastResult.success) {
             statusMsg.textContent = '✅ ' + (lastResult.message || '固件烧录成功');
@@ -1789,7 +1742,7 @@ function formatFileSize(bytes) {
 
 function escapeHtml(s) {
     const d = document.createElement('div');
-    d.textContent = s;
+    d.textContent = s == null ? '' : String(s);
     return d.innerHTML;
 }
 
@@ -1935,8 +1888,11 @@ async function onBlFileChange() {
 
 // 烧录 Bootloader
 async function flashBootloader() {
-    const blFile = document.getElementById('blFileSelect').value;
+    const blFileEl = document.getElementById('blFileSelect');
+    if (!blFileEl) return;
+    const blFile = blFileEl.value;
     const addressSelect = document.getElementById('blFlashAddress');
+    if (!addressSelect) return;
     const selectedAddress = addressSelect.options[addressSelect.selectedIndex];
     const address = addressSelect.value;
     const dfuOffset = selectedAddress?.dataset.offset || '';

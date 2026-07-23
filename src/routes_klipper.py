@@ -4,6 +4,7 @@ Klipper MCU 数据库蓝图 - Kconfig 解析、MCU 查询
 
 from flask import Blueprint, jsonify
 import os
+import threading
 
 from shared import app, config, logger, expand_klipper_path
 from klipper_kconfig_parser import KlipperKconfigParser
@@ -15,6 +16,7 @@ klipper_bp = Blueprint('klipper', __name__, url_prefix='/api/klipper')
 klipper_parser = None
 klipper_mcu_db = {}
 _mcu_db_signature = None
+_mcu_db_lock = threading.Lock()
 
 
 def _local_klipper_path():
@@ -41,20 +43,21 @@ def _kconfig_signature(klipper_path):
 def init_klipper_mcu_db(force=False):
     """初始化 Klipper MCU 数据库"""
     global klipper_parser, klipper_mcu_db, _mcu_db_signature
-    try:
-        klipper_path = _local_klipper_path()
-        signature = _kconfig_signature(klipper_path)
-        if not force and klipper_mcu_db and signature == _mcu_db_signature:
-            return
-        klipper_parser = KlipperKconfigParser(klipper_path)
-        klipper_mcu_db = klipper_parser.parse_all_platforms()
-        _mcu_db_signature = signature
-        logger.info(f"✓ Klipper MCU 数据库已加载: {len(klipper_mcu_db)} 个平台")
-        for platform, data in klipper_mcu_db.items():
-            logger.info(f"  - {platform}: {len(data['mcus'])} 个 MCU")
-    except Exception as e:
-        logger.error(f"加载 Klipper MCU 数据库失败: {e}")
-        klipper_mcu_db = {}
+    with _mcu_db_lock:
+        try:
+            klipper_path = _local_klipper_path()
+            signature = _kconfig_signature(klipper_path)
+            if not force and klipper_mcu_db and signature == _mcu_db_signature:
+                return
+            klipper_parser = KlipperKconfigParser(klipper_path)
+            klipper_mcu_db = klipper_parser.parse_all_platforms()
+            _mcu_db_signature = signature
+            logger.info(f"✓ Klipper MCU 数据库已加载: {len(klipper_mcu_db)} 个平台")
+            for platform, data in klipper_mcu_db.items():
+                logger.info(f"  - {platform}: {len(data['mcus'])} 个 MCU")
+        except Exception as e:
+            logger.error(f"加载 Klipper MCU 数据库失败: {e}")
+            klipper_mcu_db = {}
 
 
 # 启动时初始化
@@ -142,11 +145,6 @@ def get_klipper_mcus(platform):
                 }), 404
 
     platform = platform_key
-    if platform not in klipper_mcu_db:
-        return jsonify({
-            'success': False,
-            'error': f'未找到平台: {platform}'
-        }), 404
 
     data = klipper_mcu_db[platform]
     mcus = []

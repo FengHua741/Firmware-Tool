@@ -360,7 +360,7 @@ async function searchCamera() {
             container.innerHTML = '<p class="empty">未找到摄像头</p>';
         }
     } catch (error) {
-        container.innerHTML = `<p class="empty">搜索失败: ${error.message}</p>`;
+        container.innerHTML = `<p class="empty">搜索失败: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -572,7 +572,7 @@ async function searchLsusb() {
             container.innerHTML = '<p class="empty">未找到设备</p>';
         }
     } catch (error) {
-        container.innerHTML = `<p class="empty">搜索失败: ${error.message}</p>`;
+        container.innerHTML = `<p class="empty">搜索失败: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -636,17 +636,6 @@ function escapeJsString(value) {
 }
 
 
-// 初始化 BL 厂家选择
-
-// BL 厂家改变
-
-// BL 主板类型改变
-
-// BL 烧录方式改变
-
-
-
-
 // ==================== 系统设置 ====================
 // 当前已加载的连接模式（用于检测模式切换）
 let _loadedConnectionMode = 'local';
@@ -699,17 +688,13 @@ async function loadSettings() {
                     const sudoPwd = document.getElementById('settingsSudoPassword');
                     if (sshPwd) sshPwd.placeholder = credData.has_ssh_password ? '已保存 (留空保持不变)' : '输入SSH密码';
                     if (sudoPwd) sudoPwd.placeholder = credData.has_sudo_password ? '已保存 (留空保持不变)' : '与SSH密码相同则留空';
-                } catch (e) {}
+                } catch (e) { console.warn('加载 SSH 凭据状态失败:', e); }
             }
         }
     } catch (error) {
         console.error('加载设置失败:', error);
     }
 }
-
-// 加载当前 Web 界面状态
-
-// 切换 Web 界面
 
 async function saveSettings() {
     const kp = document.getElementById('settingsKlipperPath');

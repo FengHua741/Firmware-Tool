@@ -254,7 +254,7 @@ def _parse_communication_choice(kconfig_path, arch_prefix):
     if not os.path.exists(kconfig_path):
         return []
 
-    with open(kconfig_path, 'r') as f:
+    with open(kconfig_path, 'r', encoding='utf-8', errors='replace') as f:
         lines = f.readlines()
 
     options = []
@@ -327,7 +327,7 @@ def _parse_stm32_kconfig(kconfig_path):
         logger.warning(f"Kconfig 文件不存在: {kconfig_path}")
         return [], []
 
-    with open(kconfig_path, 'r') as f:
+    with open(kconfig_path, 'r', encoding='utf-8', errors='replace') as f:
         content = f.read()
 
     direct_can = []  # 直接 CAN 通信选项
@@ -398,7 +398,7 @@ def _parse_rp2040_kconfig(kconfig_path):
         logger.warning(f"Kconfig 文件不存在: {kconfig_path}")
         return None
 
-    with open(kconfig_path, 'r') as f:
+    with open(kconfig_path, 'r', encoding='utf-8', errors='replace') as f:
         content = f.read()
 
     result = {
@@ -549,7 +549,7 @@ def _parse_generic_bridge_can(kconfig_path, prefix):
     if not os.path.exists(kconfig_path):
         return [], []
 
-    with open(kconfig_path, 'r') as f:
+    with open(kconfig_path, 'r', encoding='utf-8', errors='replace') as f:
         content = f.read()
 
     direct_can = []

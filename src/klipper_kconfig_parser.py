@@ -7,6 +7,9 @@ Klipper Kconfig 解析器
 import os
 import re
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 class KlipperKconfigParser:
     PLATFORM_DEFINITIONS = {
@@ -50,10 +53,10 @@ class KlipperKconfigParser:
     def _parse_kconfig(self, kconfig_path, platform_dir, platform_info=None):
         """解析单个 Kconfig 文件"""
         try:
-            with open(kconfig_path, 'r') as f:
+            with open(kconfig_path, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
         except (IOError, OSError) as e:
-            print(f"警告: 无法读取 Kconfig 文件 {kconfig_path}: {e}")
+            logger.warning(f"无法读取 Kconfig 文件 {kconfig_path}: {e}")
             return {
                 'platform': platform_dir,
                 'mcus': {},
@@ -626,14 +629,14 @@ class KlipperKconfigParser:
         """保存数据库到 JSON 文件"""
         if output_path is None:
             output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'mcu_database.json')
-        with open(output_path, 'w') as f:
-            json.dump(self.mcu_database, f, indent=2)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(self.mcu_database, f, indent=2, ensure_ascii=False)
 
     def load_database(self, input_path=None):
         """从 JSON 文件加载数据库"""
         if input_path is None:
             input_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'mcu_database.json')
-        with open(input_path, 'r') as f:
+        with open(input_path, 'r', encoding='utf-8') as f:
             self.mcu_database = json.load(f)
         return self.mcu_database
 

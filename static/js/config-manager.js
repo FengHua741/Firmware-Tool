@@ -216,7 +216,7 @@ function renderTreeNode(node, depth, visibleIds, forceExpanded) {
         html += `
             <div class="cm-tree-item ${isSelected ? 'selected' : ''}"
                  style="padding-left:${indent + 12}px"
-                 onclick="selectConfigFile('${node.manufacturer}', '${node.boardType}', '${node.configId}', '${node.id}')"
+                 onclick="selectConfigFile('${escapeJsString(node.manufacturer)}', '${escapeJsString(node.boardType)}', '${escapeJsString(node.configId)}', '${escapeJsString(node.id)}')"
                  title="${escapeHtml(node.name)}">
                 <span class="cm-tree-icon">📄</span>
                 <span class="cm-tree-label">${escapeHtml(node.name)}</span>
@@ -230,7 +230,7 @@ function renderTreeNode(node, depth, visibleIds, forceExpanded) {
         html += `
             <div class="cm-tree-item ${isSelected ? 'selected' : ''} ${node.type === 'root' ? 'root' : ''}"
                  style="padding-left:${indent + 12}px"
-                 onclick="toggleTreeNode('${node.id}', event)">
+                 onclick="toggleTreeNode('${escapeJsString(node.id)}', event)">
                 <span class="cm-tree-toggle">${node.children && node.children.length ? toggleIcon : ''}</span>
                 <span class="cm-tree-icon">${icon}</span>
                 <span class="cm-tree-label">${escapeHtml(node.name)}</span>
@@ -567,9 +567,8 @@ async function onCmMcuPlatformChange() {
         const res = await fetch(`/api/klipper/mcus/${platform}`);
         const data = await res.json();
         if (data.success && data.mcus) {
-            data.mcus.forEach(mcu => {
-                mcuEl.innerHTML += `<option value="${escapeHtml(mcu.id)}">${escapeHtml(mcu.name)}</option>`;
-            });
+            const opts = data.mcus.map(mcu => `<option value="${escapeHtml(mcu.id)}">${escapeHtml(mcu.name)}</option>`).join('');
+            mcuEl.innerHTML += opts;
         }
     } catch (e) {
         console.error('加载MCU型号失败:', e);
@@ -608,22 +607,20 @@ async function onCmMcuModelChange() {
 
         // 填充晶振选项
         if (crystalEl && data.mcu.crystals) {
-            crystalEl.innerHTML = '';
-            data.mcu.crystals.forEach(freq => {
+            crystalEl.innerHTML = data.mcu.crystals.map(freq => {
                 const label = formatFrequency(freq);
                 const selected = (currentConfigFile && currentConfigFile.data && currentConfigFile.data.crystal === String(freq)) ? 'selected' : '';
-                crystalEl.innerHTML += `<option value="${freq}" ${selected}>${label}</option>`;
-            });
+                return `<option value="${escapeHtml(freq)}" ${selected}>${escapeHtml(label)}</option>`;
+            }).join('');
         }
 
         // 填充BL偏移选项
         if (blOffsetEl && data.mcu.bl_offsets) {
-            blOffsetEl.innerHTML = '';
-            data.mcu.bl_offsets.forEach(offset => {
+            blOffsetEl.innerHTML = data.mcu.bl_offsets.map(offset => {
                 const label = formatBlOffset(offset, mcuId);
                 const selected = (currentConfigFile && currentConfigFile.data && currentConfigFile.data.bl_offset === String(offset)) ? 'selected' : '';
-                blOffsetEl.innerHTML += `<option value="${offset}" ${selected}>${label}</option>`;
-            });
+                return `<option value="${offset}" ${selected}>${escapeHtml(label)}</option>`;
+            }).join('');
         }
 
         // 更新通信接口标签（只显示，不修改配置值）
@@ -739,7 +736,7 @@ function addConnection() {
     if (!name) return;
     const hiddenInput = document.getElementById('cmConnections');
     let connections = [];
-    try { connections = JSON.parse(hiddenInput.value || '[]'); } catch(e) {}
+    try { connections = JSON.parse(hiddenInput.value || '[]'); } catch(e) { console.warn('解析连接数据失败:', e); }
     if (!connections.includes(name)) {
         connections.push(name);
         hiddenInput.value = JSON.stringify(connections);
@@ -754,7 +751,7 @@ function addConnection() {
 function removeConnection(index) {
     const hiddenInput = document.getElementById('cmConnections');
     let connections = [];
-    try { connections = JSON.parse(hiddenInput.value || '[]'); } catch(e) {}
+    try { connections = JSON.parse(hiddenInput.value || '[]'); } catch(e) { console.warn('解析连接数据失败:', e); }
     connections.splice(index, 1);
     hiddenInput.value = JSON.stringify(connections);
     renderConnTags(connections);
@@ -1074,10 +1071,17 @@ async function createManufacturer() {
 // ==================== 工具函数 ====================
 
 function escapeHtml(text) {
-    if (!text) return '';
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text == null ? '' : String(text);
     return div.innerHTML;
+}
+
+function escapeJsString(value) {
+    return String(value == null ? '' : value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r');
 }
 
 function debounce(fn, ms) {

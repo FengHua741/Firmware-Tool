@@ -142,8 +142,6 @@ def build_index():
         if config_info:
             connections = config_info.get('connections', [])
         else:
-            # 从 klipper_rules 推断
-            mcu = config_info.get('mcu', '') if config_info else ''
             if info['pin_style'] == 'gpio':
                 connections = ['USB', 'CAN']
             else:
@@ -219,7 +217,7 @@ def build_index():
 
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
     with open(OUTPUT, 'w', encoding='utf-8') as f:
-        json.dump(index, f, indent=2, ensure_ascii=False)
+        json.dump(index, f, indent=2, ensure_ascii=False, sort_keys=True)
 
     print(f'索引已生成: {OUTPUT}')
     print(f'  主板: {len(index[manufacturer]["mainboards"])} 块')

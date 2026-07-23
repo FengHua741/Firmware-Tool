@@ -16,6 +16,7 @@ from shared import (
     expand_klipper_path, sudo_write_file, sudo_mkdir,
     SSHManager, get_fast_ssh_credentials, public_config,
 )
+import shared
 from routes_system import _ssh_connection_status, _update_ssh_disconnect_status, _normalize_service_name
 
 settings_bp = Blueprint('settings', __name__)
@@ -59,6 +60,8 @@ def handle_config():
         return jsonify(public_config(_config))
     else:
         data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({'success': False, 'error': '请求体必须是 JSON 对象'}), 400
         old_mode = _config.get('connection_mode', 'local')
 
         try:
@@ -99,8 +102,7 @@ def handle_config():
             return jsonify({'success': False, 'error': str(e)}), 400
 
         if 'port' in data:
-            global PORT
-            PORT = _config['port']
+            shared.PORT = _config['port']
 
         new_mode = _config.get('connection_mode', old_mode)
 
@@ -164,8 +166,11 @@ def resolve_paths():
     """解析路径中的 ~ 为当前模式下的实际绝对路径"""
     try:
         paths = request.args.getlist('path') or ['~/klipper', '~/katapult']
+        if len(paths) > 20:
+            return jsonify({'error': '一次最多解析 20 个路径'}), 400
         resolved = {}
         for p in paths:
+            p = _clean_setting_string(p, '路径', 500)
             if p.startswith('~'):
                 resolved[p] = expand_klipper_path(p)
             else:
@@ -326,7 +331,7 @@ def get_can_live_status():
         m = re.search(r'txqueuelen\s+(\d+)', output)
         if m:
             result['txqueuelen'] = int(m.group(1))
-    except:
+    except Exception:
         pass
     return result
 
@@ -334,18 +339,18 @@ def get_can_live_status():
 def detect_os_type():
     """检测系统类型"""
     try:
-        with open('/etc/os-release', 'r') as f:
+        with open('/etc/os-release', 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
             if 'Debian' in content or 'Ubuntu' in content:
                 return 'debian'
-    except:
+    except Exception:
         pass
     try:
-        with open('/etc/issue', 'r') as f:
+        with open('/etc/issue', 'r', encoding='utf-8', errors='replace') as f:
             content = f.read()
             if 'Debian' in content or 'Ubuntu' in content:
                 return 'debian'
-    except:
+    except Exception:
         pass
     return 'other'
 
@@ -367,7 +372,7 @@ def detect_can_config():
             r = run_cmd('cat /etc/issue 2>/dev/null || echo ""', shell=True, capture_output=True, text=True, timeout=5)
             issue_content = r.stdout or ''
         else:
-            with open('/etc/issue', 'r') as f:
+            with open('/etc/issue', 'r', encoding='utf-8', errors='replace') as f:
                 issue_content = f.read()
 
         if 'FlyOS-Fast' in issue_content:
@@ -379,7 +384,7 @@ def detect_can_config():
                     cfg_content = r.stdout or ''
                 else:
                     if os.path.exists(config_txt):
-                        with open(config_txt, 'r') as f2:
+                        with open(config_txt, 'r', encoding='utf-8', errors='replace') as f2:
                             cfg_content = f2.read()
                     else:
                         cfg_content = ''
@@ -388,10 +393,10 @@ def detect_can_config():
                     if m:
                         result['bitrate'] = int(m.group(1))
                         break
-            except:
+            except Exception:
                 pass
             return result
-    except:
+    except Exception:
         pass
 
     # 2. 检测 systemd-networkd
@@ -401,14 +406,14 @@ def detect_can_config():
             network_file = r.stdout.strip() if r.stdout else ''
             if network_file:
                 result['network_file'] = network_file
-        except:
+        except Exception:
             pass
         try:
             r = run_cmd(f'ls {CAN_NETWORK_DIR}/*can*.link 2>/dev/null | head -1 || echo ""', shell=True, capture_output=True, text=True, timeout=5)
             link_file = r.stdout.strip() if r.stdout else ''
             if link_file:
                 result['link_file'] = link_file
-        except:
+        except Exception:
             pass
     else:
         if os.path.exists(CAN_NETWORK_DIR):
@@ -429,7 +434,7 @@ def detect_can_config():
                 r = run_cmd(f'cat "{result["network_file"]}" 2>/dev/null', shell=True, capture_output=True, text=True, timeout=5)
                 content = r.stdout or ''
             else:
-                with open(result['network_file'], 'r') as f:
+                with open(result['network_file'], 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
             m = re.search(r'BitRate\s*=\s*(\d+)', content)
             if m:
@@ -442,7 +447,7 @@ def detect_can_config():
                     result['bitrate'] = 250000
                 else:
                     result['bitrate'] = bitrate_val
-        except:
+        except Exception:
             pass
         if result['link_file']:
             try:
@@ -450,12 +455,12 @@ def detect_can_config():
                     r = run_cmd(f'cat "{result["link_file"]}" 2>/dev/null', shell=True, capture_output=True, text=True, timeout=5)
                     link_content = r.stdout or ''
                 else:
-                    with open(result['link_file'], 'r') as f:
+                    with open(result['link_file'], 'r', encoding='utf-8', errors='replace') as f:
                         link_content = f.read()
                 m = re.search(r'TxQueueLength\s*=\s*(\d+)', link_content)
                 if m:
                     result['txqueuelen'] = int(m.group(1))
-            except:
+            except Exception:
                 pass
         return result
 
@@ -475,7 +480,7 @@ def detect_can_config():
                 m = re.search(r'txqueuelen\s+(\d+)', content)
                 if m:
                     result['txqueuelen'] = int(m.group(1))
-        except:
+        except Exception:
             pass
     else:
         if os.path.exists(CAN_INTERFACES_DIR):
@@ -484,7 +489,7 @@ def detect_can_config():
                     result['interfaces_file'] = os.path.join(CAN_INTERFACES_DIR, fname)
                     result['system'] = 'interfaces'
                     try:
-                        with open(result['interfaces_file'], 'r') as f:
+                        with open(result['interfaces_file'], 'r', encoding='utf-8', errors='replace') as f:
                             content = f.read()
                         m = re.search(r'bitrate\s+(\d+)', content)
                         if m:
@@ -492,7 +497,7 @@ def detect_can_config():
                         m = re.search(r'txqueuelen\s+(\d+)', content)
                         if m:
                             result['txqueuelen'] = int(m.group(1))
-                    except:
+                    except Exception:
                         pass
                     return result
 
@@ -514,7 +519,7 @@ def get_usb_can_count():
                 continue
             devices.append(line)
         return len(devices)
-    except:
+    except Exception:
         return 0
 
 
@@ -670,7 +675,7 @@ iface can0 can static
                 time.sleep(0.3)
                 run_cmd(f'sudo ip link set can0 txqueuelen {txqueuelen}', shell=True, capture_output=True, timeout=10)
                 time.sleep(0.3)
-            except:
+            except Exception:
                 pass
 
         try:
@@ -685,7 +690,7 @@ iface can0 can static
                 )
                 if 'state DOWN' in detail.stdout or 'state UNKNOWN' in detail.stdout:
                     run_cmd('sudo ip link set can0 up', shell=True, capture_output=True, timeout=10)
-        except:
+        except Exception:
             pass
 
         return jsonify({
@@ -767,7 +772,7 @@ def diagnose_can_network():
             try:
                 modprobe_result = run_cmd('sudo modprobe can && echo "OK" || echo "FAIL"', shell=True, capture_output=True, text=True)
                 result['kernel_support'] = 'OK' in modprobe_result.stdout
-            except:
+            except Exception:
                 result['errors'].append('内核CAN模块检查失败')
 
             try:
@@ -775,7 +780,7 @@ def diagnose_can_network():
                 if lsusb_result.stdout.strip():
                     result['can_device_exists'] = True
                     result['can_device_info'] = lsusb_result.stdout.strip()
-            except:
+            except Exception:
                 pass
 
             try:
@@ -794,7 +799,7 @@ def diagnose_can_network():
                 else:
                     result['can0_exists'] = False
                     result['errors'].append('can0接口不存在')
-            except:
+            except Exception:
                 result['errors'].append('can0接口检查失败')
 
         return jsonify(result)
@@ -832,7 +837,7 @@ def repair_can_network():
             run_cmd('sudo modprobe can_raw', shell=True, capture_output=True)
             run_cmd('sudo modprobe gs_usb', shell=True, capture_output=True)
             messages.append('CAN内核模块已加载')
-        except:
+        except Exception:
             messages.append('CAN内核模块加载失败')
 
         lsusb_result = run_cmd(
@@ -880,7 +885,7 @@ TxQueueLength={txqueuelen}
         try:
             run_cmd('sudo systemctl restart systemd-networkd', shell=True, capture_output=True, check=True)
             messages.append('systemd-networkd已重启')
-        except:
+        except Exception:
             messages.append('systemd-networkd重启失败')
 
         time.sleep(2)
@@ -917,7 +922,7 @@ def handle_timezone():
             result = run_cmd(['timedatectl', 'show', '--property=Timezone'], capture_output=True, text=True)
             timezone = result.stdout.strip().replace('Timezone=', '')
             return jsonify({'timezone': timezone})
-        except:
+        except Exception:
             return jsonify({'timezone': 'Unknown'})
     else:
         data = request.get_json(silent=True) or {}

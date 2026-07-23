@@ -103,12 +103,9 @@ async function loadUpdateBoardManufacturers() {
         const data = await response.json();
 
         const select = document.getElementById('updateBoardManufacturer');
-        select.innerHTML = '<option value="">-- 选择厂家 --</option>';
-
         if (data.manufacturers) {
-            data.manufacturers.forEach(mfr => {
-                select.innerHTML += `<option value="${mfr}">${mfr}</option>`;
-            });
+            select.innerHTML = '<option value="">-- 选择厂家 --</option>' +
+                data.manufacturers.map(mfr => `<option value="${fuEscapeHtml(mfr)}">${fuEscapeHtml(mfr)}</option>`).join('');
         }
     } catch (error) {
         console.error('加载厂家列表失败:', error);
@@ -136,11 +133,12 @@ async function onUpdateBoardManufacturerChange() {
 
         // 提取类型
         const types = [...new Set(updateBoardConfigs.map(c => c.type))];
-        types.forEach(type => {
-            const label = type === 'mainboard' ? '主板' :
-                         type === 'toolboard' ? '工具板' : '扩展板';
-            typeSelect.innerHTML += `<option value="${type}">${label}</option>`;
-        });
+        typeSelect.innerHTML = '<option value="">-- 选择类型 --</option>' +
+            types.map(type => {
+                const label = type === 'mainboard' ? '主板' :
+                             type === 'toolboard' ? '工具板' : '扩展板';
+                return `<option value="${fuEscapeHtml(type)}">${fuEscapeHtml(label)}</option>`;
+            }).join('');
         typeSelect.disabled = false;
     } catch (error) {
         console.error('加载配置列表失败:', error);
@@ -159,9 +157,8 @@ function onUpdateBoardTypeChange() {
     if (!type) return;
 
     const configs = updateBoardConfigs.filter(c => c.type === type);
-    configs.forEach(config => {
-        modelSelect.innerHTML += `<option value="${fuEscapeHtml(config.id)}">${fuEscapeHtml(config.name)}</option>`;
-    });
+    modelSelect.innerHTML = '<option value="">-- 选择型号 --</option>' +
+        configs.map(config => `<option value="${fuEscapeHtml(config.id)}">${fuEscapeHtml(config.name)}</option>`).join('');
     modelSelect.disabled = false;
 }
 
@@ -455,8 +452,8 @@ function openUpdateSettingsForNewConfig(boardConfig) {
     // 显示关联的主板配置信息
     document.getElementById('linkedBoardConfigInfo').innerHTML = `
         <div style="background:#e3f2fd;padding:10px;border-radius:8px;margin-bottom:15px;">
-            <strong>关联主板配置:</strong> ${boardConfig.name}<br>
-            <small>${boardConfig.platform} ${boardConfig.mcu} | ${boardConfig.type}</small>
+            <strong>关联主板配置:</strong> ${fuEscapeHtml(boardConfig.name)}<br>
+            <small>${fuEscapeHtml(boardConfig.platform)} ${fuEscapeHtml(boardConfig.mcu)} | ${fuEscapeHtml(boardConfig.type)}</small>
         </div>
     `;
 
