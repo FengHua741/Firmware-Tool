@@ -144,9 +144,9 @@ sudo ./install.sh
 安装脚本会自动：
 - 检测系统类型（FlyOS-Fast / 普通 Linux）
 - 安装 Python 依赖（flask, flask-cors, psutil, paramiko, cryptography, requests）
-- 首次安装时创建 `data/config.json`，已有配置文件时不会覆盖
+- 首次安装时创建 `data/config.json` 并生成 `api_token`，已有配置文件时不会覆盖
 - 创建 systemd 服务
-- 配置开机自启
+- 在用户确认后启动服务并配置开机自启
 - 设置默认端口（9999）
 
 ### 方法二：手动安装
@@ -181,6 +181,7 @@ python3 src/app.py
 - `bind_host`：服务监听地址，默认 `0.0.0.0`
 - `allowed_origins`：CORS 允许来源列表，空列表表示兼容旧行为
 - `api_token`：设置后 API 请求需要携带 `X-API-Token` 请求头；网页可通过 `http://设备IP:端口/?token=你的Token` 写入浏览器本地存储
+- `require_csrf`：默认开启同源页面令牌校验；关闭前建议先配置 `api_token`
 
 ## 卸载方法
 

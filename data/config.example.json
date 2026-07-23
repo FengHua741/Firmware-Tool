@@ -13,5 +13,6 @@
   "ssh_user": "",
   "sudo_mode": "password",
   "allowed_origins": [],
-  "api_token": ""
+  "api_token": "",
+  "require_csrf": true
 }

@@ -742,6 +742,17 @@ def repair_can_network():
         data = request.json or {}
         bitrate = data.get('bitrate', 1000000)
         txqueuelen = data.get('txqueuelen', 1024)
+
+        if bitrate not in CAN_BITRATES:
+            return jsonify({
+                'error': f'不支持的速率: {bitrate}，仅支持 {", ".join(CAN_BITRATES.values())}'
+            }), 400
+        try:
+            txqueuelen = int(txqueuelen)
+        except (TypeError, ValueError):
+            return jsonify({'error': '缓存大小必须是数字'}), 400
+        if txqueuelen < 128 or txqueuelen > 8192:
+            return jsonify({'error': '缓存大小范围: 128-8192'}), 400
         
         messages = []
         

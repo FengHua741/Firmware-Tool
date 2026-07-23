@@ -78,6 +78,13 @@ PORT=${PORT:-9999}
 echo -e "${GREEN}使用端口: $PORT${NC}"
 echo ""
 
+PYTHON_FOR_TOKEN=$(command -v python3 2>/dev/null || echo /usr/bin/python3)
+API_TOKEN="$($PYTHON_FOR_TOKEN - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+)"
+
 # Fast系统: 如果当前目录不是PROJECT_DIR，则复制项目
 if [ "$IS_FAST" = true ] && [ "$(pwd)" != "$PROJECT_DIR" ]; then
     echo "复制项目到 $PROJECT_DIR..."
@@ -98,11 +105,21 @@ cat > "$PROJECT_DIR/data/config.json" << EOF
   "last_json_update": null,
   "connection_mode": "local",
   "allowed_origins": [],
-  "api_token": ""
+  "api_token": "$API_TOKEN",
+  "require_csrf": true
 }
 EOF
 else
     echo "配置文件已存在，跳过覆盖: $PROJECT_DIR/data/config.json"
+    API_TOKEN="$($PYTHON_FOR_TOKEN - "$PROJECT_DIR/data/config.json" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+        print((json.load(f).get('api_token') or '').strip())
+except Exception:
+    print('')
+PY
+)"
 fi
 
 chown "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR/data/config.json"
@@ -226,6 +243,9 @@ echo ""
 echo "服务名称: $SERVICE_NAME"
 echo "端口号: $PORT"
 echo "项目目录: $PROJECT_DIR"
+if [ -n "$API_TOKEN" ]; then
+    echo "API Token: $API_TOKEN"
+fi
 echo ""
 echo "常用命令:"
 echo "  启动服务: sudo systemctl start $SERVICE_NAME"
@@ -238,7 +258,11 @@ echo "  卸载程序：cd $PROJECT_DIR/scripts && sudo ./uninstall.sh"
 echo ""
 # 获取本机 IP（兼容 FAST 系统无 hostname -I 的情况）
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -1 || echo "<IP>")
-echo -e "${GREEN}访问地址: http://$LOCAL_IP:$PORT${NC}"
+if [ -n "$API_TOKEN" ]; then
+    echo -e "${GREEN}访问地址: http://$LOCAL_IP:$PORT/?token=$API_TOKEN${NC}"
+else
+    echo -e "${GREEN}访问地址: http://$LOCAL_IP:$PORT${NC}"
+fi
 echo ""
 
 # 询问是否启动服务
