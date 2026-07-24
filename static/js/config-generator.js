@@ -613,13 +613,23 @@ function cgBoardMapDefaultHtml(root, hasItems=true) {
     return '<i class="fas fa-info-circle"></i> 点击图片上的接口查看物理位置、真实 pin 和可用分配。';
 }
 
-function cgBoardImageUrl(boardId) {
+async function cgBoardImageUrl(boardId) {
     if (!boardId) return '';
-    const path = `/api/tools/boards/${encodeURIComponent(boardId)}/image?board=${encodeURIComponent(boardId)}&v=${Date.now()}`;
-    return new URL(path, window.location.href).href;
+    // <img> 标签直接请求 API 地址不携带 CSRF 认证头，会被校验拦截返回 401。
+    // 改用 fetch（拦截器自动加 CSRF 头）下载图片并转为 blob URL，供 <img> 与热点图使用。
+    try {
+        const resp = await fetch(`/api/tools/boards/${encodeURIComponent(boardId)}/image?board=${encodeURIComponent(boardId)}`);
+        if (!resp.ok) return '';
+        const blob = await resp.blob();
+        return URL.createObjectURL(blob);
+    } catch (e) {
+        console.error('加载板卡图片失败:', e);
+        return '';
+    }
 }
 
 function cgClearBoardImages(message='正在加载板卡图片...') {
+    if (_cgBoardImageUrl && _cgBoardImageUrl.startsWith('blob:')) URL.revokeObjectURL(_cgBoardImageUrl);
     _cgBoardImageUrl = '';
     const imgContainer = document.getElementById('cgBoardImageContainer');
     const previewImg = document.getElementById('cgBoardImage');
@@ -2027,7 +2037,7 @@ function updateCgProgress() {
     if (document.querySelectorAll('[id^="cgAxis_"]').length > 0) done++;
     if (_currentProbeMode) done++;
     done += 2;
-    if (document.getElementById('cgOutput')?.value) done++;
+    if (_cgCurrentConfig) done++;
     const pct = Math.round((done / total) * 100);
     bar.style.width = pct + '%';
 }
@@ -2155,11 +2165,12 @@ async function onBoardChange() {
         _cgSelectedBoardPin = '';
         const info = _currentBoardInfo;
         document.getElementById('cgBoardInfo').innerHTML = `<span>MCU: ${cgEscapeHtml(info.mcu)}</span> | <span>${cgEscapeHtml(info.drive_count)}驱动</span> | <span>${cgEscapeHtml(info.heat_count)}加热</span> | <span>${cgEscapeHtml(info.fan_count)}风扇</span>`;
-        // 加载板卡图片
+        // 加载板卡图片（fetch + blob，避免 <img> 直接请求 API 无 CSRF 头导致 401）
         const imgContainer = document.getElementById('cgBoardImageContainer');
         const imgEl = document.getElementById('cgBoardImage');
         if (info.image && imgContainer && imgEl) {
-            const imageUrl = cgBoardImageUrl(boardId);
+            const imageUrl = await cgBoardImageUrl(boardId);
+            if (loadSeq !== _cgBoardLoadSeq) return;
             _cgBoardImageUrl = imageUrl;
             imgEl.onload = () => {
                 if (loadSeq !== _cgBoardLoadSeq) return;
@@ -2172,7 +2183,12 @@ async function onBoardChange() {
                 cgShowToast('板卡图片加载失败', 'warning');
             };
             imgEl.alt = `${info.name || boardId} 板卡图片`;
-            imgEl.src = imageUrl;
+            if (imageUrl) {
+                imgEl.src = imageUrl;
+            } else {
+                imgContainer.style.display = 'none';
+                cgShowToast('板卡图片加载失败', 'warning');
+            }
         } else if (imgContainer) {
             _cgBoardImageUrl = '';
             imgContainer.style.display = 'none';
@@ -2451,6 +2467,19 @@ function updateMotionParamsForModel() {
         const e1 = document.getElementById('cgBedST'); if (e1 && bed.sensor_type) e1.value = bed.sensor_type;
         const e2 = document.getElementById('cgBedMaxT'); if (e2 && bed.max_temp != null) e2.value = bed.max_temp;
     }
+    // bed_mesh 预设：renderLevelingParams 会用硬编码默认值重建输入框，
+    // 这里在其后注入机型预设值（如 mesh_max），避免默认值超出行程导致生成被拦截
+    const bm = p.bed_mesh;
+    if (bm) {
+        const bmMap = {cgBMSpeed:'speed', cgBMHMZ:'horizontal_move_z', cgBMMeshMin:'mesh_min', cgBMMeshMax:'mesh_max', cgBMProbeCount:'probe_count'};
+        Object.entries(bmMap).forEach(([id,k]) => {
+            const el = document.getElementById(id);
+            if (el && bm[k] != null) el.value = bm[k];
+        });
+        if (bm.algorithm) { const el = document.getElementById('cgBMAlgo'); if (el) el.value = bm.algorithm; }
+    }
+    // 探针预设：注入 z_offset/偏移/采样等参数（applyProbePreset 内部会判空）
+    applyProbePreset();
     // 更新可选段默认值
     const opt = p.optional_sections;
     if (opt) {
@@ -2985,7 +3014,7 @@ function addExtraHeater() {
     h+=`<div class="cg-func-item"><label>名称：</label><input type="text" id="cgExtraName_${idx}" value="extra_heater_${idx}" style="width:100%;"></div>`;
     h+=`<div class="cg-func-item"><label>加热引脚：</label><select id="cgExtraHeatPin_${idx}" onchange="renderToolboardConflictPanel()">${heatOpts}</select></div>`;
     h+=`<div class="cg-func-item"><label>热敏引脚：</label><select id="cgExtraTempPin_${idx}" onchange="renderToolboardConflictPanel()">${tempOpts}</select></div>`;
-    h+=`<div class="cg-func-item"><label>传感器类型：</label><select id="cgExtraST_${idx}">${SENSOR_TYPES.map(s=>`<option>${cgEscapeHtml(s)}</option>`).join('')}</select><br><small style="color:#e65100;font-size:11px;">⚠️ PT100 需要 MAX31865 放大器，PT1000 建议搭配放大器使用</small></div>`;
+    h+=`<div class="cg-func-item"><label>传感器类型：</label><select id="cgExtraST_${idx}">${SENSOR_TYPES.map(s=>`<option>${cgEscapeHtml(s)}</option>`).join('')}</select><br><small style="color:var(--warning-color);font-size:11px;">⚠️ PT100 需要 MAX31865 放大器，PT1000 建议搭配放大器使用</small></div>`;
     h+=`<div class="cg-func-item"><label>max_temp：</label><input type="number" id="cgExtraMaxT_${idx}" value="120" class="cg-xs"></div>`;
     h+=`<div class="cg-func-item" id="cgExtraMinTempRow_${idx}"><label>min_temp：</label><input type="number" id="cgExtraMinTemp_${idx}" value="-235" class="cg-xs"></div>`;
     h+=`<div class="cg-func-item" id="cgExtraMaxPowerRow_${idx}"><label>max_power：</label><input type="number" step="0.1" id="cgExtraMaxPower_${idx}" value="1.0" class="cg-xs"></div>`;
@@ -3076,7 +3105,7 @@ function renderExtruderParams() {
     h+=`<div class="cg-param-item"><label>max_temp：</label><input type="number" id="cgExtMaxT" value="${ep.max_temp??_defE.max_temp}"></div>`;
     h+=`<div class="cg-param-item"><label>min_extrude_temp：</label><input type="number" id="cgExtMinT" value="${ep.min_extrude_temp??170}"></div>`;
     const st=ep.sensor_type??_defE.sensor_type;
-    h+=`<div class="cg-param-item"><label>sensor_type：</label><select id="cgExtST">${SENSOR_TYPES.map(s=>`<option${s===st?' selected':''}>${s}</option>`).join('')}</select><br><small style="color:#e65100;font-size:11px;">⚠️ PT100 需要 MAX31865 放大器，PT1000 建议搭配放大器使用</small></div>`;
+    h+=`<div class="cg-param-item"><label>sensor_type：</label><select id="cgExtST">${SENSOR_TYPES.map(s=>`<option${s===st?' selected':''}>${s}</option>`).join('')}</select><br><small style="color:var(--warning-color);font-size:11px;">⚠️ PT100 需要 MAX31865 放大器，PT1000 建议搭配放大器使用</small></div>`;
     h+=`<div class="cg-param-item"><label>gear_ratio：</label><input type="text" id="cgExtGearRatio" value="${ep.gear_ratio||''}" style="width:100px;"><br><small style="color:var(--text-secondary);">减速比，BMG=50:17，Galileo留空</small></div>`;
     h+=`<div class="cg-param-item"><label>pressure_advance：</label><input type="number" step="0.001" id="cgExtPA" value="${ep.pressure_advance??0.05}" class="cg-xs"></div>`;
     h+=`<div class="cg-param-item"><label>pressure_advance_smooth_time：</label><input type="number" step="0.001" id="cgExtPASmooth" value="${ep.pressure_advance_smooth_time??0.040}" class="cg-xs"></div>`;
@@ -3094,7 +3123,7 @@ function renderBedParams() {
     const cp=_currentPreset||{}; const _bed=cp.bed||{};
     const _defB={sensor_type:'NTC 100K beta 3950',max_temp:120};
     const bst=_bed.sensor_type||_defB.sensor_type, bmt=_bed.max_temp??_defB.max_temp;
-    let h=`<div class="cg-param-grid"><div class="cg-param-item"><label>sensor_type：</label><select id="cgBedST">${SENSOR_TYPES.map(s=>`<option${s===bst?' selected':''}>${s}</option>`).join('')}</select><br><small style="color:#e65100;font-size:11px;">⚠️ PT100 需要 MAX31865 放大器，PT1000 建议搭配放大器使用</small></div><div class="cg-param-item"><label>max_temp：</label><input type="number" id="cgBedMaxT" value="${bmt}"></div><div class="cg-param-item"><label>max_power：</label><input type="number" step="0.1" id="cgBedMaxPower" value="1.0" class="cg-xs"></div><div class="cg-param-item"><label>control：</label><select id="cgBedControl"><option value="watermark" selected>watermark</option><option value="pid">pid</option></select></div><div class="cg-param-item"><label>min_temp：</label><input type="number" id="cgBedMinTemp" value="-235" class="cg-xs"><br><small style="color:var(--text-secondary);">FLY参考配置特殊值</small></div></div>`;
+    let h=`<div class="cg-param-grid"><div class="cg-param-item"><label>sensor_type：</label><select id="cgBedST">${SENSOR_TYPES.map(s=>`<option${s===bst?' selected':''}>${s}</option>`).join('')}</select><br><small style="color:var(--warning-color);font-size:11px;">⚠️ PT100 需要 MAX31865 放大器，PT1000 建议搭配放大器使用</small></div><div class="cg-param-item"><label>max_temp：</label><input type="number" id="cgBedMaxT" value="${bmt}"></div><div class="cg-param-item"><label>max_power：</label><input type="number" step="0.1" id="cgBedMaxPower" value="1.0" class="cg-xs"></div><div class="cg-param-item"><label>control：</label><select id="cgBedControl"><option value="watermark" selected>watermark</option><option value="pid">pid</option></select></div><div class="cg-param-item"><label>min_temp：</label><input type="number" id="cgBedMinTemp" value="-235" class="cg-xs"><br><small style="color:var(--text-secondary);">FLY参考配置特殊值</small></div></div>`;
     c.innerHTML=h;
 }
 
@@ -3191,17 +3220,17 @@ function renderEndstopConfig() {
                 } else {
                     h += `<span class="cg-diag-pin-info" id="cgEndstopDiagInfo_${ax}" style="display:none;">(${dd.diagPrefix}${dd.diag_pin} on ${dd.driver}/${dd.tmcModel})</span>`;
                 }
-                if (ax === 'Z') h += '<span style="color:#e6a817;font-size:11px;margin-left:8px;">⚠️ Z轴不建议使用DIAG</span>';
+                if (ax === 'Z') h += '<span style="color:var(--warning-color);font-size:11px;margin-left:8px;">⚠️ Z轴不建议使用DIAG</span>';
                 h += '</div>';
             } else if (dd && dd.noDiagPin) {
                 // 该驱动未引出DIAG引脚
-                h += `<div class="cg-diag-row" style="opacity:0.5;"><span style="color:#e53935;font-size:12px;">⛔ ${ax}轴(${dd.driver})：该驱动未引出DIAG引脚，不可用于传感器限位</span></div>`;
+                h += `<div class="cg-diag-row" style="opacity:0.5;"><span style="color:var(--danger-color);font-size:12px;">⛔ ${ax}轴(${dd.driver})：该驱动未引出DIAG引脚，不可用于传感器限位</span></div>`;
             } else if (dd && !dd.diagSupported) {
                 // 有DIAG引脚但TMC型号不支持 → 显示禁用的提示
-                h += `<div class="cg-diag-row" style="opacity:0.5;"><span style="color:#e53935;font-size:12px;">⛔ ${ax}轴：${dd.tmcModel} 不支持DIAG传感器限位（${dd.diagField}: ${dd.diag_pin}）</span></div>`;
+                h += `<div class="cg-diag-row" style="opacity:0.5;"><span style="color:var(--danger-color);font-size:12px;">⛔ ${ax}轴：${dd.tmcModel} 不支持DIAG传感器限位（${dd.diagField}: ${dd.diag_pin}）</span></div>`;
             } else if (ax === 'Z') {
                 // Z轴无分配 → 警告
-                h += `<div class="cg-diag-row" style="opacity:0.6;"><label class="cg-diag-check"><input type="checkbox" id="cgEndstopDiag_${ax}" onchange="onEndstopDiagChange('${ax}')"> ${ax}轴使用 DIAG 限位</label><span style="color:#e6a817;font-size:11px;"> ⚠️ Z轴不建议使用DIAG，可能影响归位精度</span></div>`;
+                h += `<div class="cg-diag-row" style="opacity:0.6;"><label class="cg-diag-check"><input type="checkbox" id="cgEndstopDiag_${ax}" onchange="onEndstopDiagChange('${ax}')"> ${ax}轴使用 DIAG 限位</label><span style="color:var(--warning-color);font-size:11px;"> ⚠️ Z轴不建议使用DIAG，可能影响归位精度</span></div>`;
             }
         });
         h += '</div>';
@@ -3245,7 +3274,7 @@ function renderProbeConfig() {
         _currentProbeMode = 'z_endstop_only';
         c.innerHTML='<div class="cg-probe-section"><h4 class="cg-section-title"><i class="fas fa-cogs"></i> Z限位/调平传感器模式</h4>'+
             '<div style="padding:10px 14px;border-radius:6px;border:1px solid var(--border-color);">'+
-            '<span style="color:#e6a817;"><i class="fas fa-info-circle"></i> 此板卡无调平传感器引脚(probe/servo)</span>'+
+            '<span style="color:var(--warning-color);"><i class="fas fa-info-circle"></i> 此板卡无调平传感器引脚(probe/servo)</span>'+
             '<p style="font-size:12px;color:var(--text-secondary);margin:4px 0 0;">仅支持"仅Z物理限位"模式，Z轴将使用物理限位开关归位。</p></div></div>';
         syncBedMeshByMode();
         return;
@@ -4454,6 +4483,7 @@ function resetForm() {
     const importPanel=document.getElementById('cgImportSummary'); if(importPanel){importPanel.style.display='none';importPanel.innerHTML='';}
     const diffPanel=document.getElementById('cgDiffSummary'); if(diffPanel){diffPanel.style.display='none';diffPanel.innerHTML='';}
     // 重置板卡图片
+    if (_cgBoardImageUrl && _cgBoardImageUrl.startsWith('blob:')) URL.revokeObjectURL(_cgBoardImageUrl);
     _cgBoardImageUrl='';
     const imgC=document.getElementById('cgBoardImageContainer'); if(imgC) imgC.style.display='none';
     const img=document.getElementById('cgBoardImage'); if(img){img.onload=null;img.onerror=null;img.removeAttribute('src');}

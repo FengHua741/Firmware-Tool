@@ -16,6 +16,7 @@
 }
 
 [data-theme="dark"] {
+    color-scheme: dark;
     --primary-color: #64B5F6;
     --primary-dark: #42A5F5;
     --success-color: #66BB6A;
@@ -320,6 +321,15 @@ body {
 
 .btn-secondary:hover {
     background: #616161;
+}
+
+.btn-info {
+    background: #00ACC1;
+    color: white;
+}
+
+.btn-info:hover {
+    background: #0097A7;
 }
 
 .btn-lg {
@@ -911,8 +921,8 @@ body {
     align-items: center;
     gap: 8px;
     padding: 6px 12px;
-    background: white;
-    border: 1px solid #dee2e6;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 16px;
     margin: 4px;
     font-size: 14px;
@@ -929,8 +939,8 @@ body {
     display: flex;
     align-items: center;
     padding: 15px;
-    background: white;
-    border: 1px solid #dee2e6;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     margin-bottom: 10px;
     gap: 15px;
@@ -964,7 +974,7 @@ body {
 
 .config-card .details {
     font-size: 13px;
-    color: #6c757d;
+    color: var(--text-secondary);
 }
 
 .config-card .status {
@@ -1005,7 +1015,8 @@ body {
 }
 
 .modal-content {
-    background: white;
+    background: var(--card-bg);
+    color: var(--text-primary);
     border-radius: 12px;
     width: 90%;
     max-width: 600px;
@@ -1018,7 +1029,7 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 20px;
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .modal-header h3 {
@@ -1049,7 +1060,8 @@ body {
 }
 
 .json-preview-content {
-    background: white;
+    background: var(--card-bg);
+    color: var(--text-primary);
     padding: 20px;
     border-radius: 8px;
     max-width: 80%;
@@ -1283,7 +1295,7 @@ body {
 
 .host-file-browser .browser-path {
     font-size: 0.8rem;
-    color: #555;
+    color: var(--text-secondary);
     font-family: monospace;
     word-break: break-all;
 }
@@ -1702,14 +1714,157 @@ body {
 .can-node { position:absolute; top:0; text-align:center; cursor:pointer; transform:translateX(-50%); transition:transform 0.2s; }
 .can-node:hover { transform:translateX(-50%) scale(1.03); }
 .can-node-connector { width:2px; height:28px; margin:0 auto; }
-.can-node-card { background:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:8px 10px; min-width:120px; max-width:180px; box-shadow:0 1px 4px rgba(0,0,0,0.06); display:flex; flex-direction:column; gap:4px; }
-.can-node-icon { font-size:16px; color:#555; }
+.can-node-card { background:var(--card-bg); border:1px solid var(--border-color); border-radius:8px; padding:8px 10px; min-width:120px; max-width:180px; box-shadow:0 1px 4px rgba(0,0,0,0.06); display:flex; flex-direction:column; gap:4px; }
+.can-node-icon { font-size:16px; color:var(--text-secondary); }
 .can-node-info { text-align:left; }
-.can-node-title { font-weight:600; font-size:12px; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.can-node-detail { font-size:10px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.can-node-title { font-weight:600; font-size:12px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.can-node-detail { font-size:10px; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .can-node-status { font-size:10px; display:flex; align-items:center; gap:3px; margin-top:2px; }
 
 .can-node-connected .can-node-card { border-left:3px solid #4caf50; }
 .can-node-katapult .can-node-card { border-left:3px solid #ff9800; }
 .can-node-lost .can-node-card { border-left:3px solid #f44336; }
 .can-node-unknown .can-node-card { border-left:3px solid #9e9e9e; }
+
+/* ==================== 暗色模式补充覆盖 ==================== */
+[data-theme="dark"] .selected-list {
+    background: #2a2a2a;
+}
+
+[data-theme="dark"] .upload-area {
+    background-color: #252525;
+}
+
+[data-theme="dark"] .upload-area:hover,
+[data-theme="dark"] .upload-area.drag-over {
+    background-color: #263238;
+}
+
+[data-theme="dark"] .config-card.selected {
+    background: rgba(76, 175, 80, 0.12);
+}
+
+/* 状态框（浅色彩底 → 暗色半透明底 + 亮色文字） */
+[data-theme="dark"] .status-success,
+[data-theme="dark"] .dep-item.ok {
+    background-color: rgba(76, 175, 80, 0.15);
+    color: #81C784;
+}
+
+[data-theme="dark"] .status-error,
+[data-theme="dark"] .dep-item.error {
+    background-color: rgba(244, 67, 54, 0.15);
+    color: #E57373;
+}
+
+[data-theme="dark"] .status-info {
+    background-color: rgba(33, 150, 243, 0.15);
+    color: #64B5F6;
+}
+
+[data-theme="dark"] .status-badge.enabled {
+    background: rgba(76, 175, 80, 0.2);
+    color: #81C784;
+}
+
+[data-theme="dark"] .status-badge.disabled {
+    background: rgba(244, 67, 54, 0.2);
+    color: #E57373;
+}
+
+/* 进度条轨道 */
+[data-theme="dark"] .monitor-progress,
+[data-theme="dark"] .progress-bar,
+[data-theme="dark"] .compile-progress .progress-bar {
+    background: #333333;
+}
+
+/* 更新结果列表 */
+[data-theme="dark"] .update-result-item {
+    border-bottom-color: #333333;
+}
+
+[data-theme="dark"] .update-result-status.pending {
+    background: #3a3a3a;
+    color: #999999;
+}
+
+/* 结果/列表浅色底 */
+[data-theme="dark"] .compile-result,
+[data-theme="dark"] .flash-result,
+[data-theme="dark"] .board-item,
+[data-theme="dark"] .update-progress {
+    background-color: #252525;
+}
+
+/* 悬停浅色底 */
+[data-theme="dark"] .resource-item-large:hover {
+    background-color: #2a2a2a;
+}
+
+[data-theme="dark"] .expandable-header:hover {
+    background: #2a2a2a;
+}
+
+/* FlyOS 信息栏 */
+[data-theme="dark"] .flyos-version-bar {
+    background: rgba(76, 175, 80, 0.12);
+    border-left-color: #66BB6A;
+}
+
+[data-theme="dark"] .flyos-version-label {
+    color: #81C784;
+}
+
+[data-theme="dark"] .flyos-version-value {
+    color: #A5D6A7;
+}
+
+[data-theme="dark"] .flyos-board-bar {
+    background: rgba(33, 150, 243, 0.12);
+    border-left-color: #64B5F6;
+}
+
+[data-theme="dark"] .flyos-board-bar .flyos-version-label {
+    color: #64B5F6;
+}
+
+[data-theme="dark"] .flyos-board-bar .flyos-version-value {
+    color: #90CAF9;
+}
+
+/* HOST 文件浏览器 */
+[data-theme="dark"] .host-file-browser {
+    background: #252525;
+}
+
+[data-theme="dark"] .host-file-browser .browser-toolbar {
+    background: #2d2d2d;
+}
+
+[data-theme="dark"] .host-file-browser .browser-toolbar .btn-sm {
+    background: #333333;
+    border-color: #444444;
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .host-file-browser .browser-item:hover {
+    background: #263238;
+}
+
+[data-theme="dark"] .host-file-browser .browser-item.selected {
+    background: #1a3a52;
+}
+
+[data-theme="dark"] .host-file-browser .browser-item .item-size {
+    color: #999999;
+}
+
+[data-theme="dark"] .host-file-browser .browser-empty {
+    color: #888888;
+}
+
+/* CAN 拓扑空状态 */
+[data-theme="dark"] .can-topology-empty {
+    color: var(--text-secondary);
+}

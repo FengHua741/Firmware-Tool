@@ -216,9 +216,12 @@ async function onCompileMcuModelChange() {
             if (blSection && blSection.style.display !== 'none') {
                 await loadBlAddressOptions();
             }
+        } else {
+            showError(`加载 MCU 详情失败: ${data.error || mcuId}`);
         }
     } catch (error) {
         console.error('加载 MCU 详情失败:', error);
+        showError(`加载 MCU 详情失败: ${error.message || error}`);
     }
 }
 
@@ -232,12 +235,12 @@ async function displayCompileMcuDetails(data) {
     if (!crystalSelect) return;
     crystalSelect.innerHTML = '';
     let crystalOptionHtml = '';
-    mcu.crystals.forEach(freq => {
+    (mcu.crystals || []).forEach(freq => {
         const label = formatCompileFrequency(freq);
         crystalOptionHtml += `<option value="${escapeHtml(freq)}">${escapeHtml(label)}</option>`;
     });
     crystalSelect.innerHTML = crystalOptionHtml;
-    if (mcu.id === 'rp2040' || mcu.id === 'rp2350' || mcu.crystals.length <= 1) {
+    if (mcu.id === 'rp2040' || mcu.id === 'rp2350' || (mcu.crystals || []).length <= 1) {
         crystalGroup.style.display = 'none';
     } else {
         crystalGroup.style.display = 'block';
@@ -247,7 +250,7 @@ async function displayCompileMcuDetails(data) {
     const blSelect = document.getElementById('compileBlOffset');
     blSelect.innerHTML = '';
     let blOptionHtml = '';
-    mcu.bl_offsets.forEach(offset => {
+    (mcu.bl_offsets || []).forEach(offset => {
         const label = formatCompileBlOffset(offset, mcu.id);
         blOptionHtml += `<option value="${escapeHtml(offset)}">${escapeHtml(label)}</option>`;
     });
@@ -1306,7 +1309,7 @@ async function refreshDeviceIds() {
             // 显示来源提示
             if (canData.source === 'printer_cfg' && canData.skipped > 0 && canErrDiv) {
                 canErrDiv.style.display = 'block';
-                canErrDiv.innerHTML = `<div style="margin-top:6px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">${escapeHtml(canData.skipped)} 个配置文件中的设备未连接，已自动过滤</div>`;
+                canErrDiv.innerHTML = `<div style="margin-top:6px;font-size:12px;color:var(--warning-color);background:rgba(255,193,7,.12);padding:6px 10px;border-radius:4px;">${escapeHtml(canData.skipped)} 个配置文件中的设备未连接，已自动过滤</div>`;
             }
         }
 
@@ -1314,7 +1317,7 @@ async function refreshDeviceIds() {
         if (usbCount > 0 || canCount > 0) {
             select.innerHTML += `<option disabled>━━━━━━━━━━━━━━━━━━━━━━━━</option>`;
             const statsText = `共找到 ${usbCount + canCount} 个设备 (USB: ${usbCount}, CAN: ${canCount})`;
-            select.innerHTML += `<option disabled style="color:#6c757d;font-style:italic;">${statsText}</option>`;
+            select.innerHTML += `<option disabled style="color:var(--text-secondary);font-style:italic;">${statsText}</option>`;
         }
 
         if (select.options.length === 1) {
@@ -2087,7 +2090,7 @@ async function checkDependencies() {
         const rows = data.dependencies.map(dep => {
             const icon = dep.installed ? '&#10003;' : '&#10007;';
             const color = dep.installed ? '#4caf50' : '#f44336';
-            const ver = dep.installed ? `<span style="color:#888;font-size:12px">${escapeHtml(dep.version)}</span>` : `<span style="color:#f44336">未安装 (${escapeHtml(dep.pkg)})</span>`;
+            const ver = dep.installed ? `<span style="color:var(--text-secondary);font-size:12px">${escapeHtml(dep.version)}</span>` : `<span style="color:var(--danger-color)">未安装 (${escapeHtml(dep.pkg)})</span>`;
             return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
                       <span style="color:${color};font-weight:bold;font-size:16px">${icon}</span>
                       <span style="font-family:monospace">${escapeHtml(dep.name)}</span>
@@ -2095,8 +2098,8 @@ async function checkDependencies() {
                     </div>`;
         }).join('');
         const summary = data.all_ok
-            ? '<p style="color:#4caf50;font-weight:bold">所有依赖已就绪</p>'
-            : '<p style="color:#f44336">存在缺失依赖，请点击"安装依赖"</p>';
+            ? '<p style="color:var(--success-color);font-weight:bold">所有依赖已就绪</p>'
+            : '<p style="color:var(--danger-color)">存在缺失依赖，请点击"安装依赖"</p>';
         statusEl.innerHTML = summary + rows;
     } catch (e) {
         statusEl.innerHTML = `<p style="color:red">请求失败: ${escapeHtml(e.message)}</p>`;
@@ -2295,13 +2298,36 @@ async function loadFirmwareHistory() {
                     <td style="padding:6px 8px;">${_escFh((h.mcu && h.mcu.id) || '-')}</td>
                     <td style="padding:6px 8px;">${h.firmware_size ? (h.firmware_size / 1024).toFixed(1) + 'KB' : '-'}</td>
                     <td style="padding:6px 8px;">
-                        <a href="/api/firmware/history/${encodeURIComponent(h.id)}/download" style="color:var(--primary-color);margin-right:8px;" title="下载"><i class="fas fa-download"></i></a>
+                        <button onclick="downloadFirmwareHistory('${_escFh(h.id)}')" style="background:none;border:none;color:var(--primary-color);cursor:pointer;margin-right:8px;" title="下载"><i class="fas fa-download"></i></button>
                         <button onclick="deleteFirmwareHistory('${_escFh(h.id)}')" style="background:none;border:none;color:var(--danger-color);cursor:pointer;" title="删除"><i class="fas fa-trash"></i></button>
                     </td>
                 </tr>`).join('')}
             </tbody></table>`;
     } catch (e) {
         container.innerHTML = '<span style="color:var(--danger-color);">加载失败</span>';
+    }
+}
+
+async function downloadFirmwareHistory(id) {
+    // 使用 fetch 下载（自动携带 CSRF 认证头）。
+    // 不能用 <a href> 直接跳转：页面跳转不携带 X-CSRF-Token 头，会被 CSRF 校验拦截返回 401。
+    try {
+        const resp = await fetch(`/api/firmware/history/${encodeURIComponent(id)}/download`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const cd = resp.headers.get('Content-Disposition') || '';
+        const m = cd.match(/filename="?([^";]+)"?/);
+        a.download = m ? m[1] : `firmware-${id}.bin`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        console.error('下载固件失败:', e);
+        showError('下载失败: ' + (e.message || e));
     }
 }
 

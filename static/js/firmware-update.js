@@ -309,7 +309,7 @@ function renderUpdateableConfigs() {
                 <div class="info">
                     <div class="name">${fuEscapeHtml(config.id)}</div>
                     <div class="details">
-                        ${updateEnabled ? '<span style="color:#28a745;">' + fuEscapeHtml(modeShortNames[mode] || mode) + '</span>' : '<span style="color:#6c757d;">已禁用</span>'}
+                        ${updateEnabled ? '<span style="color:var(--success-color);">' + fuEscapeHtml(modeShortNames[mode] || mode) + '</span>' : '<span style="color:var(--text-secondary);">已禁用</span>'}
                         ${deviceId ? '| ' + fuEscapeHtml(deviceId.substring(0, 12)) + '...' : ''}
                         ${config.board_config_id ? '| 关联: ' + fuEscapeHtml(config.board_config_id) : ''}
                     </div>
@@ -502,7 +502,7 @@ async function openUpdateSettings(configKey) {
         `;
     } else if (config.board_config_id) {
         // 后端未嵌入 board_config，主动获取
-        linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#666;">加载关联配置信息...</div>`;
+        linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:var(--text-secondary);">加载关联配置信息...</div>`;
         try {
             const mfr = config._manufacturer || config.manufacturer;
             const bcResponse = await fetch(`/api/config/get/${encodeURIComponent(mfr)}/${encodeURIComponent(config.board_config_id)}`);
@@ -516,10 +516,10 @@ async function openUpdateSettings(configKey) {
                     </div>
                 `;
             } else {
-                linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#888;">关联配置: ${fuEscapeHtml(config.board_config_id)}</div>`;
+                linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:var(--text-secondary);">关联配置: ${fuEscapeHtml(config.board_config_id)}</div>`;
             }
         } catch (e) {
-            linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:#888;">关联配置: ${fuEscapeHtml(config.board_config_id)}</div>`;
+            linkedInfoDiv.innerHTML = `<div style="padding:10px;border-radius:8px;margin-bottom:15px;font-size:13px;color:var(--text-secondary);">关联配置: ${fuEscapeHtml(config.board_config_id)}</div>`;
         }
     } else {
         linkedInfoDiv.innerHTML = '';
@@ -965,7 +965,7 @@ function addBatchResult(name, status, message) {
             </div>
             <div class="info" style="flex:1;">
                 <div style="font-weight:500;">${fuEscapeHtml(name)}</div>
-                <div style="font-size:13px;color:#6c757d;">${fuEscapeHtml(message)}</div>
+                <div style="font-size:13px;color:var(--text-secondary);">${fuEscapeHtml(message)}</div>
             </div>
         `;
         return;
@@ -981,7 +981,7 @@ function addBatchResult(name, status, message) {
         </div>
         <div class="info" style="flex:1;">
             <div style="font-weight:500;">${fuEscapeHtml(name)}</div>
-            <div style="font-size:13px;color:#6c757d;">${fuEscapeHtml(message)}</div>
+            <div style="font-size:13px;color:var(--text-secondary);">${fuEscapeHtml(message)}</div>
         </div>
     `;
 

@@ -22,33 +22,28 @@
             <nav class="sidebar-nav">
                 <a href="#" class="nav-item active" data-page="resources">
                     <span class="nav-icon">📊</span>
-                    <span>系统资源</span>
+                    <span data-i18n="nav.resources">系统资源</span>
                 </a>
                 <a href="#" class="nav-item" data-page="firmware">
                     <span class="nav-icon">🔨</span>
-                    <span>固件编译与烧录</span>
+                    <span data-i18n="nav.firmware">固件编译与烧录</span>
                 </a>
                 <a href="#" class="nav-item" data-page="firmware-update">
                     <span class="nav-icon">🔄</span>
-                    <span>固件更新</span>
+                    <span data-i18n="nav.firmware_update">固件更新</span>
                 </a>
                 <a href="#" class="nav-item" data-page="config">
                     <span class="nav-icon">📁</span>
-                    <span>配置管理</span>
+                    <span data-i18n="nav.config">配置管理</span>
                 </a>
                 <a href="#" class="nav-item" data-page="settings">
                     <span class="nav-icon">⚙️</span>
-                    <span>系统设置</span>
+                    <span data-i18n="nav.settings">系统设置</span>
                 </a>
                 <div style="border-top:1px solid var(--border-color); margin:8px 0;"></div>
                 <a href="#" class="nav-item" data-page="config-generator">
                     <span class="nav-icon">📝</span>
                     <span data-i18n="nav.config_generator">配置生成器</span>
-                </a>
-                <div style="border-top:1px solid var(--border-color); margin:8px 0;"></div>
-                <a href="/api/docs" target="_blank" class="nav-item">
-                    <span class="nav-icon">📖</span>
-                    <span data-i18n="nav.api_docs">API 文档</span>
                 </a>
             </nav>
             <div style="position:absolute;bottom:16px;left:0;right:0;padding:0 20px;">
@@ -74,7 +69,7 @@
             <!-- ==================== 系统资源页面 ==================== -->
             <div id="page-resources" class="page active">
                 <div class="page-header">
-                    <h2>系统资源</h2>
+                    <h2 data-i18n="page.resources">系统资源</h2>
                 </div>
 
                 <div class="resource-grid">
@@ -84,7 +79,7 @@
                     </div>
                     <!-- Row 1: 实时资源监控 (Span 2) + 网络状态 -->
                     <div class="card resource-monitor">
-                        <div class="card-header"><h3>实时资源监控</h3></div>
+                        <div class="card-header"><h3 data-i18n="card.resource_monitor">实时资源监控</h3></div>
                         <div class="card-body">
                             <div id="flyosVersionBar" class="flyos-version-bar" style="display:none;">
                                 <span class="flyos-version-label">FlyOS</span>
@@ -124,7 +119,7 @@
                     </div>
 
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3>网络状态</h3></div>
+                        <div class="card-header"><h3 data-i18n="card.network">网络状态</h3></div>
                         <div class="card-body">
                             <div id="networkInterfaces"><p class="empty">加载中...</p></div>
                         </div>
@@ -133,12 +128,12 @@
                     <!-- Row 2: USB + 串口 + 摄像头 -->
                     <div class="card" style="margin-top:12px;">
                         <div class="card-header">
-                            <h3>USB 设备</h3>
+                            <h3 data-i18n="card.usb_devices">USB 设备</h3>
                         </div>
                         <div class="card-body">
                             <div class="device-card-actions">
                                 <input type="text" class="form-control" id="lsusbFilter" placeholder="排除关键字（可选）">
-                                <button class="btn btn-sm btn-primary" onclick="searchLsusb()">搜索</button>
+                                <button class="btn btn-sm btn-primary" onclick="searchLsusb()" data-i18n="btn.search">搜索</button>
                             </div>
                             <div id="lsusbDevices" class="id-list"><p class="empty">点击搜索按钮</p></div>
                         </div>
@@ -146,8 +141,8 @@
 
                     <div class="card" style="margin-top:12px;">
                         <div class="card-header">
-                            <h3>串口设备</h3>
-                            <button class="btn btn-sm btn-primary" onclick="searchSerial()">搜索</button>
+                            <h3 data-i18n="card.serial_devices">串口设备</h3>
+                            <button class="btn btn-sm btn-primary" onclick="searchSerial()" data-i18n="btn.search">搜索</button>
                         </div>
                         <div class="card-body">
                             <div id="serialDevices" class="id-list"><p class="empty">点击搜索按钮</p></div>
@@ -156,8 +151,8 @@
 
                     <div class="card" style="margin-top:12px;">
                         <div class="card-header">
-                            <h3>摄像头</h3>
-                            <button class="btn btn-sm btn-primary" onclick="searchCamera()">搜索</button>
+                            <h3 data-i18n="card.camera">摄像头</h3>
+                            <button class="btn btn-sm btn-primary" onclick="searchCamera()" data-i18n="btn.search">搜索</button>
                         </div>
                         <div class="card-body">
                             <div id="cameraDevices" class="id-list"><p class="empty">点击搜索按钮</p></div>
@@ -167,10 +162,10 @@
                     <!-- Row 3: CAN 总线合并卡 (span 3) -->
                     <div class="card resource-can-combo">
                         <div class="card-header">
-                            <h3>CAN 总线</h3>
+                            <h3 data-i18n="card.can_bus">CAN 总线</h3>
                             <div style="display:flex;gap:6px;">
-                                <button class="btn btn-sm btn-info" onclick="diagnoseCanNetwork()" title="诊断CAN网络状态">诊断</button>
-                                <button class="btn btn-sm btn-secondary" onclick="loadCanHostConfig()">刷新</button>
+                                <button class="btn btn-sm btn-info" onclick="diagnoseCanNetwork()" title="诊断CAN网络状态" data-i18n="btn.diagnose">诊断</button>
+                                <button class="btn btn-sm btn-secondary" onclick="loadCanHostConfig()" data-i18n="btn.refresh">刷新</button>
                             </div>
                         </div>
                         <div class="card-body can-section">
@@ -184,8 +179,8 @@
                                 <select id="canIfaceSelect" class="form-control">
                                     <option value="">选择CAN接口</option>
                                 </select>
-                                <button class="btn btn-sm btn-secondary" onclick="refreshCanIfaces()">刷新接口</button>
-                                <button class="btn btn-sm btn-primary" onclick="searchCanUuid()">搜索UUID</button>
+                                <button class="btn btn-sm btn-secondary" onclick="refreshCanIfaces()" data-i18n="btn.refresh_iface">刷新接口</button>
+                                <button class="btn btn-sm btn-primary" onclick="searchCanUuid()" data-i18n="btn.search_uuid">搜索UUID</button>
                             </div>
                             <div id="canDevices" class="id-list"><p class="empty">先选择CAN接口再搜索</p></div>
                             <div id="canSearchError" style="display:none;"></div>
@@ -194,7 +189,7 @@
                         <div class="card-body can-section">
                             <div class="can-section-header" style="display:flex;justify-content:space-between;align-items:center;">
                                 <span>CAN 总线拓扑</span>
-                                <button class="btn btn-sm btn-secondary" onclick="refreshCanTopology()">刷新拓扑</button>
+                                <button class="btn btn-sm btn-secondary" onclick="refreshCanTopology()" data-i18n="btn.refresh_topology">刷新拓扑</button>
                             </div>
                             <div id="canTopologyViz" class="can-topology-viz">
                                 <p class="empty">点击"刷新拓扑"加载总线拓扑图</p>
@@ -208,25 +203,25 @@
             <!-- ==================== 固件编译与烧录页面 ==================== -->
             <div id="page-firmware" class="page">
                 <div class="page-header">
-                    <h2>🔨 固件编译与烧录</h2>
+                    <h2 data-i18n="page.firmware">🔨 固件编译与烧录</h2>
                 </div>
 
                 <!-- 编译配置区域 -->
                 <div class="card">
-                    <div class="card-header"><h3>🔧 编译配置</h3></div>
+                    <div class="card-header"><h3 data-i18n="card.compile_config">🔧 编译配置</h3></div>
                     <div class="card-body">
                         <!-- 模式切换 -->
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">🔄 编译模式</label>
+                                <label class="form-label" data-i18n="form.compile_mode">🔄 编译模式</label>
                                 <div class="radio-group">
                                     <label class="radio-item">
                                         <input type="radio" name="compileMode" value="preset" checked onchange="onCompileModeChange()">
-                                        <span>📋 预设配置</span>
+                                        <span data-i18n="form.preset_config">📋 预设配置</span>
                                     </label>
                                     <label class="radio-item">
                                         <input type="radio" name="compileMode" value="custom" onchange="onCompileModeChange()">
-                                        <span>🔧 自定义主控</span>
+                                        <span data-i18n="form.custom_mcu">🔧 自定义主控</span>
                                     </label>
                                 </div>
                             </div>
@@ -236,19 +231,19 @@
                         <div id="compilePresetSection">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">🏭 厂家</label>
+                                    <label class="form-label" data-i18n="form.manufacturer">🏭 厂家</label>
                                     <select class="form-control form-select" id="compilePresetManufacturer" onchange="onCompilePresetManufacturerChange()">
                                         <option value="">-- 选择厂家 --</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">📦 类型</label>
+                                    <label class="form-label" data-i18n="form.type">📦 类型</label>
                                     <select class="form-control form-select" id="compilePresetType" onchange="onCompilePresetTypeChange()" disabled>
                                         <option value="">-- 先选择厂家 --</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">🔹 型号</label>
+                                    <label class="form-label" data-i18n="form.model">🔹 型号</label>
                                     <select class="form-control form-select" id="compilePresetModel" onchange="onCompilePresetModelChange()" disabled>
                                         <option value="">-- 先选择类型 --</option>
                                     </select>
@@ -259,7 +254,7 @@
                             <div id="compilePresetAdvanced" style="display:none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #e9ecef;">
                                 <div class="form-row">
                                     <div class="form-group">
-                                        <label class="form-label">🔌 连接方式（覆盖）</label>
+                                        <label class="form-label" data-i18n="form.connection_override">🔌 连接方式（覆盖）</label>
                                         <select class="form-control form-select" id="compilePresetConnection">
                                             <option value="">-- 使用预设 --</option>
                                             <option value="USB">USB</option>
@@ -269,7 +264,7 @@
                                         </select>
                                     </div>
                                     <div class="form-group" style="flex: 2;">
-                                        <label class="form-label">🚀 启动引脚（可选）</label>
+                                        <label class="form-label" data-i18n="form.startup_pin">🚀 启动引脚（可选）</label>
                                         <input type="text" class="form-control" id="compilePresetStartupPin" placeholder="例如: PA2 或 gpio5">
                                     </div>
                                 </div>
@@ -280,13 +275,13 @@
                         <div id="compileCustomSection" style="display:none;">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">🔧 MCU 平台</label>
+                                    <label class="form-label" data-i18n="form.mcu_platform">🔧 MCU 平台</label>
                                     <select class="form-control form-select" id="compileMcuPlatform" onchange="onCompileMcuPlatformChange()">
                                         <option value="">-- 选择平台 --</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">🔹 MCU 型号</label>
+                                    <label class="form-label" data-i18n="form.mcu_model">🔹 MCU 型号</label>
                                     <select class="form-control form-select" id="compileMcuModel" onchange="onCompileMcuModelChange()" disabled>
                                         <option value="">-- 先选择平台 --</option>
                                     </select>
@@ -298,19 +293,19 @@
                         <div id="compileMcuDetails" style="display:none;">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">📳 晶振频率</label>
+                                    <label class="form-label" data-i18n="form.crystal">📳 晶振频率</label>
                                     <select class="form-control form-select" id="compileCrystal">
                                         <!-- 动态填充 -->
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">📍 Bootloader 偏移</label>
+                                    <label class="form-label" data-i18n="form.bl_offset">📍 Bootloader 偏移</label>
                                     <select class="form-control form-select" id="compileBlOffset">
                                         <!-- 动态填充 -->
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">🔌 连接方式</label>
+                                    <label class="form-label" data-i18n="form.connection">🔌 连接方式</label>
                                     <select class="form-control form-select" id="compileConnection" onchange="onCompileConnectionChange()">
                                         <!-- 动态填充 -->
                                     </select>
@@ -329,12 +324,12 @@
 
                         <!-- 编译按钮 -->
                         <div class="form-row" style="margin-top: 20px;">
-                            <button class="btn btn-info" onclick="loadCurrentCompileConfig()">📥 读取当前参数</button>
-                            <button class="btn btn-secondary" onclick="exportCompileConfig()">📤 导出配置</button>
-                            <button class="btn btn-secondary" onclick="document.getElementById('importConfigFile').click()">📥 导入配置</button>
+                            <button class="btn btn-info" onclick="loadCurrentCompileConfig()">📥 <span data-i18n="btn.read_current">读取当前参数</span></button>
+                            <button class="btn btn-secondary" onclick="exportCompileConfig()">📤 <span data-i18n="btn.export_config">导出配置</span></button>
+                            <button class="btn btn-secondary" onclick="document.getElementById('importConfigFile').click()">📥 <span data-i18n="btn.import_config">导入配置</span></button>
                             <input type="file" id="importConfigFile" accept=".json" style="display:none" onchange="importCompileConfig(event)">
-                            <button class="btn btn-success btn-lg" onclick="compileFirmware()">🔨 编译固件</button>
-                            <button class="btn btn-secondary" onclick="resetCompileForm()">🔄 重置</button>
+                            <button class="btn btn-success btn-lg" onclick="compileFirmware()">🔨 <span data-i18n="btn.compile_firmware">编译固件</span></button>
+                            <button class="btn btn-secondary" onclick="resetCompileForm()">🔄 <span data-i18n="btn.reset">重置</span></button>
                         </div>
 
                         <!-- 编译结果 -->
@@ -346,11 +341,11 @@
 
                 <!-- 烧录区域 -->
                 <div class="card">
-                    <div class="card-header"><h3>💾 烧录固件</h3></div>
+                    <div class="card-header"><h3 data-i18n="card.flash_firmware">💾 烧录固件</h3></div>
                     <div class="card-body">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">🔍 设备 ID</label>
+                                <label class="form-label" data-i18n="form.device_id">🔍 设备 ID</label>
                                 <div class="input-with-button">
                                     <select class="form-control form-select" id="flashDeviceId" onchange="refreshFlashPlan(false)">
                                         <option value="">-- 点击刷新扫描 --</option>
@@ -363,7 +358,7 @@
                                 <div id="flashCanSearchError" style="display:none;"></div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">💾 烧录模式</label>
+                                <label class="form-label" data-i18n="form.flash_mode">💾 烧录模式</label>
                                 <select class="form-control form-select" id="flashMode" onchange="onFlashModeChange()">
                                     <option value="DFU">USB/DFU</option>
                                     <option value="KAT">USB/KAT (Katapult)</option>
@@ -376,20 +371,20 @@
                         </div>
 
                         <!-- TF卡烧录提示 -->
-                        <div id="tfCardSection" class="tf-card-info" style="display:none; margin: 15px 0; padding: 15px; background: #e3f2fd; border-radius: 8px; border-left: 4px solid #2196f3;">
-                            <h4 style="margin: 0 0 10px 0; color: #1976d2;">💾 TF卡烧录说明</h4>
-                            <p style="margin: 5px 0; color: #424242;">1. 点击下方按钮下载 firmware.bin</p>
-                            <p style="margin: 5px 0; color: #424242;">2. 将 firmware.bin 复制到 TF 卡根目录</p>
-                            <p style="margin: 5px 0; color: #424242;">3. 将 TF 卡插入主板，重新上电即可自动烧录</p>
+                        <div id="tfCardSection" class="tf-card-info" style="display:none; margin: 15px 0; padding: 15px; background: rgba(33,150,243,0.08); border-radius: 8px; border-left: 4px solid var(--primary-color);">
+                            <h4 style="margin: 0 0 10px 0; color: var(--primary-dark);">💾 TF卡烧录说明</h4>
+                            <p style="margin: 5px 0; color: var(--text-primary);">1. 点击下方按钮下载 firmware.bin</p>
+                            <p style="margin: 5px 0; color: var(--text-primary);">2. 将 firmware.bin 复制到 TF 卡根目录</p>
+                            <p style="margin: 5px 0; color: var(--text-primary);">3. 将 TF 卡插入主板，重新上电即可自动烧录</p>
                             <button class="btn btn-primary" onclick="downloadFirmwareForTF()" style="margin-top: 10px;">📥 下载 firmware.bin</button>
                         </div>
 
                         <!-- HOST 固件源选择 (仅在HOST烧录模式显示) -->
-                        <div id="hostFirmwareSourceCard" style="display:none; margin: 15px 0; padding: 15px; background: #e8f5e9; border-radius: 8px; border-left: 4px solid #4caf50;">
-                            <h4 style="margin: 0 0 12px 0; color: #2e7d32;">HOST 固件源</h4>
+                        <div id="hostFirmwareSourceCard" style="display:none; margin: 15px 0; padding: 15px; background: rgba(76,175,80,0.08); border-radius: 8px; border-left: 4px solid var(--success-color);">
+                            <h4 style="margin: 0 0 12px 0; color: var(--success-color);">HOST 固件源</h4>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">固件来源</label>
+                                    <label class="form-label" data-i18n="form.firmware_source">固件来源</label>
                                     <select class="form-control form-select" id="hostFirmwareSource" onchange="onHostSourceChange()">
                                         <option value="compiled">编译固件 (~/klipper/out/klipper.bin)</option>
                                         <option value="prebuilt">预构建固件 (选择已有文件)</option>
@@ -399,7 +394,7 @@
                             <div id="hostPrebuiltSection" style="display:none;">
                                 <div class="form-row">
                                     <div class="form-group" style="flex:1;">
-                                        <label class="form-label">固件文件路径</label>
+                                        <label class="form-label" data-i18n="form.firmware_path">固件文件路径</label>
                                         <div style="display:flex; gap:8px;">
                                             <input type="text" class="form-control" id="hostPrebuiltPath" placeholder="选择或输入固件文件路径...">
                                             <button class="btn btn-secondary" onclick="openHostFileBrowser()" title="浏览远程文件">浏览</button>
@@ -417,11 +412,11 @@
                         </div>
 
                         <div class="form-row" style="margin-top: 15px;">
-                            <div id="flashPlanHint" style="display:none; width:100%; padding:10px 12px; border-radius:6px; background:#eef7ff; border-left:4px solid #2196f3; color:#263238; font-size:13px;"></div>
+                            <div id="flashPlanHint" style="display:none; width:100%; padding:10px 12px; border-radius:6px; background:rgba(33,150,243,0.08); border-left:4px solid var(--primary-color); color:var(--text-primary); font-size:13px;"></div>
                         </div>
 
                         <div class="form-row" style="margin-top: 15px;">
-                            <button class="btn btn-primary btn-lg" onclick="flashFirmware()" id="flashFirmwareBtn">⚡ 烧录固件</button>
+                            <button class="btn btn-primary btn-lg" onclick="flashFirmware()" id="flashFirmwareBtn">⚡ <span data-i18n="btn.flash_firmware">烧录固件</span></button>
                         </div>
 
                         <div id="flashResult" class="flash-result" style="display:none; margin-top: 15px;">
@@ -439,19 +434,19 @@
                     <div id="blFlashSection" class="expandable-content" style="display:none;">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">📂 BL 文件</label>
+                                <label class="form-label" data-i18n="form.bl_file">📂 BL 文件</label>
                                 <select class="form-control form-select" id="blFileSelect" onchange="onBlFileChange()">
                                     <option value="">-- 选择 BL 文件 --</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">📍 烧录地址/偏移</label>
+                                <label class="form-label" data-i18n="form.bl_address">📍 烧录地址/偏移</label>
                                 <select class="form-control form-select" id="blFlashAddress">
                                     <option value="0x08000000" data-offset="0" data-platform-key="stm32">NO BL</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">🔧 烧录工具</label>
+                                <label class="form-label" data-i18n="form.bl_tool">🔧 烧录工具</label>
                                 <select class="form-control form-select" id="blFlashTool">
                                     <option value="dfu-util">dfu-util</option>
                                     <option value="rp2040_flash">rp2040_flash (UF2)</option>
@@ -462,7 +457,7 @@
                         </div>
                         <div class="form-row">
                             <div class="form-group" style="flex: 2;">
-                                <label class="form-label">📤 或上传 BL 文件</label>
+                                <label class="form-label" data-i18n="form.upload_bl">📤 或上传 BL 文件</label>
                                 <div class="upload-area" id="blUploadArea" style="padding: 20px;">
                                     <p>拖拽 BL 文件 (.bin / .uf2) 到此处</p>
                                     <input type="file" id="blFileInput" accept=".bin,.uf2" style="display:none;">
@@ -476,7 +471,7 @@
                             </label>
                         </div>
                         <div class="form-row">
-                            <button class="btn btn-warning" onclick="flashBootloader()">🔥 烧录 BL</button>
+                            <button class="btn btn-warning" onclick="flashBootloader()">🔥 <span data-i18n="btn.flash_bl">烧录 BL</span></button>
                         </div>
                         <div id="blFlashResult" class="flash-result" style="display:none; margin-top: 15px;">
                             <div class="result-box"></div>
@@ -498,13 +493,13 @@
             <!-- ==================== 固件更新页面 ==================== -->
             <div id="page-firmware-update" class="page">
                 <div class="page-header">
-                    <h2>🔄 固件批量更新</h2>
+                    <h2 data-i18n="page.firmware_update">🔄 固件批量更新</h2>
                 </div>
 
                 <!-- 主板配置选择 -->
                 <div class="card">
                     <div class="card-header">
-                        <h3>📋 选择主板配置</h3>
+                        <h3 data-i18n="card.select_board">📋 选择主板配置</h3>
                     </div>
                     <div class="card-body">
                         <div class="form-row">
@@ -521,14 +516,14 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">🔹 主板型号</label>
+                                <label class="form-label" data-i18n="form.board_model">🔹 主板型号</label>
                                 <select class="form-control form-select" id="updateBoardModel" onchange="onUpdateBoardModelChange()" disabled>
                                     <option value="">-- 先选择类型 --</option>
                                 </select>
                             </div>
                         </div>
                         <div class="form-row">
-                            <button class="btn btn-primary" onclick="createFirmwareUpdateConfig()">➕ 创建固件更新配置</button>
+                            <button class="btn btn-primary" onclick="createFirmwareUpdateConfig()">➕ <span data-i18n="btn.create_update_config">创建固件更新配置</span></button>
                         </div>
                     </div>
                 </div>
@@ -536,7 +531,7 @@
                 <!-- 可更新配置列表 -->
                 <div class="card">
                     <div class="card-header">
-                        <h3>📋 固件更新配置列表</h3>
+                        <h3 data-i18n="card.update_config_list">📋 固件更新配置列表</h3>
                         <span class="badge" id="updateableCount">0</span>
                     </div>
                     <div class="card-body">
@@ -548,16 +543,16 @@
 
                 <!-- 批量操作 -->
                 <div class="card">
-                    <div class="card-header"><h3>⚡ 批量操作</h3></div>
+                    <div class="card-header"><h3 data-i18n="card.batch_ops">⚡ 批量操作</h3></div>
                     <div class="card-body">
                         <div class="form-row">
                             <div class="form-group">
-                                <button class="btn btn-secondary" onclick="selectAllUpdateable(true)">☑️ 全选</button>
-                                <button class="btn btn-secondary" onclick="selectAllUpdateable(false)">⬜ 全不选</button>
+                                <button class="btn btn-secondary" onclick="selectAllUpdateable(true)">☑️ <span data-i18n="btn.select_all">全选</span></button>
+                                <button class="btn btn-secondary" onclick="selectAllUpdateable(false)">⬜ <span data-i18n="btn.deselect_all">全不选</span></button>
                             </div>
                             <div class="form-group">
-                                <button class="btn btn-success btn-lg" onclick="compileAllSelected()">🔨 编译选中</button>
-                                <button class="btn btn-primary btn-lg" onclick="flashAllSelected()">⚡ 一键更新</button>
+                                <button class="btn btn-success btn-lg" onclick="compileAllSelected()">🔨 <span data-i18n="btn.compile_selected">编译选中</span></button>
+                                <button class="btn btn-primary btn-lg" onclick="flashAllSelected()">⚡ <span data-i18n="btn.update_all">一键更新</span></button>
                             </div>
                         </div>
 
@@ -574,7 +569,7 @@
 
                 <!-- 更新进度 -->
                 <div class="card">
-                    <div class="card-header"><h3>📊 更新进度</h3></div>
+                    <div class="card-header"><h3 data-i18n="card.update_progress">📊 更新进度</h3></div>
                     <div class="card-body">
                         <div id="batchUpdateProgress" style="display:none;">
                             <div class="progress-bar-container">
@@ -596,7 +591,7 @@
                 <div id="updateSettingsModal" class="modal" style="display:none;">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h3>🔄 固件更新设置</h3>
+                            <h3 data-i18n="card.update_settings">🔄 固件更新设置</h3>
                             <button class="btn btn-sm btn-secondary" onclick="closeUpdateSettingsModal()">✕</button>
                         </div>
                         <div class="modal-body">
@@ -609,7 +604,7 @@
 
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">启用固件更新</label>
+                                    <label class="form-label" data-i18n="form.enable_update">启用固件更新</label>
                                     <select class="form-control form-select" id="updateSettingEnabled" onchange="toggleUpdateModeOptions()">
                                         <option value="true">是</option>
                                         <option value="false">否</option>
@@ -620,7 +615,7 @@
                             <div id="updateSettingOptions">
                                 <div class="form-row">
                                     <div class="form-group" style="flex: 2;">
-                                        <label class="form-label">更新模式</label>
+                                        <label class="form-label" data-i18n="form.update_mode">更新模式</label>
                                         <select class="form-control form-select" id="updateSettingMode" onchange="onUpdateModeChange()">
                                             <option value="CAN">CAN - CAN总线连接，使用Katapult</option>
                                             <option value="USB_DFU">USB_DFU - USB连接，官方Bootloader</option>
@@ -631,18 +626,18 @@
                                             <option value="TF">TF - TF卡烧录（下载firmware.bin）</option>
                                             <option value="HOST">HOST - 上位机（Linux进程）</option>
                                         </select>
-                                        <p class="help-text" id="modeHelpText" style="margin-top:5px;font-size:12px;color:#6c757d;"></p>
+                                        <p class="help-text" id="modeHelpText" style="margin-top:5px;font-size:12px;color:var(--text-secondary);"></p>
                                     </div>
                                 </div>
 
                                 <div class="form-row" id="deviceIdRow">
                                     <div class="form-group" style="flex: 2;">
-                                        <label class="form-label">设备 ID / 路径</label>
+                                        <label class="form-label" data-i18n="form.device_id_path">设备 ID / 路径</label>
                                         <div class="input-with-button">
                                             <input type="text" class="form-control" id="updateSettingDeviceId" placeholder="例如: c5360983cdc4 或 /dev/serial/by-id/...">
                                             <button class="btn btn-secondary" onclick="scanDeviceIdForUpdate()" title="扫描设备">🔍</button>
                                         </div>
-                                        <p class="help-text" style="margin-top:5px;font-size:12px;color:#6c757d;">
+                                        <p class="help-text" style="margin-top:5px;font-size:12px;color:var(--text-secondary);">
                                             CAN模式填UUID，USB模式填/dev/serial/by-id路径
                                         </p>
                                     </div>
@@ -650,9 +645,9 @@
 
                                 <div class="form-row" id="katapultSerialRow" style="display:none;">
                                     <div class="form-group" style="flex: 2;">
-                                        <label class="form-label">Katapult 串口路径</label>
+                                        <label class="form-label" data-i18n="form.katapult_serial">Katapult 串口路径</label>
                                         <input type="text" class="form-control" id="updateSettingKatapultSerial" placeholder="例如: /dev/serial/by-id/usb-katapult_...">
-                                        <p class="help-text" style="margin-top:5px;font-size:12px;color:#6c757d;">
+                                        <p class="help-text" style="margin-top:5px;font-size:12px;color:var(--text-secondary);">
                                             双击Reset后使用 ls /dev/serial/by-id/* 获取
                                         </p>
                                     </div>
@@ -660,8 +655,8 @@
                             </div>
 
                             <div class="form-row" style="margin-top: 20px;">
-                                <button class="btn btn-primary" onclick="saveUpdateSettings()">💾 保存设置</button>
-                                <button class="btn btn-secondary" onclick="closeUpdateSettingsModal()">取消</button>
+                                <button class="btn btn-primary" onclick="saveUpdateSettings()">💾 <span data-i18n="btn.save_settings">保存设置</span></button>
+                                <button class="btn btn-secondary" onclick="closeUpdateSettingsModal()" data-i18n="btn.cancel">取消</button>
                             </div>
                         </div>
                     </div>
@@ -671,16 +666,16 @@
             <!-- ==================== 配置管理页面（Fluidd 风格） ==================== -->
             <div id="page-config" class="page">
                 <div class="page-header">
-                    <h2>配置管理</h2>
+                    <h2 data-i18n="page.config">配置管理</h2>
                 </div>
 
                 <div class="config-manager-layout">
                     <!-- 左侧文件树 -->
                     <div class="cm-tree-sidebar">
                         <div class="cm-tree-toolbar">
-                            <button class="primary" onclick="refreshConfigTree()">刷新</button>
-                            <button onclick="showNewConfigDialog()">+ 配置</button>
-                            <button onclick="showCreateManufacturerDialog()">+ 厂家</button>
+                            <button class="primary" onclick="refreshConfigTree()" data-i18n="btn.refresh">刷新</button>
+                            <button onclick="showNewConfigDialog()" data-i18n="btn.add_config">+ 配置</button>
+                            <button onclick="showCreateManufacturerDialog()" data-i18n="btn.add_manufacturer">+ 厂家</button>
                         </div>
                         <div class="cm-tree-search">
                             <input type="text" id="cmTreeSearch" placeholder="搜索配置..." oninput="onTreeSearch(this.value)">
@@ -695,8 +690,8 @@
                         <div class="cm-editor-toolbar">
                             <div class="cm-editor-path" id="cmEditorPath">请选择左侧配置文件</div>
                             <div class="cm-editor-actions">
-                                <button class="save-btn" onclick="saveCurrentConfig()">保存</button>
-                                <button class="danger-btn" onclick="deleteCurrentConfig()">删除</button>
+                                <button class="save-btn" onclick="saveCurrentConfig()" data-i18n="btn.save">保存</button>
+                                <button class="danger-btn" onclick="deleteCurrentConfig()" data-i18n="btn.delete">删除</button>
                             </div>
                         </div>
 
@@ -713,9 +708,9 @@
                 <!-- 配置备份 -->
                 <div class="card" style="margin-top:16px;">
                     <div class="card-header">
-                        <h3>配置备份</h3>
+                        <h3 data-i18n="card.config_backup">配置备份</h3>
                         <div style="display:flex;gap:6px;align-items:center;">
-                            <button class="btn btn-sm btn-primary" onclick="createConfigBackup()">立即备份</button>
+                            <button class="btn btn-sm btn-primary" onclick="createConfigBackup()" data-i18n="btn.backup_now">立即备份</button>
                             <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px;">
                                 <input type="checkbox" id="autoBackupToggle" onchange="toggleAutoBackup()"> 烧录前自动备份
                             </label>
@@ -732,15 +727,15 @@
             <!-- ==================== 系统设置页面 ==================== -->
             <div id="page-settings" class="page">
                 <div class="page-header">
-                    <h2>⚙️ 系统设置</h2>
+                    <h2 data-i18n="page.settings">⚙️ 系统设置</h2>
                 </div>
 
                 <div class="card">
-                    <div class="card-header"><h3>连接模式</h3></div>
+                    <div class="card-header"><h3 data-i18n="settings.connection_mode">连接模式</h3></div>
                     <div class="card-body">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">执行模式</label>
+                                <label class="form-label" data-i18n="form.exec_mode">执行模式</label>
                                 <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;">
                                     <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
                                         <input type="radio" name="connectionMode" value="local" checked onchange="toggleSshConfig()"> 本地执行
@@ -758,31 +753,31 @@
                         <div id="sshConfigSection" style="display:none;">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">远程主机</label>
+                                    <label class="form-label" data-i18n="form.remote_host">远程主机</label>
                                     <input type="text" class="form-control" id="settingsSshHost" placeholder="192.168.1.100" oninput="updateMoonrakerHostFromSsh()">
                                 </div>
                                 <div class="form-group" style="max-width:100px;">
-                                    <label class="form-label">SSH 端口</label>
+                                    <label class="form-label" data-i18n="form.ssh_port">SSH 端口</label>
                                     <input type="number" class="form-control" id="settingsSshPort" value="22" min="1" max="65535">
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">用户名</label>
+                                    <label class="form-label" data-i18n="form.username">用户名</label>
                                     <input type="text" class="form-control" id="settingsSshUser" placeholder="pi">
                                 </div>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">SSH 密码</label>
+                                    <label class="form-label" data-i18n="form.ssh_password">SSH 密码</label>
                                     <input type="password" class="form-control" id="settingsSshPassword" placeholder="输入SSH密码">
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">sudo 密码</label>
+                                    <label class="form-label" data-i18n="form.sudo_password">sudo 密码</label>
                                     <input type="password" class="form-control" id="settingsSudoPassword" placeholder="与SSH密码相同则留空">
                                 </div>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">sudo 模式</label>
+                                    <label class="form-label" data-i18n="form.sudo_mode">sudo 模式</label>
                                     <select class="form-control form-select" id="settingsSudoMode">
                                         <option value="password">需要密码</option>
                                         <option value="nopasswd">NOPASSWD 已配置</option>
@@ -790,33 +785,33 @@
                                 </div>
                             </div>
                             <div class="form-row" style="gap:10px;align-items:center;">
-                                <button class="btn btn-secondary" onclick="testSshConnection()" id="btnTestSsh">测试连接</button>
+                                <button class="btn btn-secondary" onclick="testSshConnection()" id="btnTestSsh" data-i18n="btn.test_connection">测试连接</button>
                                 <span id="sshTestResult" style="font-size:14px;"></span>
                             </div>
                         </div>
                         <!-- 本地执行确认区 -->
                         <div id="localConfigSection" style="display:none;">
-                            <div style="background:rgba(76,175,80,0.06);padding:12px 16px;border-radius:8px;border-left:4px solid #4CAF50;margin-bottom:14px;font-size:13px;color:#555;">
+                            <div style="background:rgba(76,175,80,0.06);padding:12px 16px;border-radius:8px;border-left:4px solid #4CAF50;margin-bottom:14px;font-size:13px;color:var(--text-secondary);">
                                 本地执行模式：直接在当前设备上执行命令，无需远程连接。
                             </div>
                             <div class="form-row" style="gap:10px;align-items:center;">
-                                <button class="btn btn-secondary" onclick="testLocalConnection()" id="btnTestLocal">测试连接</button>
+                                <button class="btn btn-secondary" onclick="testLocalConnection()" id="btnTestLocal" data-i18n="btn.test_connection">测试连接</button>
                                 <span id="localTestResult" style="font-size:14px;"></span>
                             </div>
                         </div>
                         <!-- FAST-SSH 配置区（仅显示 IP 地址） -->
                         <div id="fastSshConfigSection" style="display:none;">
-                            <div style="background:rgba(33,150,243,0.06);padding:12px 16px;border-radius:8px;border-left:4px solid #2196F3;margin-bottom:14px;font-size:13px;color:#555;">
+                            <div style="background:rgba(33,150,243,0.06);padding:12px 16px;border-radius:8px;border-left:4px solid #2196F3;margin-bottom:14px;font-size:13px;color:var(--text-secondary);">
                                 快速连接模式：仅需输入目标设备 IP 地址，使用预设凭据自动连接。
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label class="form-label">目标设备 IP 地址</label>
+                                    <label class="form-label" data-i18n="form.fast_ssh_host">目标设备 IP 地址</label>
                                     <input type="text" class="form-control" id="settingsFastSshHost" placeholder="192.168.1.100" oninput="updateMoonrakerHostFromSsh()">
                                 </div>
                             </div>
                             <div class="form-row" style="gap:10px;align-items:center;">
-                                <button class="btn btn-secondary" onclick="testSshConnection()" id="btnTestFastSsh">测试连接</button>
+                                <button class="btn btn-secondary" onclick="testSshConnection()" id="btnTestFastSsh" data-i18n="btn.test_connection">测试连接</button>
                                 <span id="fastSshTestResult" style="font-size:14px;"></span>
                             </div>
                         </div>
@@ -824,42 +819,42 @@
                 </div>
 
                 <div class="card">
-                    <div class="card-header"><h3>路径设置</h3></div>
+                    <div class="card-header"><h3 data-i18n="card.path_settings">路径设置</h3></div>
                     <div class="card-body">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Klipper 路径</label>
+                                <label class="form-label" data-i18n="form.klipper_path">Klipper 路径</label>
                                 <input type="text" class="form-control" id="settingsKlipperPath" value="~/klipper" oninput="updatePathHints()">
-                                <small id="klipperPathHint" style="color:#888;font-size:12px;display:block;margin-top:2px;"></small>
+                                <small id="klipperPathHint" style="color:var(--text-secondary);font-size:12px;display:block;margin-top:2px;"></small>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Katapult 路径</label>
+                                <label class="form-label" data-i18n="form.katapult_path">Katapult 路径</label>
                                 <input type="text" class="form-control" id="settingsKatapultPath" value="~/katapult" oninput="updatePathHints()">
-                                <small id="katapultPathHint" style="color:#888;font-size:12px;display:block;margin-top:2px;"></small>
+                                <small id="katapultPathHint" style="color:var(--text-secondary);font-size:12px;display:block;margin-top:2px;"></small>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Moonraker 地址</label>
+                                <label class="form-label" data-i18n="form.moonraker_host">Moonraker 地址</label>
                                 <input type="text" class="form-control" id="settingsMoonrakerHost" value="127.0.0.1" placeholder="127.0.0.1">
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label">Moonraker 端口</label>
+                                <label class="form-label" data-i18n="form.moonraker_port">Moonraker 端口</label>
                                 <input type="number" class="form-control" id="settingsMoonrakerPort" value="7125" min="1" max="65535">
                             </div>
                         </div>
                         <div class="form-row">
-                            <button class="btn btn-primary" onclick="saveSettings()">💾 保存设置</button>
+                            <button class="btn btn-primary" onclick="saveSettings()">💾 <span data-i18n="btn.save_settings">保存设置</span></button>
                         </div>
                     </div>
                 </div>
 
                 <div class="card">
-                    <div class="card-header"><h3>🔧 服务管理</h3></div>
+                    <div class="card-header"><h3 data-i18n="card.service_mgmt">🔧 服务管理</h3></div>
                     <div class="card-body">
                         <div id="serviceList" class="service-grid">
                             <!-- 服务列表将通过 JavaScript 动态加载 -->
@@ -869,7 +864,7 @@
                 </div>
 
                 <div class="card">
-                    <div class="card-header"><h3>ℹ️ 系统信息</h3></div>
+                    <div class="card-header"><h3 data-i18n="card.system_info">ℹ️ 系统信息</h3></div>
                     <div class="card-body">
                         <div id="systemInfo" class="info-grid">
                             <div class="info-item">
@@ -885,18 +880,18 @@
                 </div>
 
                 <div class="card">
-                    <div class="card-header"><h3>🔄 项目更新</h3></div>
+                    <div class="card-header"><h3 data-i18n="card.project_update">🔄 项目更新</h3></div>
                     <div class="card-body">
                         <div class="form-row">
                             <div class="form-group" style="flex:1">
                                 <label class="form-label">Firmware-Tool 更新</label>
                                 <div id="updateStatus" class="info-value">点击检查更新</div>
                             </div>
-                            <button class="btn btn-primary" onclick="checkForUpdates()">🔍 检查更新</button>
-                            <button class="btn btn-success" onclick="updateProject()" id="updateBtn" style="display:none;margin-left:10px;">🔄 立即更新</button>
+                            <button class="btn btn-primary" onclick="checkForUpdates()">🔍 <span data-i18n="btn.check_update">检查更新</span></button>
+                            <button class="btn btn-success" onclick="updateProject()" id="updateBtn" style="display:none;margin-left:10px;">🔄 <span data-i18n="btn.update_now">立即更新</span></button>
                         </div>
                         <div id="updateLog" style="margin-top:15px;display:none;">
-                            <pre style="background:#f8f9fa;padding:15px;border-radius:8px;font-size:13px;max-height:200px;overflow:auto;"></pre>
+                            <pre style="background:var(--bg-color);padding:15px;border-radius:8px;font-size:13px;max-height:200px;overflow:auto;"></pre>
                         </div>
                     </div>
                 </div>
@@ -929,16 +924,16 @@
             <!-- ==================== Klipper配置解析器页面 ==================== -->
             <div id="page-klipper-parser" class="page">
                 <div class="page-header">
-                    <h2>🔍 Klipper配置解析器</h2>
+                    <h2 data-i18n="page.klipper_parser">🔍 Klipper配置解析器</h2>
                 </div>
 
                 <!-- 远程加载区域 -->
                 <div class="card" style="margin-bottom:20px;">
-                    <div class="card-header"><h3><i class="fas fa-network-wired" style="margin-right:8px; color:var(--primary-color)"></i> 远程加载配置</h3></div>
+                    <div class="card-header"><h3><i class="fas fa-network-wired" style="margin-right:8px; color:var(--primary-color)"></i> <span data-i18n="card.remote_load">远程加载配置</span></h3></div>
                     <div class="card-body">
                         <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                            <button class="btn btn-primary" id="remoteLoadBtn" onclick="loadRemoteConfigList()"><i class="fas fa-server"></i> 从被控机器加载</button>
-                            <button class="btn btn-secondary" id="updateBaselineBtn" onclick="updateMainsailBaseline()" title="从被控机器获取最新 mainsail.cfg 更新本地基准"><i class="fas fa-sync-alt"></i> 更新宏基准</button>
+                            <button class="btn btn-primary" id="remoteLoadBtn" onclick="loadRemoteConfigList()"><i class="fas fa-server"></i> <span data-i18n="btn.load_from_remote">从被控机器加载</span></button>
+                            <button class="btn btn-secondary" id="updateBaselineBtn" onclick="updateMainsailBaseline()" title="从被控机器获取最新 mainsail.cfg 更新本地基准"><i class="fas fa-sync-alt"></i> <span data-i18n="btn.update_baseline">更新宏基准</span></button>
                             <span id="remoteLoadStatus" style="font-size:13px; color:var(--text-secondary);"></span>
                             <span id="baselineStatus" style="font-size:12px; color:var(--text-secondary);"></span>
                         </div>
@@ -950,7 +945,7 @@
                 </div>
 
                 <div class="card">
-                    <div class="card-header"><h3><i class="fas fa-file-upload" style="margin-right:8px; color:var(--primary-color)"></i> 上传配置文件</h3></div>
+                    <div class="card-header"><h3><i class="fas fa-file-upload" style="margin-right:8px; color:var(--primary-color)"></i> <span data-i18n="card.upload_config">上传配置文件</span></h3></div>
                     <div class="card-body">
                         <div class="file-upload-area" id="dropArea">
                             <i class="fas fa-cloud-upload-alt"></i>
@@ -969,15 +964,15 @@
                             <textarea id="configInput" class="config-textarea" placeholder="配置文件内容将在此处显示..."></textarea>
                         </div>
                         <div class="btn-group" style="margin-top:15px; justify-content:center;">
-                            <button class="btn btn-primary" id="parseBtn"><i class="fas fa-cogs"></i> 解析配置</button>
-                            <button class="btn btn-secondary" id="resetBtn"><i class="fas fa-redo"></i> 重置</button>
-                            <button class="btn btn-warning" id="uploadBtn"><i class="fas fa-upload"></i> 上传文件</button>
+                            <button class="btn btn-primary" id="parseBtn"><i class="fas fa-cogs"></i> <span data-i18n="btn.parse_config">解析配置</span></button>
+                            <button class="btn btn-secondary" id="resetBtn"><i class="fas fa-redo"></i> <span data-i18n="btn.reset">重置</span></button>
+                            <button class="btn btn-warning" id="uploadBtn"><i class="fas fa-upload"></i> <span data-i18n="btn.upload_file">上传文件</span></button>
                         </div>
                     </div>
                 </div>
 
                 <div class="card" style="margin-top:20px;">
-                    <div class="card-header"><h3><i class="fas fa-file-code" style="margin-right:8px; color:var(--primary-color)"></i> 配置解析结果</h3></div>
+                    <div class="card-header"><h3><i class="fas fa-file-code" style="margin-right:8px; color:var(--primary-color)"></i> <span data-i18n="card.parse_result">配置解析结果</span></h3></div>
                     <div class="card-body">
                         <div class="result-content" id="resultOutput"><p style="text-align:center; color:var(--text-secondary); padding:30px 0;">解析结果将显示在这里...</p></div>
                     </div>
@@ -987,7 +982,7 @@
             <!-- ==================== Klipper配置生成器页面 ==================== -->
             <div id="page-config-generator" class="page">
                 <div class="page-header">
-                    <h2>📝 Klipper配置生成器</h2>
+                    <h2 data-i18n="page.config_generator">📝 Klipper配置生成器</h2>
                 </div>
 
                 <div class="cg-progress-container">
@@ -996,23 +991,23 @@
 
                 <!-- 选项卡导航 -->
                 <div class="cg-tabs-nav" id="cgTabsNav">
-                    <button class="cg-tab-btn active" data-tab="1" onclick="switchCgTab(1)"><i class="fas fa-cog"></i> 机器设置</button>
-                    <button class="cg-tab-btn" data-tab="2" onclick="switchCgTab(2)"><i class="fas fa-server"></i> 轴分配与TMC</button>
-                    <button class="cg-tab-btn" data-tab="3" onclick="switchCgTab(3)"><i class="fas fa-hand-paper"></i> 限位与调平</button>
-                    <button class="cg-tab-btn" data-tab="4" onclick="switchCgTab(4)"><i class="fas fa-home"></i> 归位与调平</button>
-                    <button class="cg-tab-btn" data-tab="5" onclick="switchCgTab(5)"><i class="fas fa-thermometer-half"></i> 温控与冷却</button>
-                    <button class="cg-tab-btn" data-tab="6" onclick="switchCgTab(6)"><i class="fas fa-code"></i> 生成配置</button>
+                    <button class="cg-tab-btn active" data-tab="1" onclick="switchCgTab(1)"><i class="fas fa-cog"></i> <span data-i18n="cg.tab_machine">机器设置</span></button>
+                    <button class="cg-tab-btn" data-tab="2" onclick="switchCgTab(2)"><i class="fas fa-server"></i> <span data-i18n="cg.tab_axes">轴分配与TMC</span></button>
+                    <button class="cg-tab-btn" data-tab="3" onclick="switchCgTab(3)"><i class="fas fa-hand-paper"></i> <span data-i18n="cg.tab_endstop">限位与调平</span></button>
+                    <button class="cg-tab-btn" data-tab="4" onclick="switchCgTab(4)"><i class="fas fa-home"></i> <span data-i18n="cg.tab_homing">归位与调平</span></button>
+                    <button class="cg-tab-btn" data-tab="5" onclick="switchCgTab(5)"><i class="fas fa-thermometer-half"></i> <span data-i18n="cg.tab_thermal">温控与冷却</span></button>
+                    <button class="cg-tab-btn" data-tab="6" onclick="switchCgTab(6)"><i class="fas fa-code"></i> <span data-i18n="cg.tab_generate">生成配置</span></button>
                 </div>
 
                 <!-- Tab 1: 主板与连接 -->
                 <div class="cg-tab-panel active" data-tab="1">
                     <div style="margin:12px 0;text-align:right;">
                         <button class="btn btn-success" onclick="quickStart()" style="font-size:13px;padding:6px 14px;">
-                            <i class="fas fa-bolt"></i> 快速配置
+                            <i class="fas fa-bolt"></i> <span data-i18n="btn.quick_start">快速配置</span>
                         </button>
                     </div>
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-microchip" style="margin-right:8px;color:var(--primary-color)"></i> 主板与连接</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-microchip" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.board_connection">主板与连接</span></h3></div>
                         <div class="card-body">
                             <div class="cg-row">
                                 <label>品牌：</label>
@@ -1038,7 +1033,7 @@
                                 <label id="cgSerialLabel">MCU serial：</label>
                                 <input type="text" id="cgSerial" placeholder="/dev/serial/by-id/xxx" style="flex:1;min-width:200px;">
                                 <button class="btn btn-sm btn-primary cg-detect-btn" id="cgDetectBtn" onclick="detectMcuDevices()" title="自动扫描可用设备">
-                                    <i class="fas fa-search"></i> 自动检测
+                                    <i class="fas fa-search"></i> <span data-i18n="btn.auto_detect">自动检测</span>
                                 </button>
                                 <label id="cgBaudLabel">baud：</label>
                                 <input type="number" id="cgBaud" value="250000" style="width:90px;">
@@ -1048,7 +1043,7 @@
                     </div>
                     <!-- 工具板配置（移入Tab1） -->
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-puzzle-piece" style="margin-right:8px;color:var(--primary-color)"></i> 工具板</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-puzzle-piece" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.toolboard">工具板</span></h3></div>
                         <div class="card-body">
                             <div class="cg-row">
                                 <label>工具板数量：</label>
@@ -1067,7 +1062,7 @@
                     </div>
                     <!-- 打印机型号 -->
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-print" style="margin-right:8px;color:var(--primary-color)"></i> 打印机型号</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-print" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.printer_model">打印机型号</span></h3></div>
                         <div class="card-body">
                             <div class="cg-row">
                                 <label>打印机型号：</label>
@@ -1117,16 +1112,16 @@
                 <!-- Tab 2: 轴分配与TMC驱动配置 -->
                 <div class="cg-tab-panel" data-tab="2">
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> 驱动接口位置</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.drive_map">驱动接口位置</span></h3></div>
                         <div class="card-body">
                             <div class="cg-board-map" data-map-types="drive" data-map-empty="当前板卡没有驱动接口坐标数据"></div>
                         </div>
                     </div>
                     <div class="card" style="margin-top:12px;">
                         <div class="card-header">
-                            <h3><i class="fas fa-server" style="margin-right:8px;color:var(--primary-color)"></i> 驱动器轴分配与TMC配置</h3>
+                            <h3><i class="fas fa-server" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.driver_assign">驱动器轴分配与TMC配置</span></h3>
                             <button class="btn btn-sm btn-primary" onclick="smartAutoAssign()">
-                                <i class="fas fa-magic"></i> 智能分配
+                                <i class="fas fa-magic"></i> <span data-i18n="btn.smart_assign">智能分配</span>
                             </button>
                         </div>
                         <div class="card-body">
@@ -1136,7 +1131,7 @@
                         </div>
                     </div>
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-arrows-alt" style="margin-right:8px;color:var(--primary-color)"></i> 运动参数</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-arrows-alt" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.motion_params">运动参数</span></h3></div>
                         <div class="card-body">
                             <div id="cgMotionContainer">
                                 <p style="color:var(--text-secondary);text-align:center;">请先选择主板和打印机型号</p>
@@ -1148,13 +1143,13 @@
                 <!-- Tab 3: 限位开关与调平传感器 -->
                 <div class="cg-tab-panel" data-tab="3">
                     <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> 限位/探针接口位置</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.endstop_map">限位/探针接口位置</span></h3></div>
                         <div class="card-body">
                             <div class="cg-board-map" data-map-types="stop,probe,servo" data-map-empty="当前板卡没有限位或探针接口坐标数据"></div>
                         </div>
                     </div>
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-hand-paper" style="margin-right:8px;color:var(--primary-color)"></i> 限位开关</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-hand-paper" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.endstop_switch">限位开关</span></h3></div>
                         <div class="card-body">
                             <div id="cgEndstopContainer">
                                 <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
@@ -1162,7 +1157,7 @@
                         </div>
                     </div>
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-ruler-combined" style="margin-right:8px;color:var(--primary-color)"></i> 调平传感器</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-ruler-combined" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.probe">调平传感器</span></h3></div>
                         <div class="card-body">
                             <div id="cgProbeContainer">
                                 <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
@@ -1174,7 +1169,7 @@
                 <!-- Tab 4: 归位与调平 -->
                 <div class="cg-tab-panel" data-tab="4">
                     <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-home" style="margin-right:8px;color:var(--primary-color)"></i> 原点归位</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-home" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.homing">原点归位</span></h3></div>
                         <div class="card-body">
                             <div id="cgHomingContainer">
                                 <p style="color:var(--text-secondary);text-align:center;">请先选择主板和打印机型号</p>
@@ -1182,7 +1177,7 @@
                         </div>
                     </div>
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-th" style="margin-right:8px;color:var(--primary-color)"></i> 调平与可选配置</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-th" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.leveling">调平与可选配置</span></h3></div>
                         <div class="card-body">
                             <div id="cgLevelingContainer">
                                 <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
@@ -1194,16 +1189,16 @@
 <!-- Tab 5: 加热器 -->
                 <div class="cg-tab-panel" data-tab="5">
                     <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> 温控/风扇接口位置</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.thermal_map">温控/风扇接口位置</span></h3></div>
                         <div class="card-body">
                             <div class="cg-board-map" data-map-types="heat,temp,fan,stop,probe" data-map-empty="当前板卡没有温控、风扇或传感器接口坐标数据"></div>
                         </div>
                     </div>
                     <div class="card" style="margin-top:12px;">
                         <div class="card-header">
-                            <h3><i class="fas fa-thermometer-half" style="margin-right:8px;color:var(--primary-color)"></i> 温控与冷却</h3>
+                            <h3><i class="fas fa-thermometer-half" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.thermal_cooling">温控与冷却</span></h3>
                             <button class="btn btn-sm btn-secondary" onclick="addExtraHeater()" id="cgAddHeaterBtn">
-                                <i class="fas fa-plus"></i> 添加加热器
+                                <i class="fas fa-plus"></i> <span data-i18n="btn.add_heater">添加加热器</span>
                             </button>
                         </div>
                         <div class="card-body">
@@ -1213,7 +1208,7 @@
                         </div>
                     </div>
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-fan" style="margin-right:8px;color:var(--primary-color)"></i> 风扇配置</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-fan" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.fan_config">风扇配置</span></h3></div>
                         <div class="card-body">
                             <div id="cgFanContainer">
                                 <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
@@ -1222,7 +1217,7 @@
                     </div>
                     <!-- 挤出机参数 -->
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-compress-arrows-alt" style="margin-right:8px;color:var(--primary-color)"></i> 挤出机参数</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-compress-arrows-alt" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.extruder_params">挤出机参数</span></h3></div>
                         <div class="card-body">
                             <div id="cgExtruderParamContainer">
                                 <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
@@ -1231,7 +1226,7 @@
                     </div>
                     <!-- 热床参数 -->
                     <div class="card" style="margin-top:12px;">
-                        <div class="card-header"><h3><i class="fas fa-bed" style="margin-right:8px;color:var(--primary-color)"></i> 热床参数</h3></div>
+                        <div class="card-header"><h3><i class="fas fa-bed" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.bed_params">热床参数</span></h3></div>
                         <div class="card-body">
                             <div id="cgBedParamContainer">
                                 <p style="color:var(--text-secondary);text-align:center;">请先选择主板</p>
@@ -1244,16 +1239,16 @@
                 <div class="cg-tab-panel" data-tab="6">
                     <div class="card">
                         <div class="card-header">
-                            <h3><i class="fas fa-search" style="margin-right:8px;color:var(--primary-color)"></i> 解析已有配置</h3>
+                            <h3><i class="fas fa-search" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.parse_existing">解析已有配置</span></h3>
                         </div>
                         <div class="card-body">
                             <div class="cg-row" style="margin-bottom:10px;">
-                                <button class="btn btn-primary" id="cgParserRemoteBtn" onclick="cgParserLoadRemoteConfigList()"><i class="fas fa-server"></i> 从被控机器加载</button>
-                                <button class="btn btn-secondary" id="cgParserBaselineBtn" onclick="cgParserUpdateMainsailBaseline()"><i class="fas fa-sync-alt"></i> 更新宏基准</button>
+                                <button class="btn btn-primary" id="cgParserRemoteBtn" onclick="cgParserLoadRemoteConfigList()"><i class="fas fa-server"></i> <span data-i18n="btn.load_from_remote">从被控机器加载</span></button>
+                                <button class="btn btn-secondary" id="cgParserBaselineBtn" onclick="cgParserUpdateMainsailBaseline()"><i class="fas fa-sync-alt"></i> <span data-i18n="btn.update_baseline">更新宏基准</span></button>
                                 <input type="file" id="cgParserFileInput" class="file-input" multiple accept=".cfg,.conf,.txt" onchange="cgParserHandleFiles(event)">
-                                <button class="btn btn-secondary" onclick="document.getElementById('cgParserFileInput').click()"><i class="fas fa-upload"></i> 上传/合并配置</button>
-                                <button class="btn btn-secondary" onclick="cgParserLoadGeneratedConfig()"><i class="fas fa-code"></i> 解析生成结果</button>
-                                <button class="btn btn-warning" onclick="cgParserUseAsImported()"><i class="fas fa-file-import"></i> 作为旧配置</button>
+                                <button class="btn btn-secondary" onclick="document.getElementById('cgParserFileInput').click()"><i class="fas fa-upload"></i> <span data-i18n="btn.upload_merge">上传/合并配置</span></button>
+                                <button class="btn btn-secondary" onclick="cgParserLoadGeneratedConfig()"><i class="fas fa-code"></i> <span data-i18n="btn.parse_generated">解析生成结果</span></button>
+                                <button class="btn btn-warning" onclick="cgParserUseAsImported()"><i class="fas fa-file-import"></i> <span data-i18n="btn.use_as_imported">作为旧配置</span></button>
                                 <span id="cgParserStatus" style="font-size:13px;color:var(--text-secondary);"></span>
                             </div>
                             <div id="cgParserProgress" class="remote-progress-bar" style="display:none;"><div class="bar" style="width:100%"></div></div>
@@ -1262,8 +1257,8 @@
                             </div>
                             <textarea id="cgParserInput" class="config-textarea" style="min-height:170px;" placeholder="可粘贴 printer.cfg，也可以从被控机器加载或上传多个 .cfg 文件。"></textarea>
                             <div class="btn-group" style="margin-top:10px;justify-content:flex-start;">
-                                <button class="btn btn-primary" onclick="cgParserRun()"><i class="fas fa-cogs"></i> 解析配置</button>
-                                <button class="btn btn-secondary" onclick="cgParserClear()"><i class="fas fa-redo"></i> 清空解析</button>
+                                <button class="btn btn-primary" onclick="cgParserRun()"><i class="fas fa-cogs"></i> <span data-i18n="btn.parse_config">解析配置</span></button>
+                                <button class="btn btn-secondary" onclick="cgParserClear()"><i class="fas fa-redo"></i> <span data-i18n="btn.clear_parse">清空解析</span></button>
                             </div>
                             <div class="result-content" id="cgParserResult" style="margin-top:12px;">
                                 <p style="text-align:center;color:var(--text-secondary);padding:30px 0;">解析结果将显示在这里...</p>
@@ -1273,7 +1268,7 @@
 
                     <div class="card">
                         <div class="card-header">
-                            <h3><i class="fas fa-code" style="margin-right:8px;color:var(--primary-color)"></i> 配置预览</h3>
+                            <h3><i class="fas fa-code" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.config_preview">配置预览</span></h3>
                             <div class="status-indicator" id="configStatus"><span class="dot"></span><span>未生成</span></div>
                         </div>
                         <div class="card-body">
@@ -1287,18 +1282,18 @@
                                     <option value="merge">与现有配置合并建议</option>
                                 </select>
                                 <input type="file" id="cgImportCfgFile" class="file-input" accept=".cfg,.conf,.txt" onchange="importExistingPrinterConfig(event)">
-                                <button class="btn btn-secondary" onclick="document.getElementById('cgImportCfgFile').click()"><i class="fas fa-file-import"></i> 导入 printer.cfg</button>
-                                <button class="btn btn-secondary" onclick="showGeneratedConfigDiff()"><i class="fas fa-code-branch"></i> 对比旧配置</button>
-                                <button class="btn btn-secondary" onclick="validateGeneratedConfigLocal()"><i class="fas fa-check-circle"></i> 本地结构校验</button>
+                                <button class="btn btn-secondary" onclick="document.getElementById('cgImportCfgFile').click()"><i class="fas fa-file-import"></i> <span data-i18n="btn.import_printer_cfg">导入 printer.cfg</span></button>
+                                <button class="btn btn-secondary" onclick="showGeneratedConfigDiff()"><i class="fas fa-code-branch"></i> <span data-i18n="btn.diff_old_config">对比旧配置</span></button>
+                                <button class="btn btn-secondary" onclick="validateGeneratedConfigLocal()"><i class="fas fa-check-circle"></i> <span data-i18n="btn.local_validate">本地结构校验</span></button>
                             </div>
                             <div id="cgImportSummary" class="cg-config-side-panel" style="display:none;"></div>
                             <div id="cgDiffSummary" class="cg-config-side-panel" style="display:none;"></div>
                             <pre id="output" class="output-pre">请完成配置后点击"生成配置"按钮...</pre>
                             <div class="action-buttons">
-                                <button class="btn btn-primary" onclick="generateConfig()"><i class="fas fa-cogs"></i> 生成配置</button>
-                                <button class="btn btn-secondary" id="downloadBtn" onclick="downloadConfig()" disabled><i class="fas fa-download"></i> 下载配置</button>
-                                <button class="btn btn-secondary" onclick="copyConfig()" id="copyBtn" disabled><i class="fas fa-copy"></i> 复制配置</button>
-                                <button class="btn btn-danger" onclick="resetForm()"><i class="fas fa-redo"></i> 重置</button>
+                                <button class="btn btn-primary" onclick="generateConfig()"><i class="fas fa-cogs"></i> <span data-i18n="btn.generate_config">生成配置</span></button>
+                                <button class="btn btn-secondary" id="downloadBtn" onclick="downloadConfig()" disabled><i class="fas fa-download"></i> <span data-i18n="btn.download_config">下载配置</span></button>
+                                <button class="btn btn-secondary" onclick="copyConfig()" id="copyBtn" disabled><i class="fas fa-copy"></i> <span data-i18n="btn.copy_config">复制配置</span></button>
+                                <button class="btn btn-danger" onclick="resetForm()"><i class="fas fa-redo"></i> <span data-i18n="btn.reset">重置</span></button>
                             </div>
                         </div>
                     </div>
@@ -1321,12 +1316,12 @@
 
     <script src="/static/js/i18n.js?v=20260724a"></script>
     <script src="/static/js/notifications.js?v=20260724a"></script>
-    <script src="/static/js/app.js?v=20260724a"></script>
+    <script src="/static/js/app.js?v=20260724c"></script>
     <script src="/static/js/mcu-presets.js?v=20260320f"></script>
     <script src="/static/js/config-manager.js?v=20260320f"></script>
-    <script src="/static/js/firmware-compile.js?v=20260710a"></script>
+    <script src="/static/js/firmware-compile.js?v=20260724a"></script>
     <script src="/static/js/firmware-update.js?v=20260320f"></script>
     <script src="/static/js/klipper-parser.js?v=20260702b"></script>
-    <script src="/static/js/config-generator.js?v=20260704za"></script>
+    <script src="/static/js/config-generator.js?v=20260724a"></script>
 </body>
 </html>

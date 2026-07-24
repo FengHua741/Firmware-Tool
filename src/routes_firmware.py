@@ -2239,7 +2239,7 @@ def export_compile_config():
             boards = load_all_boards()
             for mfr, types in boards.items():
                 for btype, configs in types.items():
-                    for bc in configs:
+                    for bc in configs.values():
                         if bc.get('mcu') == params.get('mcu') and bc.get('platform') == params.get('platform'):
                             board_info = {
                                 'manufacturer': mfr,

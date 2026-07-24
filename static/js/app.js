@@ -119,6 +119,13 @@ function wsOn(type, fn) {
 function switchPage(pageId) {
     currentPage = pageId;
 
+    // 同步 URL hash，便于刷新/重载后返回当前页
+    try {
+        if (window.location.hash !== '#' + pageId) {
+            window.history.replaceState(null, '', '#' + pageId);
+        }
+    } catch (e) { /* 忽略不支持 replaceState 的环境 */ }
+
     // 更新导航
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.remove('active');
@@ -262,7 +269,7 @@ async function searchSerial() {
                             <span class="id-text" style="font-weight:600;">${escapeHtml(displayVal)}</span>
                             <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${copyVal}')">复制</button>
                         </div>
-                        <div style="font-size:11px;color:#888;margin-top:3px;">
+                        <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">
                             ${escapeHtml(info ? info : '')}${ids ? ' [' + escapeHtml(ids) + ']' : ''}${d.driver ? ' (' + escapeHtml(d.driver) + ')' : ''}
                         </div>
                     </div>`;
@@ -312,12 +319,12 @@ async function diagnoseCanNetwork() {
         const data = await response.json();
 
         let html = '<div style="font-size:13px;line-height:1.8;">';
-        html += '<h4 style="margin:0 0 8px 0;color:#333;">CAN 网络诊断结果</h4>';
+        html += '<h4 style="margin:0 0 8px 0;color:var(--text-primary);">CAN 网络诊断结果</h4>';
 
         html += `<div>内核CAN支持: <b>${data.kernel_support ? '✅ 支持' : '❌ 不支持'}</b></div>`;
         html += `<div>CAN硬件设备: <b>${data.can_device_exists ? '✅ 已检测到' : '❌ 未检测到'}</b></div>`;
         if (data.can_device_info) {
-            html += `<div style="font-size:11px;color:#666;margin-left:12px;">${escapeHtml(data.can_device_info)}</div>`;
+            html += `<div style="font-size:11px;color:var(--text-secondary);margin-left:12px;">${escapeHtml(data.can_device_info)}</div>`;
         }
 
         html += `<div>can0接口: <b>${data.can0_exists ? '✅ 存在' : '❌ 不存在'}</b></div>`;
@@ -326,11 +333,11 @@ async function diagnoseCanNetwork() {
             html += `<div style="margin-left:12px;">状态: <span style="color:${stateColor};font-weight:600;">${escapeHtml(data.can0_state)}</span></div>`;
         }
         if (data.can0_bitrate) {
-            html += `<div style="margin-left:12px;font-size:11px;color:#666;">${escapeHtml(data.can0_bitrate)}</div>`;
+            html += `<div style="margin-left:12px;font-size:11px;color:var(--text-secondary);">${escapeHtml(data.can0_bitrate)}</div>`;
         }
 
         if (data.errors && data.errors.length > 0) {
-            html += '<div style="margin-top:8px;color:#d32f2f;">';
+            html += '<div style="margin-top:8px;color:var(--danger-color);">';
             html += data.errors.map(e => `<div>❌ ${escapeHtml(e)}</div>`).join('');
             html += '</div>';
         }
@@ -369,12 +376,12 @@ async function searchCanUuid() {
             let html = '';
             // printer.cfg 来源时显示说明
             if (data.source === 'printer_cfg') {
-                html += '<div style="margin-bottom:10px;font-size:12px;color:#666;background:#f5f5f5;padding:6px 10px;border-radius:4px;">以下设备来自 Klipper 配置文件 (printer.cfg)</div>';
+                html += '<div style="margin-bottom:10px;font-size:12px;color:var(--text-secondary);background:var(--bg-color);padding:6px 10px;border-radius:4px;">以下设备来自 Klipper 配置文件 (printer.cfg)</div>';
                 // 显示连接状态验证结果
                 if (data.verified === false) {
-                    html += '<div style="margin-bottom:8px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">⚠ Moonraker 不可达，无法验证设备连接状态</div>';
+                    html += '<div style="margin-bottom:8px;font-size:12px;color:var(--warning-color);background:rgba(255,193,7,.12);padding:6px 10px;border-radius:4px;">⚠ Moonraker 不可达，无法验证设备连接状态</div>';
                 } else if (data.skipped > 0) {
-                    html += `<div style="margin-bottom:8px;font-size:12px;color:#856404;background:#fff3cd;padding:6px 10px;border-radius:4px;">ℹ ${data.skipped} 个配置文件中的设备未连接，已自动过滤</div>`;
+                    html += `<div style="margin-bottom:8px;font-size:12px;color:var(--warning-color);background:rgba(255,193,7,.12);padding:6px 10px;border-radius:4px;">ℹ ${data.skipped} 个配置文件中的设备未连接，已自动过滤</div>`;
                 }
             }
             html += data.uuids.map(d => {
@@ -390,7 +397,7 @@ async function searchCanUuid() {
                     <span class="id-text">
                         <span style="font-weight:600;">${uuid}</span>
                         <span style="font-size:11px;color:${appColor};margin-left:8px;">[${escapeHtml(appDisplay + mcuLabel + freqLabel + versionLabel)}]</span>
-                        ${d.section ? `<span style="font-size:11px;color:#666;margin-left:6px;">${escapeHtml(d.section)}</span>` : ''}
+                        ${d.section ? `<span style="font-size:11px;color:var(--text-secondary);margin-left:6px;">${escapeHtml(d.section)}</span>` : ''}
                     </span>
                     <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${escapeJsString(d.uuid)}')">复制</button>
                 </div>
@@ -400,7 +407,7 @@ async function searchCanUuid() {
             container.innerHTML = '<p class="empty">未找到CAN设备</p>';
             if (data.error && errDiv) {
                 errDiv.style.display = 'block';
-                errDiv.innerHTML = `<div style="background:#fff3cd;padding:10px;border-radius:6px;border-left:4px solid #ffc107;margin-top:8px;font-size:13px;color:#856404;">⚠️ ${escapeHtml(data.error)}</div>`;
+                errDiv.innerHTML = `<div style="background:rgba(255,193,7,.12);padding:10px;border-radius:6px;border-left:4px solid var(--warning-color);margin-top:8px;font-size:13px;color:var(--warning-color);">⚠️ ${escapeHtml(data.error)}</div>`;
             }
         }
     } catch (error) {
@@ -423,7 +430,7 @@ async function searchCamera() {
                     <div class="id-item">
                         <span class="id-text">
                             <span style="font-weight:600;">${escapeHtml(d.path)}</span>
-                            <span style="font-size:11px;color:#666;margin-left:8px;">${escapeHtml(d.name)}${d.index ? ' (index:' + escapeHtml(d.index) + ')' : ''}</span>
+                            <span style="font-size:11px;color:var(--text-secondary);margin-left:8px;">${escapeHtml(d.name)}${d.index ? ' (index:' + escapeHtml(d.index) + ')' : ''}</span>
                         </span>
                         <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${copyVal}')">复制</button>
                     </div>`;
@@ -493,7 +500,7 @@ async function loadCanHostConfig() {
                     <button class="btn btn-sm btn-primary" onclick="applyCanHostConfig()">应用修改</button>
                     <div id="canHostApplyStatus" style="margin-top:8px;"></div>
 
-                    <div style="margin-top:12px;font-size:12px;color:#888;padding:8px;background:var(--bg-color);border-radius:4px;">
+                    <div style="margin-top:12px;font-size:12px;color:var(--text-secondary);padding:8px;background:var(--bg-color);border-radius:4px;">
                         修改后会同时更新 /config/config.txt 并重启 CAN 接口，上位机速率必须与工具板固件的 CAN 速率一致
                     </div>
                 </div>`;
@@ -514,7 +521,7 @@ async function loadCanHostConfig() {
                 <div style="padding:4px 0;">
                     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:13px;">
                         <span>配置方式: <strong>${configLabel}</strong></span>
-                        <span style="color:#666;font-size:12px;">${configFile}</span>
+                        <span style="color:var(--text-secondary);font-size:12px;">${configFile}</span>
                     </div>
                     <div style="background:rgba(76,175,80,0.06);padding:10px 14px;border-radius:6px;border-left:4px solid #4caf50;margin-bottom:14px;font-size:13px;display:flex;gap:20px;flex-wrap:wrap;">
                         <span>接口: <strong>${escapeHtml(data.live && data.live.interface || 'can0')}</strong></span>
@@ -541,7 +548,7 @@ async function loadCanHostConfig() {
                     <button class="btn btn-sm btn-primary" onclick="applyCanHostConfig()">应用修改</button>
                     <div id="canHostApplyStatus" style="margin-top:8px;"></div>
 
-                    <div style="margin-top:12px;font-size:12px;color:#888;padding:8px;background:var(--bg-color);border-radius:4px;">
+                    <div style="margin-top:12px;font-size:12px;color:var(--text-secondary);padding:8px;background:var(--bg-color);border-radius:4px;">
                         上位机 CAN 速率必须与工具板固件的 CAN 速率一致
                     </div>
                 </div>`;
@@ -556,7 +563,7 @@ async function loadCanHostConfig() {
                 <div style="padding:4px 0;">
                     <div style="background:rgba(255,152,0,0.08);padding:12px;border-radius:6px;border-left:4px solid #ff9800;margin-bottom:12px;font-size:13px;">
                         未检测到 CAN 配置文件
-                        <div style="margin-top:4px;font-size:12px;color:#666;">${usbInfo} | 接口: ${liveDetail}</div>
+                        <div style="margin-top:4px;font-size:12px;color:var(--text-secondary);">${usbInfo} | 接口: ${liveDetail}</div>
                     </div>
 
                     <div class="form-row">
@@ -600,11 +607,11 @@ async function applyCanHostConfig() {
     const txqueuelen = txqueueInput ? parseInt(txqueueInput.value) : 1024;
 
     if (txqueueInput && (isNaN(txqueuelen) || txqueuelen < 128 || txqueuelen > 8192)) {
-        statusDiv.innerHTML = '<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">缓存大小必须在 128-8192 之间</div>';
+        statusDiv.innerHTML = '<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:var(--danger-color);border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">缓存大小必须在 128-8192 之间</div>';
         return;
     }
 
-    statusDiv.innerHTML = '<div style="padding:10px;font-size:13px;color:#666;">正在应用...</div>';
+    statusDiv.innerHTML = '<div style="padding:10px;font-size:13px;color:var(--text-secondary);">正在应用...</div>';
 
     try {
         const res = await fetch('/api/system/can-config', {
@@ -616,14 +623,14 @@ async function applyCanHostConfig() {
         const data = await res.json();
 
         if (data.success) {
-            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(76,175,80,0.1);color:#4caf50;border:1px solid rgba(76,175,80,0.3);padding:10px;border-radius:6px;font-size:13px;">${escapeHtml(data.message)}</div>`;
+            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(76,175,80,0.1);color:var(--success-color);border:1px solid rgba(76,175,80,0.3);padding:10px;border-radius:6px;font-size:13px;">${escapeHtml(data.message)}</div>`;
             // 刷新状态
             setTimeout(loadCanHostConfig, 1500);
         } else {
-            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">${escapeHtml(data.error || '应用失败')}</div>`;
+            statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:var(--danger-color);border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">${escapeHtml(data.error || '应用失败')}</div>`;
         }
     } catch (error) {
-        statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:#d32f2f;border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">请求失败: ${escapeHtml(error.message)}</div>`;
+        statusDiv.innerHTML = `<div class="status-area show" style="display:block;background:rgba(244,67,54,0.1);color:var(--danger-color);border:1px solid rgba(244,67,54,0.3);padding:10px;border-radius:6px;font-size:13px;">请求失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -728,8 +735,6 @@ async function loadSettings() {
             if (ktp) ktp.value = config.katapult_path || '~/katapult';
             const mrHost = document.getElementById('settingsMoonrakerHost');
             if (mrHost) mrHost.value = config.moonraker_host || '127.0.0.1';
-            // 记住原始 Moonraker 地址，用于模式切换后恢复
-            _savedMoonrakerHost = config.moonraker_host || '127.0.0.1';
             const mrPort = document.getElementById('settingsMoonrakerPort');
             if (mrPort) mrPort.value = config.moonraker_port || 7125;
 
@@ -738,6 +743,11 @@ async function loadSettings() {
             _loadedConnectionMode = mode;  // 记录加载时的模式
             const radios = document.querySelectorAll('input[name="connectionMode"]');
             radios.forEach(r => r.checked = r.value === mode);
+
+            // 记住原始 Moonraker 地址，用于模式切换后恢复。
+            // 仅在本地模式下记住：远程模式下加载到的 moonraker_host 是远程主机地址，
+            // 不能作为本地地址保存，否则切回本地模式会错误地恢复为远程地址。
+            _savedMoonrakerHost = (mode === 'local') ? (config.moonraker_host || '127.0.0.1') : '';
 
             // 标准 SSH 字段
             const sshHost = document.getElementById('settingsSshHost');
@@ -959,8 +969,10 @@ function updateMoonrakerHostFromSsh() {
     }
 
     if ((mode === 'ssh' || mode === 'fast-ssh') && remoteHost) {
-        // 首次进入远程模式时记住原始地址
-        if (!_savedMoonrakerHost) {
+        // 首次进入远程模式时记住原始地址。
+        // 仅在当前值不是远程地址本身时才记住：远程模式重载后字段里已是从配置加载的
+        // 远程主机地址，若重新记住会把远程地址误当作“本地地址”，导致切回本地模式无法恢复。
+        if (!_savedMoonrakerHost && mrHost.value && mrHost.value !== remoteHost) {
             _savedMoonrakerHost = mrHost.value;
         }
         mrHost.value = remoteHost;
@@ -968,11 +980,10 @@ function updateMoonrakerHostFromSsh() {
         mrHost.style.backgroundColor = '#f0f0f0';
         mrHost.title = `${mode.toUpperCase()} 模式下自动使用远程主机地址`;
     } else {
-        // 恢复本地模式的原始地址
-        if (_savedMoonrakerHost) {
-            mrHost.value = _savedMoonrakerHost;
-            _savedMoonrakerHost = '';
-        }
+        // 恢复本地模式的原始地址；若无保存的本地地址（如从远程模式重载后切换），
+        // 回退为本地默认地址，避免字段中残留远程主机地址
+        mrHost.value = _savedMoonrakerHost || '127.0.0.1';
+        _savedMoonrakerHost = '';
         mrHost.readOnly = false;
         mrHost.style.backgroundColor = '';
         mrHost.title = '';
@@ -1114,8 +1125,26 @@ function closeDiffModal() {
 }
 
 // ==================== 配置导入/导出 ====================
-function exportAllConfigs() {
-    window.location.href = '/api/config/export-all';
+async function exportAllConfigs() {
+    // 使用 fetch 下载（自动携带 CSRF 认证头）。
+    // 不能用 window.location.href 跳转：页面跳转不携带 X-CSRF-Token 头，会被 CSRF 校验拦截返回 401。
+    try {
+        const resp = await fetch('/api/config/export-all');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'firmware-tool-export.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showSuccess('配置已导出');
+    } catch (e) {
+        console.error('导出配置失败:', e);
+        showError('导出失败: ' + (e.message || e));
+    }
 }
 
 async function importConfigBundle(input) {
@@ -1137,7 +1166,10 @@ async function importConfigBundle(input) {
 document.addEventListener('DOMContentLoaded', async () => {
     if (typeof I18n !== 'undefined') await I18n.init();
     wsConnect();
-    switchPage('resources');
+    // 优先从 URL hash 恢复页面（如模式切换重载后返回设置页），否则默认资源页
+    const hashPage = (window.location.hash || '').replace('#', '');
+    const initialPage = hashPage && document.getElementById('page-' + hashPage) ? hashPage : 'resources';
+    switchPage(initialPage);
 });
 
 // 更新资源显示
@@ -1253,7 +1285,7 @@ async function updateSshConnectionStatus() {
             if (_lastSshConnected === false) {
                 // 从断连恢复
                 content.style.background = 'rgba(76,175,80,0.1)';
-                content.style.color = '#4caf50';
+                content.style.color = 'var(--success-color)';
                 content.style.border = '1px solid rgba(76,175,80,0.3)';
                 content.innerHTML = `
                     <span>SSH 连接已恢复: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
@@ -1264,7 +1296,7 @@ async function updateSshConnectionStatus() {
                     if (bar.style.display !== 'none') {
                         content.style.background = 'rgba(76,175,80,0.05)';
                         content.innerHTML = `
-                            <span style="color:#4caf50;">SSH 已连接: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
+                            <span style="color:var(--success-color);">SSH 已连接: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                             <span></span>
                         `;
                     }
@@ -1272,7 +1304,7 @@ async function updateSshConnectionStatus() {
             } else {
                 // 持续正常
                 content.style.background = 'rgba(76,175,80,0.05)';
-                content.style.color = '#4caf50';
+                content.style.color = 'var(--success-color)';
                 content.style.border = '1px solid rgba(76,175,80,0.2)';
                 content.innerHTML = `
                     <span>SSH 已连接: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
@@ -1287,11 +1319,11 @@ async function updateSshConnectionStatus() {
             let detailHtml = '';
 
             if (status.circuit_open) {
-                detailHtml = `<span style="color:#e65100;">断路器已打开，冷却 ${status.cooldown_remaining} 秒后自动重试</span>`;
+                detailHtml = `<span style="color:var(--warning-color);">断路器已打开，冷却 ${status.cooldown_remaining} 秒后自动重试</span>`;
             } else if (status.reconnect_attempts > 0) {
-                detailHtml = `<span style="color:#856404;">已自动重连 ${status.reconnect_attempts} 次</span>`;
+                detailHtml = `<span style="color:var(--warning-color);">已自动重连 ${status.reconnect_attempts} 次</span>`;
             } else {
-                detailHtml = '<span style="color:#856404;">连接中断，正在尝试恢复...</span>';
+                detailHtml = '<span style="color:var(--warning-color);">连接中断，正在尝试恢复...</span>';
             }
 
             content.style.background = 'rgba(244,67,54,0.08)';
@@ -1302,7 +1334,7 @@ async function updateSshConnectionStatus() {
                     <span style="font-weight:600;">${modeLabel} 连接已断开: ${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                     ${detailHtml}
                 </div>
-                <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:#d32f2f;cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
+                <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:var(--danger-color);cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
             `;
         }
     } catch (error) {
@@ -1330,7 +1362,7 @@ async function manualReconnect() {
         if (data.success) {
             _lastSshConnected = true;
             content.style.background = 'rgba(76,175,80,0.1)';
-            content.style.color = '#4caf50';
+            content.style.color = 'var(--success-color)';
             content.style.border = '1px solid rgba(76,175,80,0.3)';
             content.innerHTML = `<span>${data.message}</span><span></span>`;
         } else {
@@ -1343,7 +1375,7 @@ async function manualReconnect() {
                     <span style="font-weight:600;">重连失败</span>
                     <span style="font-size:12px;">${data.error || '未知错误'}</span>
                 </div>
-                <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:#d32f2f;cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
+                <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:var(--danger-color);cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
             `;
         }
     } catch (error) {
@@ -1352,7 +1384,7 @@ async function manualReconnect() {
         content.style.border = '1px solid rgba(244,67,54,0.25)';
         content.innerHTML = `
             <span>重连请求失败: ${error.message}</span>
-            <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:#d32f2f;cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
+            <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:var(--danger-color);cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
         `;
     }
 }
@@ -1440,7 +1472,7 @@ function renderServiceButtons(services) {
                 </div>
             `;
         } else if (service.controllable === false || !controlName) {
-            buttonsHtml = '<span style="font-size:12px;color:#888;">不可控制</span>';
+            buttonsHtml = '<span style="font-size:12px;color:var(--text-secondary);">不可控制</span>';
         } else {
             buttonsHtml = `
                 <div class="btn-group">
@@ -1505,7 +1537,7 @@ async function checkForUpdates() {
         if (data.has_update) {
             updateAvailable = true;
             updateInfo = data;
-            statusDiv.innerHTML = `<span style="color:#28a745;">发现新版本！</span><br>当前: ${escapeHtml(data.current_version)} → 最新: ${escapeHtml(data.latest_version)}<br>更新时间: ${escapeHtml(data.update_time)}`;
+            statusDiv.innerHTML = `<span style="color:var(--success-color);">发现新版本！</span><br>当前: ${escapeHtml(data.current_version)} → 最新: ${escapeHtml(data.latest_version)}<br>更新时间: ${escapeHtml(data.update_time)}`;
             updateBtn.style.display = 'inline-block';
         } else {
             updateAvailable = false;
@@ -1696,7 +1728,7 @@ function renderCanTopology(data, container) {
         container.innerHTML = `<div class="can-topology-empty">
             <i class="fas fa-search" style="font-size:24px;color:#ccc;margin-bottom:8px;display:block;"></i>
             <p>未检测到 CAN 设备</p>
-            <p style="font-size:12px;color:#999;">接口: ${escapeHtml(iface.name)} · 状态: ${escapeHtml(iface.state)}</p>
+            <p style="font-size:12px;color:var(--text-secondary);">接口: ${escapeHtml(iface.name)} · 状态: ${escapeHtml(iface.state)}</p>
         </div>`;
         return;
     }

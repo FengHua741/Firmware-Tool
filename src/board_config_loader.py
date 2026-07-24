@@ -62,7 +62,7 @@ def get_board_types(manufacturer):
 
 
 def normalize_config(config):
-    """将中文key的JSON配置转换为英文key"""
+    """将中文key的JSON配置转换为英文key（保留已有的英文key字段）"""
     # 中文到英文的映射
     key_mapping = {
         '产品类型': 'type',
@@ -85,10 +85,13 @@ def normalize_config(config):
         'BL烧录配置': 'bl_flash_config',
     }
 
-    normalized = {}
+    # 保留所有原始英文key字段，中文key映射为英文key
+    normalized = dict(config)
     for cn_key, en_key in key_mapping.items():
         if cn_key in config:
             normalized[en_key] = config[cn_key]
+            if cn_key != en_key:
+                normalized.pop(cn_key, None)
 
     # 先处理处理器名称，并生成mcu字段
     is_rp2040 = False

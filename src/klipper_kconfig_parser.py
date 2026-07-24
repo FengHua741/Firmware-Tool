@@ -76,6 +76,26 @@ class KlipperKconfigParser:
         # 解析 MCU 型号
         result['mcus'] = self._parse_mcus(content)
 
+        # 单 MCU 平台（如 HC32F460）：Kconfig 中没有显式的 config MACH_xxx 块，
+        # 整个文件只描述一个 MCU。此时构造合成 MCU 条目，避免前端型号下拉框为空、
+        # 导致“主控型号之后的选项”（晶振/BL偏移/通信）无法加载。
+        if not result['mcus']:
+            arch_symbol = (platform_info or {}).get('arch_symbol', '') or ('MACH_' + platform_dir.upper())
+            synthetic_id = platform_dir.lower()
+            result['mcus'][synthetic_id] = {
+                'id': synthetic_id,
+                'name': (platform_info or {}).get('name', platform_dir),
+                'config_name': arch_symbol,
+                'config_symbol': arch_symbol,
+                'selects': [],
+                'capabilities': [arch_symbol],
+                'crystals': [],
+                'crystal_options': [],
+                'bl_offsets': [],
+                'bl_offset_options': [],
+                'connections': []
+            }
+
         # 解析晶振选项
         self._parse_clock_options(content, result['mcus'])
 
@@ -300,6 +320,10 @@ class KlipperKconfigParser:
             for mcu_id, mcu in mcus.items():
                 if mcu_id == 'rp2040' or mcu_id == 'rp2350':
                     mcu['crystals'] = ['12000000']  # 12MHz (RP系列都是12MHz)
+                elif mcu_id.startswith('hc32'):
+                    # HC32F460 不配置外部晶振（CLOCK_FREQ 由片内 PLL 决定），
+                    # 给单一 internal 选项使前端隐藏晶振下拉框
+                    mcu['crystals'] = ['internal']
                 else:
                     mcu['crystals'] = ['8000000', '12000000', '16000000', '20000000', '24000000', '25000000']
         else:
@@ -313,7 +337,8 @@ class KlipperKconfigParser:
         choices = []
         i = 0
         while i < len(lines):
-            if lines[i].strip() != 'choice':
+            # 兼容裸 choice 和带参数的 choice（如 HC32F460 的 choice "Application Address"）
+            if not re.match(r'^choice\b', lines[i].strip()):
                 i += 1
                 continue
 
@@ -388,6 +413,27 @@ class KlipperKconfigParser:
                     if not self._check_condition(option['condition'], mcu):
                         continue
                     suffix_match = re.search(r'_FLASH_START_([0-9A-Fa-f]+)$', option['config_symbol'])
+                    if not suffix_match:
+                        continue
+                    offset = str(int(suffix_match.group(1), 16))
+                    option_rows.append({
+                        'offset': offset,
+                        'display': option['display'],
+                        'config_symbol': option['config_symbol'],
+                    })
+                    offsets.append(offset)
+                mcu['bl_offset_options'] = option_rows
+                mcu['bl_offsets'] = offsets
+            return
+
+        # HC32F460：Application Address 选择（FLASH_APPLICATION_ADDRESS_0x008000 等）
+        app_addr_options = self._parse_choice_options(content, 'Application Address')
+        if app_addr_options:
+            for mcu in mcus.values():
+                offsets = []
+                option_rows = []
+                for option in app_addr_options:
+                    suffix_match = re.search(r'_FLASH_APPLICATION_ADDRESS_0x([0-9A-Fa-f]+)$', option['config_symbol'])
                     if not suffix_match:
                         continue
                     offset = str(int(suffix_match.group(1), 16))

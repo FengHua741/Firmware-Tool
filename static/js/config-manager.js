@@ -407,7 +407,7 @@ function renderFormPanel(data) {
                     <div class="cm-form-field" style="flex: 2;">
                         <label>产品名称</label>
                         <input type="text" id="cmName" value="${escapeHtml(data.name || '')}" class="cm-input" oninput="syncNameToIdDisplay()">
-                        <div id="cmIdDisplay" style="font-size:12px;color:#888;margin-top:4px;"></div>
+                        <div id="cmIdDisplay" style="font-size:12px;color:var(--text-secondary);margin-top:4px;"></div>
                     </div>
                     <div class="cm-form-field">
                         <label>产品类型</label>
@@ -462,14 +462,14 @@ function renderFormPanel(data) {
                 </div>
                 <div class="cm-form-row">
                     <div class="cm-form-field">
-                        <label>启动引脚 <small style="color:#999;font-weight:normal;">（手动配置）</small></label>
+                        <label>启动引脚 <small style="color:var(--text-secondary);font-weight:normal;">（手动配置）</small></label>
                         <input type="text" id="cmBootPins" value="${escapeHtml(data.boot_pins || '')}" class="cm-input" placeholder="例如: gpio8">
                     </div>
                     <div class="cm-form-field">
                         <label>通信接口</label>
                         <div class="cm-connections-editor">
                             <div class="cm-tags" id="cmConnTags">
-                                ${connections.map((c, i) => `<span class="cm-tag">${escapeHtml(c)} <span class="cm-tag-remove" onclick="removeConnection(${i})" style="cursor:pointer;margin-left:4px;">×</span></span>`).join(' ') || '<span style="color:#999;">暂无</span>'}
+                                ${connections.map((c, i) => `<span class="cm-tag">${escapeHtml(c)} <span class="cm-tag-remove" onclick="removeConnection(${i})" style="cursor:pointer;margin-left:4px;">×</span></span>`).join(' ') || '<span style="color:var(--text-secondary);">暂无</span>'}
                             </div>
                             <div style="display:flex;gap:6px;margin-top:6px;">
                                 <input type="text" id="cmNewConnection" class="cm-input" placeholder="输入连接方式名称" style="flex:1;padding:4px 8px;font-size:13px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addConnection()}">
@@ -771,7 +771,7 @@ function renderConnTags(connections) {
     const tagsEl = document.getElementById('cmConnTags');
     if (!tagsEl) return;
     if (connections.length === 0) {
-        tagsEl.innerHTML = '<span style="color:#999;">暂无</span>';
+        tagsEl.innerHTML = '<span style="color:var(--text-secondary);">暂无</span>';
         return;
     }
     tagsEl.innerHTML = connections.map((c, i) =>
@@ -1028,7 +1028,7 @@ function showCreateManufacturerDialog() {
                 <div class="cm-form-field" style="margin-bottom:16px;">
                     <label>厂家名称 <span style="color:red">*</span></label>
                     <input type="text" id="cmNewMfrName" class="cm-input" placeholder="例如: FLY">
-                    <p style="font-size:12px;color:#888;margin-top:4px;">只能包含字母、数字、连字符和下划线</p>
+                    <p style="font-size:12px;color:var(--text-secondary);margin-top:4px;">只能包含字母、数字、连字符和下划线</p>
                 </div>
                 <div style="display:flex;gap:10px;justify-content:flex-end;">
                     <button class="btn btn-secondary" onclick="closeCreateManufacturerDialog()">取消</button>

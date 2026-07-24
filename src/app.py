@@ -37,11 +37,6 @@ app.register_blueprint(notifications_bp)
 app.register_blueprint(firmware_history_bp)
 
 
-@app.route('/api/docs')
-def api_docs():
-    return app.send_static_file('api-docs.html')
-
-
 # 启动
 if __name__ == '__main__':
     os.chdir(BASE_DIR)
