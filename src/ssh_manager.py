@@ -15,6 +15,8 @@ import time
 import threading
 import logging
 import subprocess
+import re
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,25 @@ def _load_config_file():
     except Exception:
         pass
     return {}
+
+
+def _normalize_host_value(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    parse_target = raw if re.match(r'^[A-Za-z][A-Za-z0-9+.-]*://', raw) else f'//{raw}'
+    try:
+        parsed = urlsplit(parse_target)
+        if parsed.hostname:
+            return parsed.hostname
+    except ValueError:
+        pass
+    host = re.split(r'[/?#]', raw, 1)[0].strip()
+    if host.startswith('[') and ']' in host:
+        return host[1:host.index(']')]
+    if host.count(':') == 1:
+        host = host.split(':', 1)[0]
+    return host
 
 # ==================== 凭据加密存储 ====================
 
@@ -249,13 +270,13 @@ class SSHManager:
         if cfg.get('connection_mode') == 'fast-ssh':
             fast_user, _ = get_fast_ssh_credentials()
             return {
-                'ssh_host': cfg.get('ssh_host', ''),
+                'ssh_host': _normalize_host_value(cfg.get('ssh_host', '')),
                 'ssh_port': cfg.get('ssh_port', 22),
                 'ssh_user': fast_user or 'root',
                 'sudo_mode': 'password',
             }
         return {
-            'ssh_host': cfg.get('ssh_host', ''),
+            'ssh_host': _normalize_host_value(cfg.get('ssh_host', '')),
             'ssh_port': cfg.get('ssh_port', 22),
             'ssh_user': cfg.get('ssh_user', ''),
             'sudo_mode': cfg.get('sudo_mode', 'password'),

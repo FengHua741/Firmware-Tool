@@ -722,6 +722,27 @@ function escapeJsString(value) {
 // 当前已加载的连接模式（用于检测模式切换）
 let _loadedConnectionMode = 'local';
 
+function normalizeHostInput(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    try {
+        const url = new URL(raw.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//) ? raw : `http://${raw}`);
+        if (url.hostname) return url.hostname.replace(/^\[|\]$/g, '');
+    } catch (e) {
+        // 兜底处理不完整 URL 或裸 IPv6。
+    }
+
+    let host = raw.split(/[/?#]/, 1)[0].trim();
+    if (host.startsWith('[') && host.includes(']')) {
+        return host.slice(1, host.indexOf(']'));
+    }
+    if ((host.match(/:/g) || []).length === 1) {
+        host = host.split(':', 1)[0];
+    }
+    return host;
+}
+
 async function loadSettings() {
     try {
         const response = await fetch('/api/settings/config');
@@ -734,7 +755,7 @@ async function loadSettings() {
             const ktp = document.getElementById('settingsKatapultPath');
             if (ktp) ktp.value = config.katapult_path || '~/katapult';
             const mrHost = document.getElementById('settingsMoonrakerHost');
-            if (mrHost) mrHost.value = config.moonraker_host || '127.0.0.1';
+            if (mrHost) mrHost.value = normalizeHostInput(config.moonraker_host || '127.0.0.1');
             const mrPort = document.getElementById('settingsMoonrakerPort');
             if (mrPort) mrPort.value = config.moonraker_port || 7125;
 
@@ -747,11 +768,11 @@ async function loadSettings() {
             // 记住原始 Moonraker 地址，用于模式切换后恢复。
             // 仅在本地模式下记住：远程模式下加载到的 moonraker_host 是远程主机地址，
             // 不能作为本地地址保存，否则切回本地模式会错误地恢复为远程地址。
-            _savedMoonrakerHost = (mode === 'local') ? (config.moonraker_host || '127.0.0.1') : '';
+            _savedMoonrakerHost = (mode === 'local') ? normalizeHostInput(config.moonraker_host || '127.0.0.1') : '';
 
             // 标准 SSH 字段
             const sshHost = document.getElementById('settingsSshHost');
-            if (sshHost) sshHost.value = config.ssh_host || '';
+            if (sshHost) sshHost.value = normalizeHostInput(config.ssh_host || '');
             const sshPort = document.getElementById('settingsSshPort');
             if (sshPort) sshPort.value = config.ssh_port || 22;
             const sshUser = document.getElementById('settingsSshUser');
@@ -761,7 +782,7 @@ async function loadSettings() {
 
             // FAST-SSH IP 地址
             const fastSshHost = document.getElementById('settingsFastSshHost');
-            if (fastSshHost) fastSshHost.value = config.ssh_host || '';
+            if (fastSshHost) fastSshHost.value = normalizeHostInput(config.ssh_host || '');
 
             toggleSshConfig();
 
@@ -802,26 +823,30 @@ async function saveSettings() {
     const settings = {
         klipper_path: kp ? kp.value : '~/klipper',
         katapult_path: ktp ? ktp.value : '~/katapult',
-        moonraker_host: mrHost ? mrHost.value : '127.0.0.1',
+        moonraker_host: mrHost ? normalizeHostInput(mrHost.value) : '127.0.0.1',
         moonraker_port: mrPort ? parseInt(mrPort.value) || 7125 : 7125,
         connection_mode: connectionMode,
     };
 
     if (connectionMode === 'ssh') {
-        settings.ssh_host = sshHost ? sshHost.value : '';
+        settings.ssh_host = sshHost ? normalizeHostInput(sshHost.value) : '';
         settings.ssh_port = sshPort ? parseInt(sshPort.value) || 22 : 22;
         settings.ssh_user = sshUser ? sshUser.value : '';
         settings.sudo_mode = sudoMode ? sudoMode.value : 'password';
     } else if (connectionMode === 'fast-ssh') {
-        settings.ssh_host = fastSshHost ? fastSshHost.value : '';
+        settings.ssh_host = fastSshHost ? normalizeHostInput(fastSshHost.value) : '';
         settings.ssh_port = 22;
         // ssh_user 和 sudo_mode 由后端自动设置固定值
     } else {
         // local 模式: 保留 ssh_host/port 的值以便将来切换回来
-        settings.ssh_host = sshHost ? sshHost.value : '';
+        settings.ssh_host = sshHost ? normalizeHostInput(sshHost.value) : '';
         settings.ssh_port = sshPort ? parseInt(sshPort.value) || 22 : 22;
         settings.ssh_user = '';
     }
+
+    if (mrHost) mrHost.value = settings.moonraker_host;
+    if (sshHost) sshHost.value = normalizeHostInput(sshHost.value);
+    if (fastSshHost) fastSshHost.value = normalizeHostInput(fastSshHost.value);
 
     try {
         const response = await fetch('/api/settings/config', {
@@ -963,17 +988,19 @@ function updateMoonrakerHostFromSsh() {
     // 确定当前远程主机 IP
     let remoteHost = '';
     if (mode === 'ssh') {
-        remoteHost = sshHost ? sshHost.value : '';
+        remoteHost = sshHost ? normalizeHostInput(sshHost.value) : '';
+        if (sshHost && sshHost.value !== remoteHost) sshHost.value = remoteHost;
     } else if (mode === 'fast-ssh') {
-        remoteHost = fastSshHost ? fastSshHost.value : '';
+        remoteHost = fastSshHost ? normalizeHostInput(fastSshHost.value) : '';
+        if (fastSshHost && fastSshHost.value !== remoteHost) fastSshHost.value = remoteHost;
     }
 
     if ((mode === 'ssh' || mode === 'fast-ssh') && remoteHost) {
         // 首次进入远程模式时记住原始地址。
         // 仅在当前值不是远程地址本身时才记住：远程模式重载后字段里已是从配置加载的
         // 远程主机地址，若重新记住会把远程地址误当作“本地地址”，导致切回本地模式无法恢复。
-        if (!_savedMoonrakerHost && mrHost.value && mrHost.value !== remoteHost) {
-            _savedMoonrakerHost = mrHost.value;
+        if (!_savedMoonrakerHost && mrHost.value && normalizeHostInput(mrHost.value) !== remoteHost) {
+            _savedMoonrakerHost = normalizeHostInput(mrHost.value);
         }
         mrHost.value = remoteHost;
         mrHost.readOnly = true;

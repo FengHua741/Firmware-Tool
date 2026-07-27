@@ -1507,7 +1507,7 @@ async function flashFirmware() {
             firmwarePath = prebuiltPath;
         } else {
             if (!firmwarePath) {
-                firmwarePath = '~/klipper/out/klipper.bin';
+                firmwarePath = '~/klipper/out/klipper.elf';
             }
         }
         return await flashHostFirmware(firmwarePath);
@@ -1618,6 +1618,9 @@ async function flashHostFirmware(firmwarePath) {
 
 // ==================== HOST 固件源 & 文件浏览器 ====================
 
+let _hostBrowserParent = null;
+let _hostBrowserDefaultDir = null;
+
 // 固件源切换
 function onHostSourceChange() {
     const source = document.getElementById('hostFirmwareSource')?.value;
@@ -1631,25 +1634,30 @@ function onHostSourceChange() {
     }
 }
 
+function buildHostInfoParams() {
+    const params = new URLSearchParams();
+    const mcuId = currentCompileMcu ? currentCompileMcu.mcu.id : '';
+    const commType = document.getElementById('compileConnection')?.value || '';
+    const blOffset = document.getElementById('compileBlOffset')?.value || '';
+
+    if (mcuId) params.set('mcu', mcuId);
+    if (commType) params.set('comm_type', commType);
+    if (blOffset) params.set('bl_offset', blOffset);
+    return params;
+}
+
 // 自动检测 HOST 预构建固件路径
 async function autoDetectHostFirmwarePath() {
     const pathInput = document.getElementById('hostPrebuiltPath');
     if (!pathInput) return;
 
-    // 收集当前 MCU 和通信参数
     const mcuId = currentCompileMcu ? currentCompileMcu.mcu.id : '';
-    const commType = document.getElementById('compileConnection')?.value || '';
-    const blOffset = document.getElementById('compileBlOffset')?.value || '';
 
     try {
-        const params = new URLSearchParams();
-        if (mcuId) params.set('mcu', mcuId);
-        if (commType) params.set('comm_type', commType);
-        if (blOffset) params.set('bl_offset', blOffset);
-
-        const resp = await fetch('/api/firmware/host-info?' + params.toString());
+        const resp = await fetch('/api/firmware/host-info?' + buildHostInfoParams().toString());
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const info = await resp.json();
+        _hostBrowserDefaultDir = info.default_browser_dir || info.firmware_dir || _hostBrowserDefaultDir;
 
         if (info.best_match && info.best_score > 0) {
             pathInput.value = info.best_match.path;
@@ -1673,14 +1681,33 @@ async function autoDetectHostFirmwarePath() {
 }
 
 // 打开文件浏览器
-let _hostBrowserParent = null;
-
-function openHostFileBrowser() {
+async function openHostFileBrowser() {
     const browser = document.getElementById('hostFileBrowser');
     if (!browser) return;
     browser.style.display = 'block';
-    // 默认打开预构建固件目录
-    loadHostBrowserDir('/usr/lib/firmware/klipper');
+    loadHostBrowserDir(await resolveHostBrowserStartDir());
+}
+
+async function resolveHostBrowserStartDir() {
+    const selectedPath = document.getElementById('hostPrebuiltPath')?.value?.trim();
+    if (selectedPath && selectedPath.includes('/')) {
+        return selectedPath.replace(/\/[^/]*$/, '') || '/';
+    }
+    if (_hostBrowserDefaultDir) {
+        return _hostBrowserDefaultDir;
+    }
+
+    try {
+        const resp = await fetch('/api/firmware/host-info?' + buildHostInfoParams().toString());
+        if (resp.ok) {
+            const info = await resp.json();
+            _hostBrowserDefaultDir = info.default_browser_dir || info.firmware_dir || null;
+            if (_hostBrowserDefaultDir) return _hostBrowserDefaultDir;
+        }
+    } catch (err) {
+        console.warn('获取 HOST 默认固件目录失败:', err);
+    }
+    return '~/klipper/out';
 }
 
 function hostBrowserGoUp() {

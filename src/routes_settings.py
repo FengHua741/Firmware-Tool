@@ -13,7 +13,7 @@ from shared import (
     CAN_NETWORK_DIR, CAN_INTERFACES_DIR, CAN_BITRATES, BITRATE_VALUES,
     run_cmd, is_ssh_mode,
     expand_klipper_path, sudo_write_file, sudo_mkdir,
-    SSHManager, get_fast_ssh_credentials, public_config,
+    SSHManager, get_fast_ssh_credentials, public_config, normalize_host_value,
 )
 import shared
 from routes_system import _ssh_connection_status, _update_ssh_disconnect_status, _normalize_service_name
@@ -76,12 +76,18 @@ def handle_config():
                 ('katapult_path', 'Katapult 路径'),
                 ('json_repo_url', 'JSON 仓库地址'),
                 ('bind_host', '监听地址'),
-                ('moonraker_host', 'Moonraker 地址'),
-                ('ssh_host', 'SSH 地址'),
                 ('ssh_user', 'SSH 用户'),
             ]:
                 if key in data:
                     _config[key] = _clean_setting_string(data[key], label)
+
+            for key, label in [
+                ('moonraker_host', 'Moonraker 地址'),
+                ('ssh_host', 'SSH 地址'),
+            ]:
+                if key in data:
+                    cleaned = _clean_setting_string(data[key], label)
+                    _config[key] = normalize_host_value(cleaned)
 
             if 'bind_host' in data and not re.match(r'^[A-Za-z0-9:_.-]{1,120}$', _config['bind_host']):
                 raise ValueError('监听地址格式无效')

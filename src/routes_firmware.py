@@ -32,6 +32,7 @@ from kconfig_can_parser import parse_can_options
 firmware_bp = Blueprint('firmware', __name__)
 MANIFEST_FILENAME = 'firmware-tool-manifest.json'
 DEFAULT_CANBUS_FREQUENCY = '1000000'
+HOST_PREBUILT_FIRMWARE_DIR = '/usr/lib/firmware/klipper'
 _compile_lock = threading.Lock()
 _flash_lock = threading.Lock()
 
@@ -174,20 +175,49 @@ def _path_under(path, roots):
     return False
 
 
+def _unique_paths(paths):
+    unique = []
+    seen = set()
+    for path in paths:
+        if not path:
+            continue
+        normalized = _normalize_fs_path(path)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique.append(path)
+    return unique
+
+
+def _host_firmware_dirs(klipper_path=None):
+    klipper_path = klipper_path or expand_klipper_path(config.get('klipper_path', '~/klipper'))
+    return _unique_paths([
+        os.path.join(klipper_path, 'out'),
+        '/data/klipper/out',
+        HOST_PREBUILT_FIRMWARE_DIR,
+    ])
+
+
 def _allowed_firmware_roots(klipper_path=None):
     klipper_path = klipper_path or expand_klipper_path(config.get('klipper_path', '~/klipper'))
     roots = [
         os.path.join(klipper_path, 'out'),
         '/data/klipper/out',
+        HOST_PREBUILT_FIRMWARE_DIR,
         os.path.join(BASE_DIR, 'board_configs'),
         os.path.join(BASE_DIR, 'out'),
     ]
-    return [root for root in roots if root]
+    return _unique_paths(roots)
 
 
 def _allowed_browse_roots(klipper_path=None):
     klipper_path = klipper_path or expand_klipper_path(config.get('klipper_path', '~/klipper'))
-    roots = [klipper_path, os.path.join(klipper_path, 'out'), os.path.join(BASE_DIR, 'board_configs')]
+    roots = [
+        klipper_path,
+        os.path.join(klipper_path, 'out'),
+        HOST_PREBUILT_FIRMWARE_DIR,
+        os.path.join(BASE_DIR, 'board_configs'),
+    ]
     try:
         _, home_dir = get_klipper_owner(klipper_path)
         if home_dir:
@@ -196,7 +226,7 @@ def _allowed_browse_roots(klipper_path=None):
         pass
     for root in ('/data', '/tmp'):
         roots.append(root)
-    return [root for root in roots if root]
+    return _unique_paths(roots)
 
 
 def _is_safe_klipper_tree(klipper_path):
@@ -1237,7 +1267,7 @@ def compile_firmware():
             return
 
         out_dir = os.path.join(klipper_path, 'out')
-        firmware_files = ['klipper.bin', 'klipper.uf2']
+        firmware_files = ['klipper.bin', 'klipper.uf2', 'klipper.elf']
         firmware_path = None
 
         for fw_file in firmware_files:
@@ -1892,32 +1922,68 @@ def get_host_firmware_info():
         mcu_id = (request.args.get('mcu', '') or '').lower()
         comm_type = request.args.get('comm_type', '')
         bl_offset = request.args.get('bl_offset', '')
-        firmware_dir = '/usr/lib/firmware/klipper'
+        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
+        firmware_dirs = _host_firmware_dirs(klipper_path)
+        firmware_exts = ('.bin', '.elf', '.uf2', '.hex')
+        existing_dirs = []
         firmware_files = []
 
         if is_ssh_mode():
-            result = run_cmd(f'ls -la {shlex.quote(firmware_dir)}/ 2>/dev/null', shell=True, capture_output=True, text=True, timeout=10)
+            script = (
+                "import json, os, sys\n"
+                "dirs = json.loads(sys.argv[1])\n"
+                "exts = tuple(json.loads(sys.argv[2]))\n"
+                "payload = {'dirs': [], 'files': []}\n"
+                "for base in dirs:\n"
+                "    if not os.path.isdir(base):\n"
+                "        continue\n"
+                "    payload['dirs'].append(base)\n"
+                "    try:\n"
+                "        names = os.listdir(base)\n"
+                "    except OSError:\n"
+                "        continue\n"
+                "    for name in names:\n"
+                "        if name.startswith('.') or not name.lower().endswith(exts):\n"
+                "            continue\n"
+                "        full = os.path.join(base, name)\n"
+                "        try:\n"
+                "            if not os.path.isfile(full):\n"
+                "                continue\n"
+                "            payload['files'].append({'name': name, 'path': full, 'size': os.path.getsize(full)})\n"
+                "        except OSError:\n"
+                "            pass\n"
+                "print(json.dumps(payload, ensure_ascii=False))\n"
+            )
+            cmd = (
+                f'python3 -c {shlex.quote(script)} '
+                f'{shlex.quote(json.dumps(firmware_dirs))} '
+                f'{shlex.quote(json.dumps(firmware_exts))}'
+            )
+            result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
-                for line in result.stdout.strip().split('\n'):
-                    parts = line.split()
-                    if len(parts) >= 9 and parts[-1].endswith('.bin'):
-                        name = parts[-1]
-                        size = int(parts[4]) if parts[4].isdigit() else 0
-                        full_path = os.path.join(firmware_dir, name)
-                        firmware_files.append({'name': name, 'path': full_path, 'size': size})
+                payload = json.loads(result.stdout or '{}')
+                existing_dirs = payload.get('dirs', [])
+                firmware_files = payload.get('files', [])
         else:
-            if os.path.isdir(firmware_dir):
+            for firmware_dir in firmware_dirs:
+                if not os.path.isdir(firmware_dir):
+                    continue
+                existing_dirs.append(firmware_dir)
                 for name in os.listdir(firmware_dir):
-                    if name.endswith('.bin'):
-                        full_path = os.path.join(firmware_dir, name)
+                    if name.startswith('.') or not name.lower().endswith(firmware_exts):
+                        continue
+                    full_path = os.path.join(firmware_dir, name)
+                    if os.path.isfile(full_path):
                         try:
                             size = os.path.getsize(full_path)
                         except Exception:
                             size = 0
                         firmware_files.append({'name': name, 'path': full_path, 'size': size})
 
+        firmware_files.sort(key=lambda fw: (fw.get('name') or '').lower())
+
         for fw in firmware_files:
-            m = re.match(r'^([a-z0-9]+)-(\d+)k-(\w+?)(?:-(\w+))?\.bin$', fw['name'])
+            m = re.match(r'^([a-z0-9]+)-(\d+)k-(\w+?)(?:-(\w+))?\.(?:bin|elf|uf2|hex)$', fw['name'], re.IGNORECASE)
             if m:
                 fw['fw_mcu'] = m.group(1)
                 fw['fw_bl'] = m.group(2) + 'k'
@@ -1947,8 +2013,13 @@ def get_host_firmware_info():
                 best_score = score
                 best_match = fw
 
+        default_browser_dir = existing_dirs[0] if existing_dirs else firmware_dirs[0]
+
         return jsonify({
-            'firmware_dir': firmware_dir,
+            'firmware_dir': default_browser_dir,
+            'firmware_dirs': firmware_dirs,
+            'existing_dirs': existing_dirs,
+            'default_browser_dir': default_browser_dir,
             'firmware_files': firmware_files,
             'best_match': best_match,
             'best_score': best_score,

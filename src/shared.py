@@ -17,6 +17,7 @@ import pwd
 import base64
 import logging
 import sys
+from urllib.parse import urlsplit
 
 # 导入主板配置
 from board_config_loader import load_all_boards, load_board_config, get_manufacturers, get_board_types, get_bl_firmwares
@@ -175,6 +176,34 @@ def new_csrf_token():
     return secrets.token_urlsafe(32)
 
 
+def normalize_host_value(value):
+    """归一化主机输入，允许用户误填 URL，只保留 hostname/IP。"""
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+
+    parse_target = raw if re.match(r'^[A-Za-z][A-Za-z0-9+.-]*://', raw) else f'//{raw}'
+    try:
+        parsed = urlsplit(parse_target)
+        if parsed.hostname:
+            return parsed.hostname
+    except ValueError:
+        pass
+
+    # 兜底处理畸形 URL 或裸 IPv6，去掉路径、查询和片段。
+    host = re.split(r'[/?#]', raw, 1)[0].strip()
+    if host.startswith('[') and ']' in host:
+        return host[1:host.index(']')]
+    if host.count(':') == 1:
+        host = host.split(':', 1)[0]
+    return host
+
+
+for _host_config_key in ('moonraker_host', 'ssh_host'):
+    if _host_config_key in config:
+        config[_host_config_key] = normalize_host_value(config.get(_host_config_key, ''))
+
+
 def public_config(raw_config=None):
     """返回可给前端使用的配置，避免泄露凭据和内部安全字段。"""
     source = raw_config or config
@@ -268,6 +297,7 @@ def get_klipper_owner(klipper_path=None):
 def get_moonraker_base_url():
     """获取 Moonraker HTTP API 基础 URL"""
     host = config.get('moonraker_host') or ('127.0.0.1' if not is_ssh_mode() else config.get('ssh_host', '127.0.0.1'))
+    host = normalize_host_value(host)
     port = config.get('moonraker_port', 7125)
     return f'http://{host}:{port}'
 
