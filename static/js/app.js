@@ -12,7 +12,8 @@ let compileParams = {
     boardModel: ''
 };
 
-// 可选 API Token：访问 /?token=xxx 后写入本地存储，后续 fetch 自动带上请求头。
+// 可选 API Token：存储于本地存储，fetch 自动携带请求头；401 时提示输入。
+// 安全说明：Token 仅通过请求头传递，不再从 URL 参数读取（避免泄露进日志/历史记录）。
 (function setupApiTokenFetch() {
     function getStoredToken() {
         try {
@@ -28,15 +29,6 @@ let compileParams = {
             console.warn('API Token 无法写入本地存储:', error);
         }
     }
-    const params = new URLSearchParams(window.location.search);
-    const tokenFromUrl = params.get('token');
-    if (tokenFromUrl) {
-        setStoredToken(tokenFromUrl);
-        params.delete('token');
-        const cleanQuery = params.toString();
-        const cleanUrl = `${window.location.pathname}${cleanQuery ? `?${cleanQuery}` : ''}${window.location.hash}`;
-        window.history.replaceState({}, document.title, cleanUrl);
-    }
     function readCookie(name) {
         const prefix = `${name}=`;
         const found = document.cookie.split(';').map(v => v.trim()).find(v => v.startsWith(prefix));
@@ -46,13 +38,17 @@ let compileParams = {
             return '';
         }
     }
-    const originalFetch = window.fetch.bind(window);
-    window.fetch = function(resource, options = {}) {
-        const apiToken = getStoredToken();
+    function buildHeaders(resource, options) {
         const headers = new Headers(options.headers || (resource instanceof Request ? resource.headers : undefined));
+        const apiToken = getStoredToken();
         if (apiToken) headers.set('X-API-Token', apiToken);
         const csrf = readCookie('firmware_tool_csrf');
         if (csrf) headers.set('X-CSRF-Token', csrf);
+        return headers;
+    }
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = function(resource, options = {}) {
+        const headers = buildHeaders(resource, options);
         return originalFetch(resource, { ...options, headers });
     };
 })();
@@ -713,6 +709,7 @@ function escapeJsString(value) {
     return String(value == null ? '' : value)
         .replace(/\\/g, '\\\\')
         .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
         .replace(/\n/g, '\\n')
         .replace(/\r/g, '\\r');
 }
@@ -725,6 +722,12 @@ let _loadedConnectionMode = 'local';
 function normalizeHostInput(value) {
     const raw = String(value || '').trim();
     if (!raw) return '';
+
+    // IPv4 字面量（含输入中间态如 "192"、"192."、"192.168.1"）：直接原样返回。
+    // 避免 new URL 按 IPv4 简写规则把 "192" 扩展为 "0.0.0.192"（会导致输入被改写）。
+    if (/^\d{1,3}(\.\d{1,3}){0,3}\.?$/.test(raw)) {
+        return raw.replace(/\.+$/, '');
+    }
 
     try {
         const url = new URL(raw.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//) ? raw : `http://${raw}`);
@@ -985,14 +988,13 @@ function updateMoonrakerHostFromSsh() {
 
     if (!mrHost) return;
 
-    // 确定当前远程主机 IP
+    // 确定当前远程主机 IP（仅用于同步 Moonraker 地址，不回写输入框本身，
+    // 避免输入过程中被规范化改写导致无法正常输入）
     let remoteHost = '';
     if (mode === 'ssh') {
         remoteHost = sshHost ? normalizeHostInput(sshHost.value) : '';
-        if (sshHost && sshHost.value !== remoteHost) sshHost.value = remoteHost;
     } else if (mode === 'fast-ssh') {
         remoteHost = fastSshHost ? normalizeHostInput(fastSshHost.value) : '';
-        if (fastSshHost && fastSshHost.value !== remoteHost) fastSshHost.value = remoteHost;
     }
 
     if ((mode === 'ssh' || mode === 'fast-ssh') && remoteHost) {

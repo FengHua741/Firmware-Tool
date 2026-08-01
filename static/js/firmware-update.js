@@ -842,9 +842,25 @@ async function flashAllSelected() {
             if (mode === 'TF') {
                 // TF卡模式：提供下载
                 addBatchResult(displayName, 'success', '编译成功，请下载firmware.bin到TF卡');
-                // 自动触发下载
-                const downloadUrl = `/api/firmware/download?path=${encodeURIComponent(compileResult.firmware_path)}`;
-                window.open(downloadUrl, '_blank');
+                // 自动触发下载（fetch 携带认证头，新窗口打开会被 401 拦截）
+                try {
+                    const dlResp = await fetch(`/api/firmware/download?path=${encodeURIComponent(compileResult.firmware_path)}`);
+                    if (dlResp.ok) {
+                        const blob = await dlResp.blob();
+                        const dlUrl = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = dlUrl;
+                        a.download = 'firmware.bin';
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(dlUrl);
+                    } else {
+                        addBatchResult(displayName, 'error', '固件下载失败: HTTP ' + dlResp.status);
+                    }
+                } catch (dlErr) {
+                    addBatchResult(displayName, 'error', '固件下载失败: ' + (dlErr.message || '未知错误'));
+                }
             } else if (mode === 'UF2') {
                 // UF2模式：直接烧录
                 addBatchResult(displayName, 'running', 'UF2烧录中...');

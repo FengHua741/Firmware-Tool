@@ -14,11 +14,15 @@ from shared import (
     run_cmd, is_ssh_mode,
     expand_klipper_path, sudo_write_file, sudo_mkdir,
     SSHManager, get_fast_ssh_credentials, public_config, normalize_host_value,
+    safe_error,
 )
 import shared
 from routes_system import _ssh_connection_status, _update_ssh_disconnect_status, _normalize_service_name
 
 settings_bp = Blueprint('settings', __name__)
+
+# 允许通过 resolve-paths 接口解析的路径前缀（收敛路径探测面，S16）
+ALLOWED_RESOLVE_PREFIXES = ('~/klipper', '~/katapult')
 
 
 def _coerce_port(value, name):
@@ -104,7 +108,7 @@ def handle_config():
                     raise ValueError('sudo 模式无效')
                 _config['sudo_mode'] = sudo_mode
         except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'success': False, 'error': safe_error(e)}), 400
 
         if 'port' in data:
             shared.PORT = _config['port']
@@ -116,11 +120,16 @@ def handle_config():
             _fast_user, _fast_pwd = get_fast_ssh_credentials()
             _config['ssh_user'] = _fast_user
             _config['sudo_mode'] = 'password'
-            save_credential('ssh_password', _fast_pwd)
-            save_credential('sudo_password', _fast_pwd)
+            if _fast_pwd:
+                save_credential('ssh_password', _fast_pwd)
+                save_credential('sudo_password', _fast_pwd)
+            else:
+                logger.warning(
+                    'FAST-SSH 模式未配置密码（可通过环境变量 FAST_SSH_PASSWORD '
+                    '或 data/config.json 的 fast_ssh_password 设置），SSH 连接将不可用'
+                )
             if not _config.get('fast_ssh_user'):
                 _config['fast_ssh_user'] = _fast_user
-            _config.pop('fast_ssh_password', None)
 
         if new_mode == 'local' and old_mode in ('ssh', 'fast-ssh'):
             try:
@@ -156,19 +165,23 @@ def handle_ssh_credentials():
         if data.get('clear_all'):
             clear_credentials()
             return jsonify({'success': True, 'message': '凭据已清除'})
+        if data.get('clear_host_keys'):
+            from ssh_manager import clear_host_keys
+            ok, msg = clear_host_keys()
+            return jsonify({'success': ok, 'message': msg})
         try:
             if data.get('ssh_password') is not None:
                 save_credential('ssh_password', _clean_secret(data['ssh_password'], 'SSH 密码'))
             if data.get('sudo_password') is not None:
                 save_credential('sudo_password', _clean_secret(data['sudo_password'], 'sudo 密码'))
         except ValueError as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'success': False, 'error': safe_error(e)}), 400
         return jsonify({'success': True, 'message': '凭据已保存'})
 
 
 @settings_bp.route('/api/settings/resolve-paths', methods=['GET'])
 def resolve_paths():
-    """解析路径中的 ~ 为当前模式下的实际绝对路径"""
+    """解析路径中的 ~ 为当前模式下的实际绝对路径（仅允许 Klipper/Katapult 相关路径）"""
     try:
         paths = request.args.getlist('path') or ['~/klipper', '~/katapult']
         if len(paths) > 20:
@@ -176,13 +189,15 @@ def resolve_paths():
         resolved = {}
         for p in paths:
             p = _clean_setting_string(p, '路径', 500)
+            if not p.startswith(ALLOWED_RESOLVE_PREFIXES):
+                return jsonify({'error': f'不允许解析该路径: {p}'}), 400
             if p.startswith('~'):
                 resolved[p] = expand_klipper_path(p)
             else:
                 resolved[p] = p
         return jsonify({'resolved': resolved, 'mode': config.get('connection_mode', 'local')})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @settings_bp.route('/api/settings/local-test', methods=['POST'])
@@ -231,7 +246,7 @@ def test_local_connection():
             'checks': checks
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 200
+        return jsonify({'success': False, 'error': safe_error(e)}), 200
 
 
 @settings_bp.route('/api/settings/ssh-test', methods=['POST'])
@@ -246,7 +261,7 @@ def test_ssh_connection():
         else:
             return jsonify({'success': False, 'error': message}), 200
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 200
+        return jsonify({'success': False, 'error': safe_error(e)}), 200
 
 
 @settings_bp.route('/api/ssh/status')
@@ -265,7 +280,7 @@ def get_ssh_connection_status():
         return jsonify({
             'mode': config.get('connection_mode', 'ssh'),
             'connected': False,
-            'error': str(e)
+            'error': safe_error(e)
         })
 
 
@@ -293,7 +308,7 @@ def reconnect_ssh():
             _update_ssh_disconnect_status()
             return jsonify({'success': False, 'error': message}), 200
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 200
+        return jsonify({'success': False, 'error': safe_error(e)}), 200
 
 
 # ==================== CAN 辅助函数 ====================
@@ -560,7 +575,7 @@ def get_can_config():
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @settings_bp.route('/api/system/can-config', methods=['POST'])
@@ -704,7 +719,7 @@ iface can0 can static
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @settings_bp.route('/api/system/can-diagnose', methods=['GET'])
@@ -810,7 +825,7 @@ def diagnose_can_network():
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @settings_bp.route('/api/system/can-repair', methods=['POST'])
@@ -915,7 +930,7 @@ TxQueueLength={txqueuelen}
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 # ==================== 时区设置 API ====================
@@ -938,7 +953,7 @@ def handle_timezone():
             run_cmd(['sudo', 'timedatectl', 'set-timezone', new_timezone], check=True, capture_output=True)
             return jsonify({'success': True, 'message': f'时区已设置为 {new_timezone}'})
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return jsonify({'error': safe_error(e)}), 500
 
 
 # ==================== 服务管理 API ====================
@@ -970,4 +985,4 @@ def manage_service(action):
             else:
                 return jsonify({'error': result.stderr}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500

@@ -1001,11 +1001,6 @@
 
                 <!-- Tab 1: 主板与连接 -->
                 <div class="cg-tab-panel active" data-tab="1">
-                    <div style="margin:12px 0;text-align:right;">
-                        <button class="btn btn-success" onclick="quickStart()" style="font-size:13px;padding:6px 14px;">
-                            <i class="fas fa-bolt"></i> <span data-i18n="btn.quick_start">快速配置</span>
-                        </button>
-                    </div>
                     <div class="card" style="margin-top:12px;">
                         <div class="card-header"><h3><i class="fas fa-microchip" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.board_connection">主板与连接</span></h3></div>
                         <div class="card-body">
@@ -1020,7 +1015,7 @@
                                 </select>
                                 <span id="cgBoardInfo" class="cg-board-info"></span>
                             </div>
-                            <div id="cgBoardImageContainer" class="cg-board-image-container">
+                            <div id="cgBoardImageContainer" class="cg-board-image-container cg-board-map" data-map-types="all" data-map-empty="当前板卡没有接口坐标数据">
                                 <div id="cgBoardImageStage" class="cg-board-image-stage">
                                     <img id="cgBoardImage" class="cg-board-image" alt="板卡图片">
                                 </div>
@@ -1191,7 +1186,7 @@
                     <div class="card">
                         <div class="card-header"><h3><i class="fas fa-map-marker-alt" style="margin-right:8px;color:var(--primary-color)"></i> <span data-i18n="cg.thermal_map">温控/风扇接口位置</span></h3></div>
                         <div class="card-body">
-                            <div class="cg-board-map" data-map-types="heat,temp,fan,stop,probe" data-map-empty="当前板卡没有温控、风扇或传感器接口坐标数据"></div>
+                            <div class="cg-board-map" data-map-types="heat,temp,fan" data-map-empty="当前板卡没有温控、风扇或传感器接口坐标数据"></div>
                         </div>
                     </div>
                     <div class="card" style="margin-top:12px;">

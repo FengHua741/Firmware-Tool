@@ -1,7 +1,8 @@
-flask
-flask-cors
-flask-sock
-psutil
-paramiko
-cryptography
-requests
+# 依赖版本已锁定（安全修复 S12）：避免上游发版引入漏洞或破坏兼容性
+flask>=3.0.0,<4.0.0
+flask-cors>=4.0.0,<6.0.0
+flask-sock>=0.7.0,<1.0.0
+psutil>=5.9.0,<8.0.0
+paramiko>=3.4.0,<4.0.0
+cryptography>=42.0.0,<46.0.0
+requests>=2.31.0,<3.0.0

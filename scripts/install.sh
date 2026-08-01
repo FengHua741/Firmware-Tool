@@ -83,15 +83,6 @@ echo -e "${GREEN}使用端口: $PORT${NC}"
 echo ""
 
 PYTHON_FOR_TOKEN=$(command -v python3 2>/dev/null || echo /usr/bin/python3)
-if [ ! -x "$PYTHON_FOR_TOKEN" ]; then
-    echo -e "${RED}未找到可用的 python3，无法生成 API Token${NC}"
-    exit 1
-fi
-API_TOKEN="$($PYTHON_FOR_TOKEN - <<'PY'
-import secrets
-print(secrets.token_urlsafe(32))
-PY
-)"
 
 # Fast系统: 如果当前目录不是PROJECT_DIR，则复制项目
 if [ "$IS_FAST" = true ] && [ "$(pwd)" != "$PROJECT_DIR" ]; then
@@ -107,7 +98,7 @@ if [ ! -f "$PROJECT_DIR/data/config.json" ]; then
 cat > "$PROJECT_DIR/data/config.json" << EOF
 {
   "port": $PORT,
-  "bind_host": "0.0.0.0",
+  "bind_host": "127.0.0.1",
   "klipper_path": "~/klipper",
   "katapult_path": "~/katapult",
   "json_repo_url": "",
@@ -120,21 +111,12 @@ cat > "$PROJECT_DIR/data/config.json" << EOF
   "ssh_user": "",
   "sudo_mode": "password",
   "allowed_origins": [],
-  "api_token": "$API_TOKEN",
+  "api_token": "",
   "require_csrf": true
 }
 EOF
 else
     echo "配置文件已存在，跳过覆盖: $PROJECT_DIR/data/config.json"
-    API_TOKEN="$($PYTHON_FOR_TOKEN - "$PROJECT_DIR/data/config.json" <<'PY'
-import json, sys
-try:
-    with open(sys.argv[1], 'r', encoding='utf-8') as f:
-        print((json.load(f).get('api_token') or '').strip())
-except Exception:
-    print('')
-PY
-)"
 fi
 
 chown "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR/data/config.json"
@@ -181,7 +163,7 @@ if [ -f "$PROJECT_DIR/requirements.txt" ]; then
     echo "通过 pip 安装 requirements.txt 依赖..."
     $PIP_CMD install $PIP_INSTALL_OPTS -r "$PROJECT_DIR/requirements.txt" 2>&1 | tail -5
 else
-    $PIP_CMD install $PIP_INSTALL_OPTS flask flask-cors psutil paramiko cryptography requests 2>&1 | tail -5
+    $PIP_CMD install $PIP_INSTALL_OPTS flask flask-cors flask-sock psutil paramiko cryptography requests 2>&1 | tail -5
 fi
 
 # 验证关键包是否可导入
@@ -265,9 +247,6 @@ echo ""
 echo "服务名称: $SERVICE_NAME"
 echo "端口号: $PORT"
 echo "项目目录: $PROJECT_DIR"
-if [ -n "$API_TOKEN" ]; then
-    echo "API Token: $API_TOKEN"
-fi
 echo ""
 echo "常用命令:"
 echo "  启动服务: sudo systemctl start $SERVICE_NAME"
@@ -280,11 +259,9 @@ echo "  卸载程序：cd $PROJECT_DIR/scripts && sudo ./uninstall.sh"
 echo ""
 # 获取本机 IP（兼容 FAST 系统无 hostname -I 的情况）
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -1 || echo "<IP>")
-if [ -n "$API_TOKEN" ]; then
-    echo -e "${GREEN}访问地址: http://$LOCAL_IP:$PORT/?token=$API_TOKEN${NC}"
-else
-    echo -e "${GREEN}访问地址: http://$LOCAL_IP:$PORT${NC}"
-fi
+echo -e "${GREEN}本机访问地址: http://127.0.0.1:$PORT${NC}"
+echo -e "${YELLOW}局域网访问（需在 data/config.json 中将 bind_host 改为 0.0.0.0 并重启服务）:${NC}"
+echo -e "${YELLOW}  http://$LOCAL_IP:$PORT${NC}"
 echo ""
 
 # 询问是否启动服务

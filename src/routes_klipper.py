@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify
 import os
 import threading
 
-from shared import config, logger, expand_klipper_path
+from shared import config, logger, expand_klipper_path, safe_error
 from klipper_kconfig_parser import KlipperKconfigParser
 from kconfig_can_parser import parse_can_options
 
@@ -208,5 +208,5 @@ def refresh_klipper_database():
     except Exception as e:
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': safe_error(e)
         }), 500

@@ -16,6 +16,7 @@ from shared import (
     get_moonraker_base_url, get_klipper_owner,
     is_ssh_mode, sudo_write_file,
     SSHManager,
+    safe_error,
 )
 
 backup_bp = Blueprint('backup_api', __name__)
@@ -91,7 +92,7 @@ def _write_printer_cfg(content):
             sudo_write_file(target, content)
             return True, 'ssh'
         except Exception as e:
-            return False, str(e)
+            return False, safe_error(e)
     else:
         try:
             expanded = os.path.expanduser(target)
@@ -100,7 +101,7 @@ def _write_printer_cfg(content):
                 f.write(content)
             return True, 'local'
         except Exception as e:
-            return False, str(e)
+            return False, safe_error(e)
 
 
 def _backup_meta_path(backup_id):
@@ -167,7 +168,7 @@ def create_backup():
         })
     except Exception as e:
         logger.exception('创建备份失败')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @backup_bp.route('/api/backup/list')
@@ -197,7 +198,7 @@ def list_backups():
         return jsonify({'success': True, 'backups': backups})
     except Exception as e:
         logger.exception('列出备份失败')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @backup_bp.route('/api/backup/rollback', methods=['POST'])
@@ -223,7 +224,7 @@ def rollback_backup():
             return jsonify({'success': False, 'error': f'写入失败: {result}'}), 500
     except Exception as e:
         logger.exception('恢复备份失败')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @backup_bp.route('/api/backup/<backup_id>', methods=['DELETE'])
@@ -249,7 +250,7 @@ def delete_backup(backup_id):
             return jsonify({'success': False, 'error': '备份不存在'}), 404
     except Exception as e:
         logger.exception('删除备份失败')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @backup_bp.route('/api/backup/settings')
@@ -282,7 +283,7 @@ def update_backup_settings():
         return jsonify({'success': True, 'settings': backup_cfg})
     except Exception as e:
         logger.exception('更新备份设置失败')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 def _prune_old_backups(max_count):
@@ -349,7 +350,7 @@ def diff_backups():
         return jsonify({'success': True, 'diff': diff_lines, 'has_changes': len(diff_lines) > 0})
     except Exception as e:
         logger.exception('配置对比失败')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 def auto_backup_printer_cfg():

@@ -5,12 +5,31 @@ import json
 import time
 import threading
 import logging
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
 sock = None
 _clients = []
 _clients_lock = threading.Lock()
+
+
+def _origin_allowed(environ):
+    """校验 WebSocket 握手 Origin 与 Host 同源；无 Origin（非浏览器客户端）拒绝。
+
+    浏览器 WebSocket 握手会自动携带 Origin 头，跨站页面无法伪造同源 Origin。
+    """
+    origin = environ.get('HTTP_ORIGIN', '')
+    if not origin:
+        return False
+    host = environ.get('HTTP_HOST', '')
+    try:
+        parsed = urlsplit(origin)
+        if parsed.hostname and parsed.netloc.lower() == host.lower():
+            return True
+    except ValueError:
+        pass
+    return False
 
 
 def init_websocket(app):
@@ -21,6 +40,14 @@ def init_websocket(app):
 
         @sock.route('/ws')
         def ws_endpoint(ws):
+            environ = getattr(ws, 'environ', {}) or {}
+            if not _origin_allowed(environ):
+                logger.warning("WebSocket 连接被拒绝（Origin 校验失败）")
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+                return
             with _clients_lock:
                 _clients.append(ws)
             try:

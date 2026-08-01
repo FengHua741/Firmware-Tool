@@ -25,6 +25,7 @@ function kpEscapeJsString(value) {
     return String(value == null ? '' : value)
         .replace(/\\/g, '\\\\')
         .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
         .replace(/\n/g, '\\n')
         .replace(/\r/g, '\\r');
 }

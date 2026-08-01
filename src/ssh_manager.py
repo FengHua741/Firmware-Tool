@@ -16,6 +16,7 @@ import threading
 import logging
 import subprocess
 import re
+import paramiko
 from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,42 @@ def _normalize_host_value(value):
 CREDENTIALS_DIR = os.path.expanduser('~/.firmware-tool')
 CREDENTIALS_PATH = os.path.join(CREDENTIALS_DIR, 'ssh_credentials.enc')
 KEY_PATH = '/etc/firmware-tool/ssh_key'
+KNOWN_HOSTS_PATH = os.path.join(CREDENTIALS_DIR, 'known_hosts')
+
+
+class _TrustOnFirstUsePolicy(paramiko.MissingHostKeyPolicy):
+    """首次连接信任并持久化主机密钥；后续连接由 paramiko 严格校验。
+
+    替代 AutoAddPolicy（任意接受，存在中间人风险）。
+    直接操作 client._host_keys（paramiko 2.x/3.x 均存在），兼容两种版本。
+    """
+
+    def __init__(self, known_hosts_path):
+        self._known_hosts_path = known_hosts_path
+
+    def missing_host_key(self, client, hostname, key):
+        with threading.Lock():
+            try:
+                host_keys = getattr(client, '_host_keys', None)
+                if host_keys is None:
+                    return
+                host_keys.add(hostname, key.get_name(), key)
+                try:
+                    host_keys.save(self._known_hosts_path)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+
+def clear_host_keys():
+    """清除已保存的主机密钥信任（主机密钥变更后使用）"""
+    try:
+        if os.path.exists(KNOWN_HOSTS_PATH):
+            os.remove(KNOWN_HOSTS_PATH)
+        return True, '主机密钥信任已清除'
+    except Exception as e:
+        return False, f'清除失败: {e}'
 
 _fernet_instance = None
 _fernet_lock = threading.Lock()
@@ -66,9 +103,17 @@ _fernet_lock = threading.Lock()
 
 def _ensure_credentials_dir():
     os.makedirs(CREDENTIALS_DIR, exist_ok=True)
+    for attempt in range(2):
+        try:
+            os.chmod(CREDENTIALS_DIR, 0o700)
+            break
+        except PermissionError:
+            pass
     try:
-        os.chmod(CREDENTIALS_DIR, 0o700)
-    except PermissionError:
+        for _f in (CREDENTIALS_PATH, os.path.join(CREDENTIALS_DIR, 'ssh_credentials.json')):
+            if os.path.exists(_f):
+                os.chmod(_f, 0o600)
+    except OSError:
         pass
 
 
@@ -379,7 +424,25 @@ class SSHManager:
                 raise ConnectionError("SSH 主机地址未配置")
 
             self._client = paramiko.SSHClient()
-            self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # 主机密钥校验：优先使用已保存的 known_hosts（严格校验），
+            # 首次连接时信任并持久化（TOFU），替代 AutoAddPolicy 的任意接受策略。
+            # 兼容 paramiko 2.x（load_host_keys）与 3.x（set_host_keys）
+            if os.path.exists(KNOWN_HOSTS_PATH):
+                try:
+                    if hasattr(self._client, 'load_host_keys'):
+                        self._client.load_host_keys(KNOWN_HOSTS_PATH)
+                    elif hasattr(self._client, 'set_host_keys'):
+                        host_keys = paramiko.HostKeys()
+                        try:
+                            host_keys.load(KNOWN_HOSTS_PATH)
+                        except Exception:
+                            pass
+                        self._client.set_host_keys(host_keys)
+                except Exception:
+                    logger.warning("known_hosts 解析失败，将重新建立信任")
+            self._client.set_missing_host_key_policy(
+                _TrustOnFirstUsePolicy(KNOWN_HOSTS_PATH)
+            )
 
             password = load_credential('ssh_password')
 
@@ -507,39 +570,43 @@ class SSHManager:
         }
 
     def wrap_sudo(self, cmd):
-        """包装 sudo 命令"""
+        """包装 sudo 命令（密码经 stdin 传输，避免出现在命令行）"""
         cfg = _load_config_file()
         sudo_mode = cfg.get('sudo_mode', 'password')
         if sudo_mode == 'nopasswd':
             return f'sudo {cmd}'
         else:
-            sudo_pwd = load_credential('sudo_password') or load_credential('ssh_password') or ''
-            if sudo_pwd:
-                return f"echo {shlex.quote(sudo_pwd)} | sudo -S {cmd}"
-            else:
-                return f'sudo {cmd}'
+            return f"sudo -S -p '' {cmd}"
 
     def _inject_sudo_password(self, cmd):
-        """自动替换命令中的 sudo 为带密码版本（仅 password 模式）"""
+        """将命令中的 sudo 替换为 sudo -S -p ''，密码经 stdin 传输。
+
+        返回 (cmd, sudo_password)；无需注入时 sudo_password 为 None。
+        """
         cfg = _load_config_file()
         sudo_mode = cfg.get('sudo_mode', 'password')
         if sudo_mode == 'nopasswd':
-            return cmd
+            return cmd, None
         sudo_pwd = load_credential('sudo_password') or load_credential('ssh_password') or ''
         if not sudo_pwd:
-            return cmd
-        # 替换 'sudo ' 为 'echo PWD | sudo -S '
-        # 不替换已经有 sudo -S 的情况
-        if 'sudo -S' not in cmd and 'sudo ' in cmd:
-            cmd = cmd.replace('sudo ', f'echo {shlex.quote(sudo_pwd)} | sudo -S ')
-        return cmd
+            return cmd, None
+        if 'sudo -S' in cmd:
+            # 已显式使用 sudo -S，由调用方通过 sudo_password 参数提供密码
+            return cmd, None
+        if not re.search(r'(^|\s)sudo(\s|$)', cmd):
+            # 命令中不包含 sudo，无需注入密码
+            return cmd, None
+        if 'sudo ' in cmd:
+            cmd = cmd.replace('sudo ', "sudo -S -p '' ")
+        return cmd, sudo_pwd
 
-    def exec_command(self, cmd, timeout=None, sudo=False, inject_sudo=True):
+    def exec_command(self, cmd, timeout=None, sudo=False, inject_sudo=True, sudo_password=None):
         """执行远程命令，返回 CmdResult
 
         Args:
             inject_sudo: 是否自动注入 sudo 密码（默认True，
                          含管道的 sudo 命令应设为 False 避免破坏管道结构）
+            sudo_password: 显式提供 sudo 密码（用于已含 'sudo -S' 的命令）
         """
         # 断路器快速检查（不持锁，避免阻塞其他线程）
         if self._is_circuit_open():
@@ -548,9 +615,11 @@ class SSHManager:
                 f"将在 {int(self._circuit_open_until - time.time())} 秒后重试"
             )
 
-        # 处理 sudo: 自动替换命令中的 sudo 为密码版本
+        # 处理 sudo: 自动替换命令中的 sudo 为密码版本（密码经 stdin 传输）
         if inject_sudo:
-            cmd = self._inject_sudo_password(cmd)
+            cmd, injected_pwd = self._inject_sudo_password(cmd)
+            if sudo_password is None:
+                sudo_password = injected_pwd
 
         # 自动重连 — 使用类级别配置的重试次数
         last_error = None
@@ -560,6 +629,12 @@ class SSHManager:
                 # 命令执行阶段加锁，连接建立已在 get_connection 中用 conn_lock 保护
                 with self._cmd_lock:
                     stdin_fd, stdout_fd, stderr_fd = client.exec_command(cmd, timeout=timeout)
+                    if sudo_password:
+                        try:
+                            stdin_fd.write(sudo_password + '\n')
+                            stdin_fd.flush()
+                        except Exception:
+                            pass
                     stdin_fd.channel.shutdown_write()
 
                     exit_code = stdout_fd.channel.recv_exit_status()
@@ -567,19 +642,17 @@ class SSHManager:
                     stderr = stderr_fd.read().decode('utf-8', errors='replace')
 
                 # 过滤 sudo 密码提示和密码回显
-                if 'sudo -S' in cmd and stderr:
+                if sudo_password and stderr:
                     lines = []
                     for line in stderr.split('\n'):
                         if '[sudo]' not in line and 'password' not in line.lower():
                             lines.append(line)
                     stderr = '\n'.join(lines)
-                # 过滤 echo 密码回显
-                if 'echo ' in cmd and 'sudo -S' in cmd:
-                    _sudo_pwd = load_credential('sudo_password') or load_credential('ssh_password') or ''
+                # 过滤密码回显
+                if sudo_password and stdout:
                     stdout_lines = []
                     for line in stdout.split('\n'):
-                        # 过滤密码回显行（echo 的密码会出现在 stdout）
-                        if line.strip() and line.strip() != _sudo_pwd:
+                        if line.strip() and line.strip() != sudo_password:
                             stdout_lines.append(line)
                     if stdout_lines:
                         stdout = '\n'.join(stdout_lines)
@@ -621,7 +694,7 @@ class SSHManager:
         except Exception as e:
             return False, f"连接失败: {str(e)}"
 
-    def exec_command_stream(self, cmd, timeout=None, sudo=False, inject_sudo=True):
+    def exec_command_stream(self, cmd, timeout=None, sudo=False, inject_sudo=True, sudo_password=None):
         """执行远程命令，逐行 yield 输出（用于 SSE 流式响应）
 
         yield 格式：
@@ -633,9 +706,11 @@ class SSHManager:
             yield f'[ERROR] SSH 连接不可用（连续 {self._consecutive_failures} 次失败）'
             return
 
-        # 处理 sudo
+        # 处理 sudo（密码经 stdin 传输）
         if inject_sudo:
-            cmd = self._inject_sudo_password(cmd)
+            cmd, injected_pwd = self._inject_sudo_password(cmd)
+            if sudo_password is None:
+                sudo_password = injected_pwd
 
         try:
             client = self.get_connection()
@@ -650,6 +725,11 @@ class SSHManager:
             # 合并 stderr 到 stdout，简化读取
             channel.set_combine_stderr(True)
             channel.exec_command(cmd)
+            if sudo_password:
+                try:
+                    channel.send(sudo_password + '\n')
+                except Exception:
+                    pass
 
             stdout = channel.makefile('r', -1)
             buf = ''
@@ -699,20 +779,25 @@ class SSHManager:
 
 # ==================== 统一命令执行函数 ====================
 
-# FAST-SSH 模式凭据 — 环境变量优先，默认值用于兼容既有 FAST 设备。
+# FAST-SSH 模式凭据 — 环境变量优先，其次配置文件显式配置。
+# 注意：不再提供任何内置默认密码，未配置时返回空密码（连接将失败并提示）。
 FAST_SSH_USER = os.environ.get('FAST_SSH_USER', '')
 FAST_SSH_PASSWORD = os.environ.get('FAST_SSH_PASSWORD', '')
 
 
 def get_fast_ssh_credentials():
-    """获取 FAST-SSH 凭据，优先级：环境变量 > 用户名配置 > 兼容默认值。"""
+    """获取 FAST-SSH 凭据，优先级：环境变量 > 配置文件显式配置。
+
+    未配置密码时返回空字符串，调用方应提示用户配置。
+    """
     user = os.environ.get('FAST_SSH_USER', '')
     password = os.environ.get('FAST_SSH_PASSWORD', '')
     if user and password:
         return user, password
     cfg = _load_config_file()
     user = cfg.get('fast_ssh_user', '') or 'root'
-    return user, 'mellow'
+    password = cfg.get('fast_ssh_password', '') or ''
+    return user, password
 
 
 def is_ssh_mode():

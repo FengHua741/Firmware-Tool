@@ -26,6 +26,7 @@ from shared import (
     SSHManager, get_klipper_owner, get_klipper_python_bin, expand_klipper_path,
     get_moonraker_base_url,
     CSRF_COOKIE_NAME, new_csrf_token,
+    safe_error,
 )
 
 system_bp = Blueprint('system', __name__)
@@ -360,7 +361,14 @@ monitor_thread.start()
 def index():
     """主页面"""
     response = send_from_directory('../static', 'index.html')
-    response.set_cookie(CSRF_COOKIE_NAME, new_csrf_token(), samesite='Lax')
+    # 与 /static/ 一致：禁用缓存，确保页面更新后浏览器能立即拿到最新版本
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    response.set_cookie(
+        CSRF_COOKIE_NAME, new_csrf_token(),
+        samesite='Lax', secure=request.is_secure, httponly=False
+    )
     return response
 
 
@@ -457,7 +465,7 @@ def get_system_resources():
             }
         return jsonify(response_data)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 # ==================== lsusb API ====================
@@ -493,7 +501,7 @@ def get_lsusb():
     except Exception as e:
         if isinstance(e, ConnectionError) or 'SSH' in str(e):
             return jsonify({'devices': [], 'error': f'SSH连接不可用: {e}'})
-        return jsonify({'devices': [], 'error': str(e)})
+        return jsonify({'devices': [], 'error': safe_error(e)})
 
 
 # ==================== 串口设备详情 API ====================
@@ -504,7 +512,7 @@ def get_serial_devices():
         return _get_serial_devices()
     except Exception as e:
         logger.error(f'获取串口设备失败: {e}')
-        return jsonify({'devices': [], 'error': str(e)})
+        return jsonify({'devices': [], 'error': safe_error(e)})
 
 
 def _get_serial_devices():
@@ -652,7 +660,7 @@ def get_can_interfaces():
                     result.append({'ifname': ifname, 'operstate': state, 'flags': []})
             return jsonify({'ifaces': result})
         except Exception as e:
-            return jsonify({'ifaces': [], 'error': str(e)})
+            return jsonify({'ifaces': [], 'error': safe_error(e)})
 
 
 # ==================== CAN UUID 搜索辅助函数 ====================
@@ -761,7 +769,7 @@ def query_moonraker_printer_cfg():
     except requests.Timeout:
         return [], False, 'Moonraker 超时'
     except Exception as e:
-        return [], True, str(e)
+        return [], True, safe_error(e)
 
 
 def read_printer_cfg_direct():
@@ -839,7 +847,7 @@ def _scan_can_uuids(iface='can0'):
     except subprocess.TimeoutExpired:
         return [], 'CAN查询超时'
     except Exception as e:
-        return [], str(e)
+        return [], safe_error(e)
 
 
 def verify_mcu_connection_status(uuids):
@@ -991,7 +999,7 @@ def search_can_uuid():
     except subprocess.TimeoutExpired:
         return jsonify({'uuids': [], 'error': 'CAN查询超时'})
     except Exception as e:
-        return jsonify({'uuids': [], 'error': str(e)})
+        return jsonify({'uuids': [], 'error': safe_error(e)})
 
 
 # ==================== 摄像头详情 API ====================
@@ -1135,7 +1143,7 @@ def get_all_ids():
     except ConnectionError as e:
         return jsonify({'usb': [], 'can': [], 'camera': [], 'kat_usb': [], 'rp_boot': [], 'error': f'SSH连接不可用: {e}'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 # ==================== 版本与服务 API ====================
@@ -1347,7 +1355,7 @@ def control_service():
     except subprocess.TimeoutExpired:
         return jsonify({'success': False, 'error': '服务操作超时'}), 500
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @system_bp.route('/api/system/check-update', methods=['GET'])
@@ -1403,7 +1411,7 @@ def check_update():
         })
     except Exception as e:
         logger.error(f"检查更新失败: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @system_bp.route('/api/system/update', methods=['POST'])
@@ -1484,7 +1492,7 @@ def update_project():
         except subprocess.TimeoutExpired:
             yield "错误: 操作超时\n"
         except Exception as e:
-            yield f"错误: {str(e)}\n"
+            yield f"错误: {safe_error(e)}\n"
 
     return Response(generate(), mimetype='text/plain')
 

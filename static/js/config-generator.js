@@ -580,7 +580,8 @@ function cgBoardMapRoots() {
 
 function cgEnsureBoardMap(root) {
     if (!root) return null;
-    if (!root.querySelector('.cg-board-image-stage')) {
+    // 缺少 stage 或 overlay 时重建完整结构（兼容仅含 stage 的主图容器）
+    if (!root.querySelector('.cg-board-image-stage') || !root.querySelector('.cg-board-overlay')) {
         root.innerHTML = `<div class="cg-board-image-stage">
             <img class="cg-board-image" alt="板卡接口位置">
             <div class="cg-board-overlay" aria-label="板卡接口热区"></div>
@@ -2024,7 +2025,14 @@ function switchCgTab(n) {
 
 function validateCgStep(tab) {
     if (tab === 1) return !!document.getElementById('cgBoard')?.value;
-    if (tab === 2) return document.querySelectorAll('[id^="cgAxis_"]').length > 0 || true;
+    if (tab === 2) {
+        // 轴分配完整性：至少分配了一个轴，且无重复轴
+        const assigned = [];
+        document.querySelectorAll('[id^="cgAxis_"]').forEach(sel => {
+            if (sel.value && sel.value !== '') assigned.push(sel.value);
+        });
+        return assigned.length > 0 && new Set(assigned).size === assigned.length;
+    }
     return true;
 }
 
@@ -2033,25 +2041,19 @@ function updateCgProgress() {
     if (!bar) return;
     let done = 0;
     const total = 6;
-    if (document.getElementById('cgBoard')?.value) done++;
-    if (document.querySelectorAll('[id^="cgAxis_"]').length > 0) done++;
-    if (_currentProbeMode) done++;
-    done += 2;
-    if (_cgCurrentConfig) done++;
+    if (document.getElementById('cgBoard')?.value) done++;                                    // Tab1 机器设置
+    const assigned = new Set();
+    document.querySelectorAll('[id^="cgAxis_"]').forEach(sel => { if (sel.value) assigned.add(sel.value); });
+    if (assigned.size > 0 && assigned.size === document.querySelectorAll('[id^="cgAxis_"]').length) done++;  // Tab2 轴分配
+    if (_currentProbeMode) done++;                                                          // Tab3 限位与调平
+    if (Object.keys(_cgHomingDirs).length > 0) done++;                                      // Tab4 归位与调平
+    if (document.querySelectorAll('[id^="cgHeatPin_"]').length > 0) done++;                 // Tab5 温控与冷却
+    if (_cgCurrentConfig) done++;                                                           // Tab6 生成配置
     const pct = Math.round((done / total) * 100);
     bar.style.width = pct + '%';
 }
 
-async function quickStart() {
-    const board = document.getElementById('cgBoard')?.value;
-    if (!board) { if (typeof cgShowToast === 'function') cgShowToast('请先选择主板', 'error'); return; }
-    if (!_currentPreset) { if (typeof cgShowToast === 'function') cgShowToast('请先选择打印机型号', 'error'); return; }
-    if (typeof cgApplyPreset === 'function') cgApplyPreset(_currentPreset);
-    switchCgTab(6);
-    if (typeof cgShowToast === 'function') cgShowToast('快速配置完成，请检查后生成', 'success');
-}
-
-// ========== 连接方式切换修复 ==========
+// ========== 连接方式切换 ==========
 function onConnectionTypeChange() {
     const v = document.getElementById('cgConnection').value;
     const h = document.getElementById('cgSerialHint');
@@ -2100,12 +2102,10 @@ async function loadMachinePresets() {
 function populatePrinterModels() {
     const sel = document.getElementById('cgPrinterModel');
     if (!sel || !_machineList.length) return;
-    sel.innerHTML = '';
-    _machineList.forEach(m => {
-        sel.innerHTML += `<option value="${cgEscapeHtml(m.id)}">${cgEscapeHtml(m.name)} (${cgEscapeHtml(m.drive_count)}驱动, ${cgEscapeHtml(m.geometry?.type || '?')})</option>`;
-    });
-    sel.innerHTML += `<option value="custom">✏️ 自定义打印机</option>`;
-    if (_machineList.length > 0) { _loadFullPreset(_machineList[0].id); }
+    sel.innerHTML = _machineList.map(m =>
+        `<option value="${cgEscapeHtml(m.id)}">${cgEscapeHtml(m.name)} (${cgEscapeHtml(m.drive_count)}驱动, ${cgEscapeHtml(m.geometry?.type || '?')})</option>`
+    ).join('') + `<option value="custom">✏️ 自定义打印机</option>`;
+    // 不自动加载第一个预设：由用户选择时再加载（避免额外请求与覆盖用户选择）
 }
 async function _loadFullPreset(machineId) {
     try {
@@ -2116,8 +2116,11 @@ async function _loadFullPreset(machineId) {
     } catch (e) { console.error('加载预设详情失败', e); }
 }
 function populateBrands() {
-    const sel = document.getElementById('cgBrand'); sel.innerHTML = '';
-    for (const b of Object.keys(_boardsIndex)) sel.innerHTML += `<option value="${cgEscapeHtml(b)}"${b==='FLY'?' selected':''}>${cgEscapeHtml(b)}</option>`;
+    const sel = document.getElementById('cgBrand');
+    if (!sel) return;
+    sel.innerHTML = Object.keys(_boardsIndex).map(b =>
+        `<option value="${cgEscapeHtml(b)}"${b==='FLY'?' selected':''}>${cgEscapeHtml(b)}</option>`
+    ).join('');
     populateBoards();
 }
 function onBrandChange() {
@@ -2136,14 +2139,17 @@ function populateBoards() {
     const brand = document.getElementById('cgBrand').value || 'FLY';
     const bd = _boardsIndex[brand]; if (!bd) return;
     const bs = document.getElementById('cgBoard');
-    bs.innerHTML = '<option value="">-- 选择型号 --</option>';
-    for (const [bid,info] of Object.entries(bd.mainboards)) bs.innerHTML += `<option value="${cgEscapeHtml(bid)}">${cgEscapeHtml(info.name)} (${cgEscapeHtml(info.drive_count)}驱动, ${cgEscapeHtml(info.platform)})</option>`;
-    const tbs = Object.keys(bd.toolboards);
-    if (tbs.length > 0) {
-        bs.innerHTML += `<optgroup label="工具板">`;
-        for (const [bid,info] of Object.entries(bd.toolboards)) bs.innerHTML += `<option value="${cgEscapeHtml(bid)}">${cgEscapeHtml(info.name)} (${cgEscapeHtml(info.drive_count)}驱动, ${cgEscapeHtml(info.platform)})</option>`;
-        bs.innerHTML += `</optgroup>`;
-    }
+    if (!bs) return;
+    const mainOpts = Object.entries(bd.mainboards).map(([bid,info]) =>
+        `<option value="${cgEscapeHtml(bid)}">${cgEscapeHtml(info.name)} (${cgEscapeHtml(info.drive_count)}驱动, ${cgEscapeHtml(info.platform)})</option>`
+    ).join('');
+    const tbEntries = Object.entries(bd.toolboards);
+    const tbOpts = tbEntries.length > 0
+        ? `<optgroup label="工具板">` + tbEntries.map(([bid,info]) =>
+            `<option value="${cgEscapeHtml(bid)}">${cgEscapeHtml(info.name)} (${cgEscapeHtml(info.drive_count)}驱动, ${cgEscapeHtml(info.platform)})</option>`
+          ).join('') + `</optgroup>`
+        : '';
+    bs.innerHTML = '<option value="">-- 选择型号 --</option>' + mainOpts + tbOpts;
 }
 async function onBoardChange() {
     const boardId = document.getElementById('cgBoard').value;
@@ -2164,34 +2170,26 @@ async function onBoardChange() {
         _currentBoardLayout = d.layout || null;
         _cgSelectedBoardPin = '';
         const info = _currentBoardInfo;
-        document.getElementById('cgBoardInfo').innerHTML = `<span>MCU: ${cgEscapeHtml(info.mcu)}</span> | <span>${cgEscapeHtml(info.drive_count)}驱动</span> | <span>${cgEscapeHtml(info.heat_count)}加热</span> | <span>${cgEscapeHtml(info.fan_count)}风扇</span>`;
-        // 加载板卡图片（fetch + blob，避免 <img> 直接请求 API 无 CSRF 头导致 401）
+        const boardInfoEl = document.getElementById('cgBoardInfo');
+        if (boardInfoEl && info) boardInfoEl.innerHTML = `<span>MCU: ${cgEscapeHtml(info.mcu)}</span> | <span>${cgEscapeHtml(info.drive_count)}驱动</span> | <span>${cgEscapeHtml(info.heat_count)}加热</span> | <span>${cgEscapeHtml(info.fan_count)}风扇</span>`;
+        // 加载板卡图片：主图与迷你图统一由 .cg-board-map 体系渲染（含热点 overlay，
+        // fetch + blob 获取，避免 <img> 直接请求 API 无 CSRF 头导致 401）
         const imgContainer = document.getElementById('cgBoardImageContainer');
-        const imgEl = document.getElementById('cgBoardImage');
-        if (info.image && imgContainer && imgEl) {
+        if (info && info.image) {
             const imageUrl = await cgBoardImageUrl(boardId);
             if (loadSeq !== _cgBoardLoadSeq) return;
             _cgBoardImageUrl = imageUrl;
-            imgEl.onload = () => {
-                if (loadSeq !== _cgBoardLoadSeq) return;
-                imgContainer.style.display = 'block';
-                renderBoardLayoutOverlay();
-            };
-            imgEl.onerror = () => {
-                if (loadSeq !== _cgBoardLoadSeq) return;
-                imgContainer.style.display = 'none';
-                cgShowToast('板卡图片加载失败', 'warning');
-            };
-            imgEl.alt = `${info.name || boardId} 板卡图片`;
+            if (imgContainer) imgContainer.style.display = 'block';
             if (imageUrl) {
-                imgEl.src = imageUrl;
+                renderBoardLayoutOverlay();   // 统一渲染主图与迷你图热点
             } else {
-                imgContainer.style.display = 'none';
+                _cgBoardImageUrl = '';
+                if (imgContainer) imgContainer.style.display = 'none';
                 cgShowToast('板卡图片加载失败', 'warning');
             }
-        } else if (imgContainer) {
+        } else {
             _cgBoardImageUrl = '';
-            imgContainer.style.display = 'none';
+            if (imgContainer) imgContainer.style.display = 'none';
         }
         populateConnections(info.connections);
         renderDriverAssignment(); renderMotionParams();
@@ -2203,8 +2201,12 @@ async function onBoardChange() {
     } catch (e) { cgShowToast('加载板卡数据失败: '+e.message,'error'); }
 }
 function populateConnections(connections) {
-    const sel = document.getElementById('cgConnection'); sel.innerHTML = '';
-    for (const c of connections) { const v=c.includes('CAN')?'can':c.includes('USB')?'usb':'serial'; sel.innerHTML += `<option value="${cgEscapeHtml(v)}">${cgEscapeHtml(c)}</option>`; }
+    const sel = document.getElementById('cgConnection');
+    if (!sel) return;
+    sel.innerHTML = (connections || []).map(c => {
+        const v=c.includes('CAN')?'can':c.includes('USB')?'usb':'serial';
+        return `<option value="${cgEscapeHtml(v)}">${cgEscapeHtml(c)}</option>`;
+    }).join('');
     onConnectionTypeChange();
 }
 
@@ -2244,11 +2246,10 @@ async function detectMcuDevices() {
         const sel = document.createElement('select');
         sel.id = 'cgSerialSelect';
         sel.style.cssText = 'flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;font-size:14px;';
-        sel.innerHTML = '<option value="">-- 选择检测到的设备 --</option>';
-        devices.forEach(dev => {
+        sel.innerHTML = '<option value="">-- 选择检测到的设备 --</option>' + devices.map(dev => {
             const icons = {can:'🔗 CAN', usb:'🔌 USB', serial:'📡 串口'};
-            sel.innerHTML += `<option value="${cgEscapeHtml(dev.path)}" data-type="${cgEscapeHtml(dev.type || 'serial')}">${cgEscapeHtml(icons[dev.type] || '🔌')}: ${cgEscapeHtml(dev.description || dev.path)}</option>`;
-        });
+            return `<option value="${cgEscapeHtml(dev.path)}" data-type="${cgEscapeHtml(dev.type || 'serial')}">${cgEscapeHtml(icons[dev.type] || '🔌')}: ${cgEscapeHtml(dev.description || dev.path)}</option>`;
+        }).join('');
         serialInput.style.display = 'none';
         container.insertBefore(sel, serialInput.nextSibling);
         sel.onchange = function() {
@@ -2311,44 +2312,6 @@ function toggleParamSection(header) {
         body.classList.toggle('collapsed');
         header.classList.toggle('collapsed');
     }
-}
-// 将参数容器的各 h4+内容自动包装为可折叠面板
-function _wrapCollapsibleSections(container) {
-    if (!container) return;
-    const titles = container.querySelectorAll('h4.cg-section-title');
-    titles.forEach(title => {
-        // 收集该标题后的所有兄弟元素直到下一个 h4
-        const section = document.createElement('div');
-        section.className = 'cg-param-section';
-        const header = document.createElement('div');
-        header.className = 'cg-param-section-header';
-        header.innerHTML = '<span>' + title.innerHTML + '</span><i class="fas fa-chevron-down"></i>';
-        header.onclick = function() { toggleParamSection(this); };
-        const body = document.createElement('div');
-        body.className = 'cg-param-section-body';
-        title.parentNode.insertBefore(section, title);
-        section.appendChild(header);
-        section.appendChild(body);
-        let next = title.nextSibling;
-        title.remove();
-        // 收集直到下一个 h4 的所有节点
-        while (next) {
-            const nxt = next.nextSibling;
-            if (next.nodeType === 1 && next.tagName === 'H4' && next.classList.contains('cg-section-title')) break;
-            // 跳过已经是 cg-param-section 的包装元素
-            if (next.nodeType === 1 && next.classList.contains('cg-param-section')) { nxt = next.nextSibling; continue; }
-            body.appendChild(next);
-            next = nxt;
-        }
-        // 高级部分默认折叠
-        const advancedTitles = ['可选配置段', '加速度计', '热床网格校准', '温度监控', '打印宏'];
-        const titleText = title.textContent;
-        const isAdvanced = advancedTitles.some(at => titleText.includes(at));
-        if (isAdvanced) {
-            header.classList.add('collapsed');
-            body.classList.add('collapsed');
-        }
-    });
 }
 function renderI18nField(id, termKey, value, extra) {
     const term = TERM_I18N[termKey];
@@ -2741,8 +2704,17 @@ function onToolCountChange() {
         inner.appendChild(div);
         const cs=document.getElementById(`cgTBConn${i}`); if(cs) cs.value=tb.connType;
     }
-    // 填充工具板型号
-    const bd = _boardsIndex[brand]; if(bd) { for(const[bid,info]of Object.entries(bd.toolboards)) { for(let i=0;i<count;i++){const o=document.getElementById(`cgTBBoard${i}`);if(o)o.innerHTML+=`<option value="${cgEscapeHtml(bid)}">${cgEscapeHtml(info.name)} (${cgEscapeHtml(info.mcu)})</option>`;} } }
+    // 填充工具板型号（先收集再一次性赋值，避免循环 DOM 重解析）
+    const bd = _boardsIndex[brand];
+    if (bd) {
+        const tbOptions = Object.entries(bd.toolboards).map(([bid,info]) =>
+            `<option value="${cgEscapeHtml(bid)}">${cgEscapeHtml(info.name)} (${cgEscapeHtml(info.mcu)})</option>`
+        ).join('');
+        for (let i = 0; i < count; i++) {
+            const o = document.getElementById(`cgTBBoard${i}`);
+            if (o) o.innerHTML += tbOptions;
+        }
+    }
     _toolboardData.forEach((tb,i)=>{if(tb.boardId){const s=document.getElementById(`cgTBBoard${i}`);if(s)s.value=tb.boardId;}});
     renderToolboardConflictPanel();
     if (_currentMapping) { renderDriverAssignment(); renderEndstopConfig(); renderProbeConfig(); renderHeaterConfig(); renderFanConfig(); }
@@ -2759,7 +2731,7 @@ async function onToolBoardSelect(i) {
         _toolboardData[i].mapping=d.mapping; _toolboardData[i].boardInfo=d.board_info;
         const bi=d.board_info; info.textContent=`${bi.drive_count}驱动, ${bi.heat_count}加热, ${bi.fan_count}风扇`;
         const cs=document.getElementById(`cgTBConn${i}`);
-        if(cs&&bi.connections){cs.innerHTML='';bi.connections.forEach(c=>{const v=c.includes('CAN')?'can':c.includes('USB')?'usb':'serial';cs.innerHTML+=`<option value="${cgEscapeHtml(v)}">${cgEscapeHtml(c)}</option>`;});cs.value=_toolboardData[i].connType;}
+        if(cs&&bi.connections){cs.innerHTML=bi.connections.map(c=>{const v=c.includes('CAN')?'can':c.includes('USB')?'usb':'serial';return `<option value="${cgEscapeHtml(v)}">${cgEscapeHtml(c)}</option>`;}).join('');cs.value=_toolboardData[i].connType;}
         const defaultedExtruder = cgApplyToolboardExtruderDefaults(i);
         renderToolboardConflictPanel();
         if (_currentMapping) {
@@ -3695,7 +3667,8 @@ function generateConfig() {
     const outputMode = cgGetOutputMode();
     const includeToolboards = outputMode !== 'mainboard';
     const ownsToolboard = func => cgToolboardOwns(tbClaims, func);
-    const errEl = document.getElementById('errorMessage'); errEl.style.display = 'none';
+    const errEl = document.getElementById('errorMessage');
+    if (errEl) errEl.style.display = 'none';
     const m = _currentMapping;
     const _DM={rotation_distance:40,microsteps:16,homing_speed:50,position_min:0,position_max:200,position_endstop:0};
     const _DE={rotation_distance:22.67,microsteps:16,filament_diameter:1.75,nozzle_diameter:0.4,max_temp:285,sensor_type:'NTC 100K beta 3950'};
@@ -4473,7 +4446,8 @@ function resetForm() {
     document.getElementById('cgPrinterModel').value='';
     const customSec=document.getElementById('cgCustomPrinterSection'); if(customSec) customSec.style.display='none';
     _currentMapping=null;_currentBoardInfo=null;_currentBoardLayout=null;_cgSelectedBoardPin='';_toolboardData=[];_cgCurrentConfig='';_cgImportedConfig='';_cgImportedToolboards=[];_currentPreset=null;_extraHeaterCount=0;
-    resetConfigPanels(); populateBrands(); loadMachinePresets();
+    resetConfigPanels(); populateBrands();
+    // 不重复拉取机型预设（避免与初始化重复请求）；预设数据仍在 _machineList 中
     document.getElementById('output').textContent='请完成配置后点击“生成配置”...';
     document.getElementById('downloadBtn').disabled=true;
     document.getElementById('copyBtn').disabled=true;

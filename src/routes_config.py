@@ -10,6 +10,7 @@ import json
 from shared import (
     config, logger, BASE_DIR, BOARD_CONFIGS_DIR, CONFIGS_DIR,
     sanitize_manufacturer, sanitize_config_id,
+    safe_error,
 )
 
 board_config_bp = Blueprint('board_config', __name__, url_prefix='/api/config')
@@ -162,7 +163,7 @@ def list_configs(manufacturer):
 
         return jsonify({'configs': configs, 'board_types': sorted(board_types)})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @board_config_bp.route('/get/<manufacturer>/<config_id>', methods=['GET'])
@@ -189,7 +190,7 @@ def get_config(manufacturer, config_id):
 
         return jsonify({'error': '配置不存在'}), 404
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @board_config_bp.route('/create/<manufacturer>', methods=['POST'])
@@ -233,7 +234,7 @@ def create_config(manufacturer):
             'path': filepath
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @board_config_bp.route('/delete/<manufacturer>/<config_id>', methods=['DELETE'])
@@ -261,7 +262,7 @@ def delete_config(manufacturer, config_id):
 
         return jsonify({'error': '配置不存在'}), 404
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @board_config_bp.route('/upload', methods=['POST'])
@@ -351,7 +352,7 @@ def upload_config():
             'errors': errors
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @board_config_bp.route('/mcu-list', methods=['GET'])
@@ -420,7 +421,7 @@ def create_manufacturer():
         })
     except Exception as e:
         logger.error(f"创建厂家失败: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @board_config_bp.route('/all', methods=['GET'])
@@ -461,7 +462,7 @@ def get_all_configs():
         logger.error(f"获取所有配置失败: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': safe_error(e)
         }), 500
 
 
@@ -512,7 +513,7 @@ def save_board_config():
         logger.error(f"保存配置失败: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': safe_error(e)
         }), 500
 
 
@@ -556,7 +557,7 @@ def export_all_configs():
                          as_attachment=True, download_name='firmware-tool-export.zip')
     except Exception as e:
         logger.error(f"导出配置失败: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @board_config_bp.route('/import-bundle', methods=['POST'])
@@ -580,6 +581,17 @@ def import_config_bundle():
         names = zf.namelist()
         if 'manifest.json' not in names:
             return jsonify({'success': False, 'error': '无效的配置包 (缺少 manifest.json)'}), 400
+
+        # 解压炸弹防护：限制条目数量与解压后总大小（S6）
+        MAX_ZIP_ENTRIES = 2000
+        MAX_ZIP_TOTAL_SIZE = 200 * 1024 * 1024
+        if len(names) > MAX_ZIP_ENTRIES:
+            return jsonify({'success': False, 'error': '配置包文件条目过多'}), 413
+        total_unpacked = 0
+        for info in zf.infolist():
+            total_unpacked += info.file_size
+            if total_unpacked > MAX_ZIP_TOTAL_SIZE:
+                return jsonify({'success': False, 'error': '配置包解压后过大'}), 413
 
         restored = {'board_configs': 0, 'machines': 0}
         for name in names:
@@ -621,4 +633,4 @@ def import_config_bundle():
         return jsonify({'success': False, 'error': '无效的 ZIP 文件'}), 400
     except Exception as e:
         logger.error(f"导入配置失败: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500

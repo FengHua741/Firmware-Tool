@@ -41,6 +41,12 @@ Thumbs.db
 data/config.json
 .env
 
+# Runtime data (auto-generated)
+data/backups/
+data/firmware_history/
+data/notifications.json
+src/can_options_cache.json
+
 # Backup files
 *.bak
 *.bak.*

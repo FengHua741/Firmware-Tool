@@ -24,6 +24,7 @@ from shared import (
     sudo_write_file,
     load_all_boards, load_board_config, get_manufacturers, get_bl_firmwares,
     SSHManager,
+    safe_error,
 )
 from routes_system import _scan_can_uuids, _is_valid_can_iface
 from klipper_kconfig_parser import KlipperKconfigParser
@@ -156,7 +157,19 @@ def _read_text_file(path):
 def _normalize_fs_path(path):
     path = str(path or '').strip()
     if is_ssh_mode():
-        return posixpath.normpath(path)
+        norm = posixpath.normpath(path)
+        # SSH 模式：解析符号链接，防止链接逃逸出允许根目录（S9）
+        try:
+            result = run_cmd(
+                f'readlink -f {shlex.quote(norm)} 2>/dev/null || echo {shlex.quote(norm)}',
+                shell=True, capture_output=True, text=True, timeout=5
+            )
+            resolved = (result.stdout or '').strip()
+            if resolved:
+                return posixpath.normpath(resolved)
+        except Exception:
+            pass
+        return norm
     return os.path.realpath(os.path.expanduser(path))
 
 
@@ -952,7 +965,7 @@ def get_boards():
         manufacturers = get_manufacturers()
         return jsonify({'boards': boards, 'manufacturers': manufacturers})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @firmware_bp.route('/api/firmware/manufacturers')
@@ -962,7 +975,7 @@ def get_manufacturers_list():
         manufacturers = get_manufacturers()
         return jsonify({'manufacturers': manufacturers})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @firmware_bp.route('/api/firmware/bl-firmwares')
@@ -1006,7 +1019,7 @@ def get_all_bl_firmwares():
             }
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 @firmware_bp.route('/api/firmware/bl-firmwares/<manufacturer>')
 @firmware_bp.route('/api/firmware/bl-firmwares/<manufacturer>/<board_type>')
@@ -1016,7 +1029,7 @@ def get_bl_firmwares_list(manufacturer, board_type=None):
         firmwares = get_bl_firmwares(manufacturer, board_type)
         return jsonify({'firmwares': firmwares})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 # ==================== 固件编译规则 API ====================
 @firmware_bp.route('/api/firmware/rules/<processor>')
@@ -1029,7 +1042,7 @@ def get_processor_rules(processor):
         else:
             return jsonify({'error': f'未找到处理器 {processor} 的规则'}), 404
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 @firmware_bp.route('/api/firmware/rules')
 def get_all_rules():
@@ -1038,7 +1051,7 @@ def get_all_rules():
         rules = load_klipper_rules()
         return jsonify(rules)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @firmware_bp.route('/api/firmware/current-config')
@@ -1068,7 +1081,7 @@ def get_current_firmware_config():
         })
     except Exception as e:
         logger.exception('读取当前 Klipper 编译参数失败')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 # ==================== 编译依赖检测 API ====================
 @firmware_bp.route('/api/firmware/dependencies')
@@ -1105,7 +1118,7 @@ def check_compile_dependencies():
             })
         return jsonify({'dependencies': results, 'all_ok': all_ok})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 @firmware_bp.route('/api/firmware/dependencies/install', methods=['POST'])
@@ -1189,7 +1202,7 @@ def compile_firmware():
                 rp2040_can_rx_gpio, rp2040_can_tx_gpio, canbus_frequency
             )
         except ValueError as e:
-            yield f'data: {json.dumps({"error": str(e)})}\n\n'
+            yield f'data: {json.dumps({"error": safe_error(e)})}\n\n'
             return
         if verbose_config_logs:
             for log_line in config_logs:
@@ -1353,7 +1366,7 @@ def compile_firmware():
      except subprocess.TimeoutExpired:
             yield f'data: {json.dumps({"error": "编译超时"})}\n\n'
      except Exception as e:
-            yield f'data: {json.dumps({"error": str(e)})}\n\n'
+            yield f'data: {json.dumps({"error": safe_error(e)})}\n\n'
      finally:
             _compile_lock.release()
     return Response(_compile_stream(), mimetype='text/event-stream',
@@ -1370,7 +1383,7 @@ def get_firmware_manifest():
             return jsonify({'success': False, 'error': '未找到固件 manifest'}), 404
         return jsonify({'success': True, 'manifest': manifest})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @firmware_bp.route('/api/firmware/flash/plan', methods=['POST'])
@@ -1387,7 +1400,7 @@ def get_firmware_flash_plan():
         plan = _flash_plan(manifest, firmware_path, flash_mode, device_id, can_iface)
         return jsonify({'success': True, 'plan': plan, 'manifest': manifest})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @firmware_bp.route('/api/firmware/download')
@@ -1411,7 +1424,7 @@ def download_firmware():
         local_firmware_path = download_firmware_from_remote(firmware_path)
         return send_file(local_firmware_path, as_attachment=True, download_name=_firmware_download_name(firmware_path))
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 # ==================== 设备检测 API ====================
 @firmware_bp.route('/api/firmware/detect')
@@ -1591,7 +1604,7 @@ def detect_devices():
 
         return jsonify({'devices': _annotate_devices(devices)})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 # ==================== CAN设备搜索 API ====================
 @firmware_bp.route('/api/firmware/can/scan')
@@ -1848,7 +1861,7 @@ def flash_firmware():
      except subprocess.TimeoutExpired:
             yield f'data: {json.dumps({"error": "烧录超时"})}\n\n'
      except Exception as e:
-            yield f'data: {json.dumps({"error": str(e)})}\n\n'
+            yield f'data: {json.dumps({"error": safe_error(e)})}\n\n'
      finally:
             _flash_lock.release()
     return Response(_flash_stream(), mimetype='text/event-stream',
@@ -1908,7 +1921,7 @@ def install_host_firmware():
         return
 
      except Exception as e:
-            yield f'data: {json.dumps({"error": str(e)})}\n\n'
+            yield f'data: {json.dumps({"error": safe_error(e)})}\n\n'
      finally:
             _flash_lock.release()
     return Response(_install_stream(), mimetype='text/event-stream',
@@ -2026,7 +2039,7 @@ def get_host_firmware_info():
             'query': {'mcu': mcu_id, 'comm_type': comm_type, 'bl_offset': bl_offset}
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 # ==================== 远程目录浏览 API ====================
 @firmware_bp.route('/api/remote/browse')
@@ -2093,7 +2106,7 @@ def remote_browse():
 
         return jsonify({'path': path, 'parent': parent, 'entries': entries})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 # ==================== BL固件烧录 API ====================
 @firmware_bp.route('/api/firmware/bl/address-options')
@@ -2142,7 +2155,7 @@ def get_bl_address_options():
             'board_default_address': board_default_address,
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @firmware_bp.route('/api/firmware/bl/flash', methods=['POST'])
@@ -2280,7 +2293,7 @@ def flash_bl_firmware():
             return jsonify({'success': False, 'error': 'BL固件烧录失败', 'output': result.stdout + result.stderr}), 500
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': safe_error(e)}), 500
 
 
 # ==================== 编译配置导入/导出 API ====================
@@ -2347,7 +2360,7 @@ def export_compile_config():
         return jsonify({'success': True, 'config': export_data, 'warnings': warnings})
     except Exception as e:
         logger.exception('导出编译配置失败')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
 
 
 @firmware_bp.route('/api/firmware/import-config', methods=['POST'])
@@ -2403,4 +2416,4 @@ def import_compile_config():
         })
     except Exception as e:
         logger.exception('导入编译配置失败')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': safe_error(e)}), 500

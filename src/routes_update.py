@@ -9,6 +9,7 @@ import json
 from shared import (
     config, logger, BASE_DIR, BOARD_CONFIGS_DIR,
     sanitize_manufacturer, sanitize_config_id,
+    safe_error,
 )
 
 firmware_update_bp = Blueprint('firmware_update', __name__, url_prefix='/api/firmware-update')
@@ -67,7 +68,7 @@ def list_firmware_update_configs():
         logger.error(f"列出固件更新配置失败: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': safe_error(e)
         }), 500
 
 
@@ -103,7 +104,7 @@ def get_firmware_update_config(manufacturer, config_id):
         logger.error(f"获取固件更新配置失败: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': safe_error(e)
         }), 500
 
 
@@ -145,7 +146,7 @@ def save_firmware_update_config(manufacturer, config_id):
         logger.error(f"保存固件更新配置失败: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': safe_error(e)
         }), 500
 
 
@@ -180,5 +181,5 @@ def delete_firmware_update_config(manufacturer, config_id):
         logger.error(f"删除固件更新配置失败: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': safe_error(e)
         }), 500

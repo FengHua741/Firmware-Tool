@@ -14,7 +14,7 @@ import urllib.parse
 import requests
 from flask import Blueprint, jsonify, request, send_from_directory
 
-from shared import config, logger, expand_klipper_path, get_moonraker_base_url
+from shared import config, logger, expand_klipper_path, get_moonraker_base_url, safe_error
 from ssh_manager import run_cmd, is_ssh_mode
 
 tools_bp = Blueprint('tools_api', __name__)
@@ -76,7 +76,19 @@ def _normalize_path_for_mode(path):
             ssh_user = config.get('ssh_user', '')
             home = f'/home/{ssh_user}' if ssh_user and ssh_user != 'root' else '/root'
             path = home + path[1:]
-        return posixpath.normpath(path)
+        norm = posixpath.normpath(path)
+        # SSH 模式：解析符号链接，防止链接逃逸出允许根目录（S9）
+        try:
+            result = run_cmd(
+                f'readlink -f {shlex.quote(norm)} 2>/dev/null || echo {shlex.quote(norm)}',
+                shell=True, capture_output=True, text=True, timeout=5
+            )
+            resolved = (result.stdout or '').strip()
+            if resolved:
+                return posixpath.normpath(resolved)
+        except Exception:
+            pass
+        return norm
     return os.path.realpath(os.path.expanduser(path))
 
 
@@ -456,7 +468,7 @@ def read_config_content():
         except requests.Timeout:
             return jsonify({'success': False, 'error': 'Moonraker 超时'})
         except Exception as e:
-            return jsonify({'success': False, 'error': str(e)})
+            return jsonify({'success': False, 'error': safe_error(e)})
 
     # 方案2: SSH/本地读取
     if not _validate_config_file_path(file_path):
@@ -497,7 +509,7 @@ def read_config_content():
                 'source': 'local',
             })
         except Exception as e:
-            return jsonify({'success': False, 'error': str(e)})
+            return jsonify({'success': False, 'error': safe_error(e)})
 
 
 @tools_bp.route('/api/tools/mainsail-config', methods=['GET'])
@@ -632,7 +644,7 @@ def get_board_image(board_id):
         filename = os.path.basename(full_path)
         return send_from_directory(directory, filename)
     except Exception as e:
-        return str(e), 500
+        return str(safe_error(e)), 500
 
 
 def _load_boards_index():
@@ -694,7 +706,7 @@ def list_boards():
                 }
         return jsonify({'success': True, 'brands': result})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': safe_error(e)})
 
 
 @tools_bp.route('/api/tools/boards/<board_id>/mapping', methods=['GET'])
@@ -755,7 +767,7 @@ def get_board_mapping(board_id):
             'board_info': board_info,
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': safe_error(e)})
 
 
 # ========== 机型预设 API ==========
@@ -786,7 +798,7 @@ def list_machines():
                     })
         return jsonify({'success': True, 'machines': machines})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': safe_error(e)})
 
 
 @tools_bp.route('/api/tools/machines/<machine_id>', methods=['GET'])
@@ -807,7 +819,7 @@ def get_machine_preset(machine_id):
             preset = json.load(f)
         return jsonify({'success': True, 'preset': preset})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': safe_error(e)})
 
 
 # ========== MCU 自动检测 API ==========

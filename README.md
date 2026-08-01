@@ -236,10 +236,12 @@ python3 src/app.py
 ### 可选安全配置
 
 `data/config.json` 支持以下可选安全项：
-- `bind_host`：服务监听地址，默认 `0.0.0.0`
-- `allowed_origins`：CORS 允许来源列表，空列表表示兼容旧行为
-- `api_token`：设置后 API 请求需要携带 `X-API-Token` 请求头；网页可通过 `http://设备IP:端口/?token=你的Token` 写入浏览器本地存储
-- `require_csrf`：默认开启同源页面令牌校验；关闭前建议先配置 `api_token`
+- `bind_host`：服务监听地址，默认 `127.0.0.1`；局域网访问需改为 `0.0.0.0`
+- `allowed_origins`：CORS 允许来源列表，空列表表示禁止跨域
+- `api_token`：可选 API 访问令牌。默认留空（无需任何配置，页面通过同源 CSRF 自动校验即可正常使用）；仅当需要额外认证时填写，填写后远程（非本机）访问需在请求头携带 `X-API-Token`
+- `require_csrf`：默认开启同源页面令牌校验；关闭前请确认网络环境可信
+
+安全说明：服务默认启用同源 CSRF 校验（防跨站请求）与 Origin 校验（跨源请求一律 403）；`api_token` 为可选增强，不配置不影响使用。
 
 手动安装并监听局域网地址时，建议先生成并填写 `api_token`。未配置 `api_token` 时，请不要把服务直接暴露到不可信网络。
 
@@ -248,7 +250,7 @@ python3 src/app.py
 | 配置项 | 说明 |
 |--------|------|
 | `port` | Web 服务端口，默认 `9999` |
-| `bind_host` | Web 服务监听地址，安装脚本生成的配置默认监听 `0.0.0.0`，样例配置默认 `127.0.0.1` |
+| `bind_host` | Web 服务监听地址，默认 `127.0.0.1`（安装脚本与样例配置一致） |
 | `klipper_path` | Klipper 源码目录，用于编译、读取 `.config`、调用 Klipper 脚本 |
 | `katapult_path` | Katapult 源码目录，用于 Katapult 相关烧录流程 |
 | `moonraker_host` / `moonraker_port` | Moonraker 地址，用于读取配置文件和版本信息 |
@@ -256,7 +258,7 @@ python3 src/app.py
 | `ssh_host` / `ssh_port` / `ssh_user` | SSH 远程模式的目标设备信息 |
 | `sudo_mode` | 远程或本地提权方式，可用值为 `password`、`nopasswd` |
 | `allowed_origins` | CORS 允许来源列表 |
-| `api_token` | API 访问令牌，安装脚本首次创建配置时会自动生成 |
+| `api_token` | 可选 API 访问令牌；默认留空即可正常使用，填写后远程访问需携带 `X-API-Token` 请求头 |
 | `require_csrf` | 是否启用同源页面令牌校验 |
 
 ### 环境变量
@@ -290,7 +292,7 @@ systemd 服务文件由安装脚本写入 `/etc/systemd/system/firmware-tool.ser
 
 `http://<设备 IP>:9999`
 
-如果配置了 `api_token`，可使用 `http://<设备 IP>:9999/?token=<你的 Token>` 让前端写入浏览器本地存储，之后接口请求会携带 `X-API-Token`。
+页面访问无需任何配置（同源 CSRF 自动校验）；如额外配置了 `api_token`，远程访问需在请求头携带 `X-API-Token`（可在浏览器本地存储 `firmwareToolApiToken` 中预设）。
 
 ## 运行时文件
 
@@ -508,7 +510,7 @@ MCU 型号和固件版本来自 Klipper 节点的 identify 字典。CanBoot/Kata
 ## 常见问题
 
 - 服务无法访问：检查 `data/config.json` 中的 `bind_host` 与 `port`，并确认 systemd 服务已启动。
-- API 返回未授权：确认前端地址带有 `?token=<你的 Token>`，或请求头包含 `X-API-Token`。
+- API 返回未授权：若已配置 `api_token`，确认请求头包含 `X-API-Token`；未配置时刷新页面重新获取页面令牌即可。
 - 手动运行正常但服务运行异常：检查 `sudo journalctl -u firmware-tool -f` 输出，以及 systemd 服务中的 `WorkingDirectory` 和 `PYTHONPATH`。
 - CAN 扫描无结果：先确认 CAN 接口存在并处于 UP 状态，再使用 CAN 诊断/修复接口检查 bitrate 与 txqueuelen。
 - DFU 烧录失败：重新让主板进入 DFU 模式，并确认 DFU 地址与编译时 Bootloader 偏移匹配。
