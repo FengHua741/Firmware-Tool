@@ -94,6 +94,24 @@ def format_mcu_name(mcu):
         mcu = mcu[:-2]
     return mcu
 
+def pick_firmware_constants(config):
+    keys = [
+        "MCU", "CLOCK_FREQ", "CLOCK_REF_FREQ", "CRYSTAL_FREQ", "XOSC_FREQ",
+        "HSE_FREQ", "OSC_FREQ", "EXTERNAL_CLOCK_FREQ",
+        "CANBUS_FREQUENCY", "CANBUS_BRIDGE", "INITIAL_PINS",
+        "RESERVE_PINS_CAN", "RESERVE_PINS_USB", "RESERVE_PINS_USB1",
+        "RESERVE_PINS_serial", "SERIAL_BAUD",
+    ]
+    key_fragments = ("CLOCK_REF", "CRYSTAL", "XOSC", "HSE")
+    picked = {}
+    for key, value in (config or {}).items():
+        if key in keys or key.startswith("RESERVE_PINS_") or any(part in key for part in key_fragments):
+            picked[key] = value
+    return picked
+
+def firmware_info_json(info):
+    return json.dumps(info, sort_keys=True, separators=(",", ":"))
+
 class SocketCan:
     def __init__(self, canbus_iface, can_filter=None):
         self.sock = socket.socket(socket.PF_CAN, socket.SOCK_RAW,
@@ -295,10 +313,14 @@ def get_firmware_info(canbus_iface, uuid, canbus_nodeid, connect_timeout):
                                  connect_timeout)
     try:
         conn.identify()
-        processor = format_mcu_name(conn.msgparser.config.get("MCU",
-                                                              "Unknown"))
+        constants = pick_firmware_constants(conn.msgparser.config)
+        processor = format_mcu_name(constants.get("MCU", "Unknown"))
         firmware = conn.msgparser.version or "Unknown"
-        return {"processor": processor, "firmware": firmware}
+        return {
+            "processor": processor,
+            "firmware": firmware,
+            "constants": constants,
+        }
     finally:
         try:
             conn.reset()
@@ -392,9 +414,10 @@ def query_unassigned(canbus_iface, canbus_nodeid, connect_timeout,
                                                 iface_timeout)
             output_line("Found canbus_uuid=%012x, Application: %s,"
                         " Processor: %s,"
-                        " Firmware: %s"
+                        " Firmware: %s,"
+                        " InfoJSON: %s"
                         % (uuid, app_name, info["processor"],
-                           info["firmware"]))
+                           info["firmware"], firmware_info_json(info)))
         except (error, OSError) as e:
             output_line("Found canbus_uuid=%012x, Application: %s"
                         % (uuid, app_name))

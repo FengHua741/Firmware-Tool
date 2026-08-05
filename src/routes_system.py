@@ -27,6 +27,7 @@ from shared import (
     get_moonraker_base_url,
     CSRF_COOKIE_NAME, new_csrf_token,
     safe_error,
+    load_all_boards,
 )
 
 system_bp = Blueprint('system', __name__)
@@ -703,6 +704,391 @@ def _normalize_can_app(line):
     return 'Unknown'
 
 
+def _set_device_field(device, key, value, source):
+    if value is None or value == '':
+        return
+    device[key] = value
+    sources = device.setdefault('field_sources', {})
+    sources[key] = source
+
+
+def _truthy_constant(value):
+    if isinstance(value, bool):
+        return value
+    raw = str(value or '').strip().lower()
+    return raw not in ('', '0', 'false', 'none', 'no')
+
+
+def _normalize_mcu_name(value):
+    value = str(value or '').strip().lower()
+    value = re.sub(r'[^a-z0-9]', '', value)
+    if value.endswith('xx'):
+        value = value[:-2]
+    return value
+
+
+def _offset_int(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    try:
+        return int(raw, 0)
+    except ValueError:
+        return None
+
+
+def _format_offset_label(offset):
+    offset_int = _offset_int(offset)
+    if offset_int is None:
+        return ''
+    if offset_int == 0:
+        return 'No bootloader'
+    if offset_int % 1024 == 0:
+        return f'{offset_int // 1024}KiB'
+    return f'{offset_int} bytes'
+
+
+def _flash_base_for_mcu(mcu_model):
+    mcu = _normalize_mcu_name(mcu_model)
+    if mcu.startswith('rp2040') or mcu.startswith('rp2350') or mcu.startswith('rpxxxx'):
+        return 0x10000000
+    if mcu.startswith('stm32'):
+        return 0x08000000
+    return None
+
+
+def _parse_frequency_hz(value):
+    if value is None or value == '':
+        return ''
+    raw = str(value).strip().lower()
+    if raw in ('internal', 'int'):
+        return 'internal'
+    try:
+        num = float(raw)
+        if num <= 0:
+            return ''
+        if num == 1:
+            return 'internal'
+        return str(int(num))
+    except (TypeError, ValueError):
+        pass
+
+    match = re.search(r'(\d+(?:\.\d+)?)\s*(mhz|m|khz|k|hz)?', raw)
+    if not match:
+        return ''
+    num = float(match.group(1))
+    unit = match.group(2) or 'hz'
+    if unit in ('mhz', 'm'):
+        num *= 1000000
+    elif unit in ('khz', 'k'):
+        num *= 1000
+    if num <= 0:
+        return ''
+    if int(num) == 1:
+        return 'internal'
+    return str(int(num))
+
+
+def _crystal_label(value):
+    if value == 'internal':
+        return 'Internal clock'
+    freq = _parse_frequency_hz(value)
+    if not freq or freq == 'internal':
+        return 'Internal clock' if freq == 'internal' else ''
+    num = int(freq)
+    if num >= 1000000 and num % 1000000 == 0:
+        return f'{num // 1000000} MHz'
+    if num >= 1000000:
+        return f'{num / 1000000:.2f}'.rstrip('0').rstrip('.') + ' MHz'
+    if num >= 1000 and num % 1000 == 0:
+        return f'{num // 1000} kHz'
+    if num >= 1000:
+        return f'{num / 1000:.2f}'.rstrip('0').rstrip('.') + ' kHz'
+    return f'{num} Hz'
+
+
+def _crystal_from_config_symbol(key):
+    key = str(key or '').upper()
+    if key.endswith('CLOCK_REF_INTERNAL') or key.endswith('CRYSTAL_INTERNAL'):
+        return 'internal'
+    if 'CLOCK_REF_X32K' in key or 'CRYSTAL_X32K' in key:
+        return '32768'
+    match = re.search(r'(?:CLOCK_REF|CRYSTAL|XOSC|HSE)_X?(\d+)M\b', key)
+    if match:
+        return str(int(match.group(1)) * 1000000)
+    return ''
+
+
+def _extract_crystal_from_constants(constants):
+    direct_keys = (
+        'CLOCK_REF_FREQ', 'CRYSTAL_FREQ', 'XOSC_FREQ', 'HSE_FREQ',
+        'OSC_FREQ', 'EXTERNAL_CLOCK_FREQ',
+    )
+    for key in direct_keys:
+        freq = _parse_frequency_hz(constants.get(key))
+        if freq:
+            return freq
+
+    for key, value in constants.items():
+        if not _truthy_constant(value):
+            continue
+        freq = _crystal_from_config_symbol(key)
+        if freq:
+            return freq
+    return ''
+
+
+def _extract_device_constants(device, constants, source):
+    constants = constants or {}
+    if not isinstance(constants, dict):
+        return
+
+    if constants:
+        device['mcu_constants'] = constants
+
+    mcu_model = constants.get('MCU')
+    if mcu_model:
+        _set_device_field(device, 'mcu_model', str(mcu_model).lower(), source)
+
+    _set_device_field(device, 'mcu_freq', constants.get('CLOCK_FREQ'), source)
+    _set_device_field(device, 'canbus_frequency', constants.get('CANBUS_FREQUENCY'), source)
+    _set_device_field(device, 'startup_pin', constants.get('INITIAL_PINS'), source)
+    crystal = _extract_crystal_from_constants(constants)
+    if crystal:
+        _set_device_field(device, 'crystal', crystal, source)
+        _set_device_field(device, 'crystal_label', _crystal_label(crystal), source)
+
+    connection_pins = {}
+    for key, value in constants.items():
+        if key.startswith('RESERVE_PINS_') and value:
+            connection_pins[key.replace('RESERVE_PINS_', '').lower()] = value
+    if connection_pins:
+        _set_device_field(device, 'connection_pins', connection_pins, source)
+
+    can_pins = constants.get('RESERVE_PINS_CAN')
+    if can_pins:
+        _set_device_field(device, 'can_pins', can_pins, source)
+        parts = [p.strip() for p in str(can_pins).split(',') if p.strip()]
+        if len(parts) >= 2:
+            _set_device_field(device, 'can_rx_pin', parts[0], source)
+            _set_device_field(device, 'can_tx_pin', parts[1], source)
+    crystal_pins = constants.get('RESERVE_PINS_crystal') or constants.get('RESERVE_PINS_CRYSTAL')
+    if crystal_pins:
+        _set_device_field(device, 'crystal_pins', crystal_pins, source)
+
+    if _truthy_constant(constants.get('CANBUS_BRIDGE')):
+        _set_device_field(device, 'inferred_connection', 'USB桥接CAN', 'firmware_inferred')
+    elif constants.get('CANBUS_FREQUENCY') or can_pins:
+        _set_device_field(device, 'inferred_connection', 'CANBUS', 'firmware_inferred')
+
+
+def _format_gpio_pin(value):
+    if value is None or value == '':
+        return ''
+    raw = str(value).strip()
+    if re.fullmatch(r'\d+', raw):
+        return f'gpio{raw}'
+    return raw
+
+
+def _board_led_pin(board):
+    for key in ('katapult_led_pin', 'status_led_pin', 'led_pin', 'status_led', 'led'):
+        value = board.get(key)
+        if value:
+            return value
+    return ''
+
+
+def _normalize_connection_label(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    compact = re.sub(r'[\s_\-()/]+', '', raw).lower()
+    if 'usb' in compact and 'can' in compact:
+        return 'USB桥接CAN'
+    if 'canbus' in compact or compact == 'can' or 'can总线' in raw.lower():
+        return 'CANBUS'
+    if 'usb' in compact:
+        return 'USB'
+    if 'serial' in compact or 'uart' in compact or '串口' in raw:
+        return '串口/UART'
+    return raw
+
+
+def _unique_labels(labels):
+    result = []
+    seen = set()
+    for label in labels:
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        result.append(label)
+    return result
+
+
+def _board_connection_labels(board):
+    labels = []
+    for item in board.get('connections') or []:
+        labels.append(_normalize_connection_label(item))
+    labels.append(_normalize_connection_label(board.get('default_connection')))
+
+    flash_values = [board.get('default_flash')]
+    flash_values.extend(board.get('flash_modes') or [])
+    if any(str(mode or '').upper() == 'CAN_BRIDGE_KAT' for mode in flash_values):
+        labels.append('USB桥接CAN')
+
+    return _unique_labels(labels)
+
+
+def _preferred_connection_label(labels, device):
+    labels = _unique_labels(labels)
+    if not labels:
+        if device.get('canbus_frequency') or device.get('can_pins'):
+            return 'CANBUS'
+        return ''
+
+    for preferred in ('USB桥接CAN', 'CANBUS', 'USB', '串口/UART'):
+        if preferred in labels:
+            return preferred
+    return labels[0]
+
+
+def _candidate_connection_summary(candidates, device):
+    option_sets = []
+    options = []
+    for _score, _manufacturer, _board_type, _board_id, board in candidates:
+        labels = _board_connection_labels(board)
+        if labels:
+            option_sets.append(set(labels))
+            options.extend(labels)
+
+    options = _unique_labels(options)
+    common = []
+    if option_sets:
+        common_set = set.intersection(*option_sets)
+        common = [label for label in options if label in common_set]
+
+    label = _preferred_connection_label(common or options, device)
+    return {
+        'connection_label': label,
+        'connection_options': options,
+        'connection_common': common,
+    }
+
+
+def _board_match_score(board, device):
+    board_mcu = _normalize_mcu_name(board.get('mcu') or board.get('processor'))
+    dev_mcu = _normalize_mcu_name(device.get('mcu_model'))
+    if dev_mcu and board_mcu and not (dev_mcu == board_mcu or dev_mcu.startswith(board_mcu) or board_mcu.startswith(dev_mcu)):
+        return -1
+
+    score = 0
+    if dev_mcu and board_mcu:
+        score += 2
+
+    dev_offset = _offset_int(device.get('bl_offset'))
+    board_offset = _offset_int(board.get('bl_offset') or board.get('bootloader_offset'))
+    if dev_offset is not None and board_offset is not None:
+        if dev_offset == board_offset:
+            score += 2
+        else:
+            return -1
+
+    section = str(device.get('section') or '').lower()
+    if section:
+        board_id = str(board.get('id') or '').lower()
+        board_name = str(board.get('name') or '').lower()
+        section_compact = re.sub(r'[^a-z0-9]', '', section)
+        board_compact = re.sub(r'[^a-z0-9]', '', f'{board_id} {board_name}')
+        if board_compact and len(board_compact) >= 4 and board_compact in section_compact:
+            score += 8
+        board_tokens = [token for token in re.split(r'[^a-z0-9]+', f'{board_id} {board_name}') if len(token) >= 3]
+        if any(token in section for token in board_tokens):
+            score += 4
+
+    return score
+
+
+def _infer_board_fields(device):
+    try:
+        boards = load_all_boards()
+    except Exception as e:
+        logger.warning(f'板卡数据库加载失败，跳过 KAT 引脚推断: {e}')
+        return device
+
+    candidates = []
+    for manufacturer, type_map in (boards or {}).items():
+        for board_type, board_map in (type_map or {}).items():
+            for board_id, board in (board_map or {}).items():
+                score = _board_match_score(board, device)
+                if score > 0:
+                    candidates.append((score, manufacturer, board_type, board_id, board))
+
+    if not candidates:
+        label = _preferred_connection_label([], device)
+        if label:
+            _set_device_field(device, 'inferred_connection', label, 'klipper_identify')
+        return device
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    best = candidates[0]
+    if len(candidates) > 1 and candidates[1][0] == best[0]:
+        tied_candidates = [c for c in candidates if c[0] == best[0]]
+        connection_summary = _candidate_connection_summary(tied_candidates, device)
+        device['board_inference'] = {
+            'status': 'ambiguous',
+            'candidates': [c[4].get('name') or c[3] for c in candidates[:5]],
+            **connection_summary,
+        }
+        if connection_summary.get('connection_label') and not device.get('inferred_connection'):
+            _set_device_field(device, 'inferred_connection', connection_summary['connection_label'], 'board_config_inferred')
+        return device
+
+    _score, manufacturer, board_type, board_id, board = best
+    connection_summary = _candidate_connection_summary([best], device)
+    device['board_inference'] = {
+        'status': 'matched',
+        'manufacturer': manufacturer,
+        'board_type': board_type,
+        'id': board_id,
+        'name': board.get('name') or board_id,
+        'source': 'board_config_inferred',
+        **connection_summary,
+    }
+    if connection_summary.get('connection_label') and not device.get('inferred_connection'):
+        _set_device_field(device, 'inferred_connection', connection_summary['connection_label'], 'board_config_inferred')
+
+    can_gpio = board.get('can_gpio') or {}
+    if isinstance(can_gpio, dict):
+        rx_pin = _format_gpio_pin(can_gpio.get('rx'))
+        tx_pin = _format_gpio_pin(can_gpio.get('tx'))
+        if rx_pin and tx_pin and not device.get('can_pins'):
+            _set_device_field(device, 'can_pins', f'{rx_pin},{tx_pin}', 'board_config_inferred')
+            _set_device_field(device, 'can_rx_pin', rx_pin, 'board_config_inferred')
+            _set_device_field(device, 'can_tx_pin', tx_pin, 'board_config_inferred')
+
+    if not device.get('startup_pin'):
+        _set_device_field(device, 'startup_pin', board.get('boot_pins'), 'board_config_inferred')
+    if not device.get('led_pin'):
+        _set_device_field(device, 'led_pin', _board_led_pin(board), 'board_config_inferred')
+    if not device.get('bl_offset'):
+        board_offset = board.get('bl_offset') or board.get('bootloader_offset')
+        _set_device_field(device, 'bl_offset', board_offset, 'board_config_inferred')
+        _set_device_field(device, 'bl_offset_label', _format_offset_label(board_offset), 'board_config_inferred')
+
+    return device
+
+
+def _parse_info_json(line):
+    marker = 'InfoJSON:'
+    if marker not in line:
+        return None
+    raw = line.split(marker, 1)[1].strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
 def _parse_can_uuid_line(line):
     match = re.search(r'canbus_uuid=([a-fA-F0-9]+)', line)
     if not match:
@@ -714,15 +1100,125 @@ def _parse_can_uuid_line(line):
         'raw': line.strip(),
     }
 
-    processor_match = re.search(r'\bProcessor:\s*([^,]+)', line)
-    if processor_match:
-        device['mcu_model'] = processor_match.group(1).strip()
+    info = _parse_info_json(line)
+    if isinstance(info, dict):
+        constants = info.get('constants') or {}
+        _extract_device_constants(device, constants, 'klipper_identify')
 
-    firmware_match = re.search(r'\bFirmware:\s*(.+)$', line)
-    if firmware_match:
-        device['mcu_version'] = firmware_match.group(1).strip()
+    processor_match = re.search(r'\bProcessor:\s*([^,]+)', line)
+    if processor_match and not device.get('mcu_model'):
+        _set_device_field(device, 'mcu_model', processor_match.group(1).strip(), 'klipper_identify')
+
+    firmware_match = re.search(r'\bFirmware:\s*([^,]+)', line)
+    if firmware_match and not device.get('mcu_version'):
+        _set_device_field(device, 'mcu_version', firmware_match.group(1).strip(), 'klipper_identify')
 
     return device
+
+
+def _expand_remote_style_path(path, home_dir):
+    raw = str(path or '').strip() or '~/katapult'
+    if raw == '~':
+        return home_dir
+    if raw.startswith('~/'):
+        return os.path.join(home_dir, raw[2:])
+    return os.path.expanduser(raw) if not is_ssh_mode() else raw
+
+
+def _get_katapult_flashtool_script(home_dir):
+    katapult_path = _expand_remote_style_path(config.get('katapult_path', '~/katapult'), home_dir)
+    candidates = [
+        os.path.join(katapult_path, 'scripts', 'flashtool.py'),
+        os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py'),
+        os.path.join(home_dir, 'klipper', 'lib', 'katapult', 'flashtool.py'),
+        '/data/katapult/scripts/flashtool.py',
+        '/data/klipper/lib/katapult/flashtool.py',
+    ]
+    for candidate in dict.fromkeys(candidates):
+        try:
+            if path_exists(candidate):
+                return candidate
+        except Exception:
+            continue
+    return ''
+
+
+def _parse_katapult_status_output(output):
+    status = {}
+    patterns = {
+        'katapult_version': r'Software Version:\s*([^\n]+)',
+        'katapult_protocol': r'Protocol Version:\s*([^\n]+)',
+        'katapult_block_size': r'Block Size:\s*(\d+)\s*bytes',
+        'application_start': r'Application Start:\s*(0x[0-9a-fA-F]+)',
+        'mcu_model': r'MCU type:\s*([^\n]+)',
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, output or '', re.IGNORECASE)
+        if match:
+            status[key] = match.group(1).strip()
+    return status
+
+
+def _apply_katapult_status(device, status):
+    if not status:
+        return device
+    for key in ('mcu_model', 'katapult_version', 'katapult_protocol', 'katapult_block_size', 'application_start'):
+        _set_device_field(device, key, status.get(key), 'katapult_protocol')
+    if status.get('katapult_version'):
+        _set_device_field(device, 'mcu_version', status.get('katapult_version'), 'katapult_protocol')
+
+    start = _offset_int(status.get('application_start'))
+    base = _flash_base_for_mcu(status.get('mcu_model') or device.get('mcu_model'))
+    if start is not None and base is not None and start >= base:
+        offset = start - base
+        _set_device_field(device, 'bl_offset', str(offset), 'katapult_protocol')
+        _set_device_field(device, 'bl_offset_hex', f'0x{offset:x}', 'katapult_protocol')
+        _set_device_field(device, 'bl_offset_label', _format_offset_label(offset), 'katapult_protocol')
+    return device
+
+
+def _query_katapult_status(iface, uuid, python_bin, home_dir):
+    flashtool_script = _get_katapult_flashtool_script(home_dir)
+    if not flashtool_script:
+        return {}, '未找到 Katapult flashtool.py，无法读取 KAT 状态'
+    cmd = (
+        f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} '
+        f'-i {shlex.quote(iface)} -u {shlex.quote(uuid)} -s 2>&1'
+    )
+    release_cmd = (
+        f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} '
+        f'-i {shlex.quote(iface)} -q >/dev/null 2>&1 || true'
+    )
+    try:
+        output = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=20)
+        combined = (output.stdout or '') + (output.stderr or '')
+        if output.returncode != 0 and 'Katapult Connected' not in combined:
+            return {}, combined.strip()[:300] or 'Katapult 状态读取失败'
+        return _parse_katapult_status_output(combined), None
+    finally:
+        try:
+            # flashtool.py -s assigns a temporary node id.  Clear it so the
+            # node remains discoverable by later CAN UUID searches.
+            run_cmd(release_cmd, shell=True, capture_output=True, text=True, timeout=8)
+        except Exception as e:
+            logger.warning(f'Katapult 临时 CAN node id 释放失败: {e}')
+
+
+def _merge_config_sections(devices):
+    cfg_uuids = []
+    mr_uuids, _mr_available, _mr_error = query_moonraker_printer_cfg()
+    if mr_uuids:
+        cfg_uuids = mr_uuids
+    else:
+        fs_uuids, _fs_available = read_printer_cfg_direct()
+        cfg_uuids = fs_uuids
+
+    cfg_uuid_map = {u.get('uuid', '').lower(): u for u in cfg_uuids if u.get('uuid')}
+    for dev in devices:
+        cfg_info = cfg_uuid_map.get(str(dev.get('uuid', '')).lower())
+        if cfg_info and not dev.get('section'):
+            dev['section'] = cfg_info.get('section', '')
+    return devices
 
 def read_mcu_uuids_from_printer_cfg(content):
     """从 printer.cfg 内容中提取所有 MCU 段落的 canbus_uuid"""
@@ -841,6 +1337,18 @@ def _scan_can_uuids(iface='can0'):
                         device['script_source'] = script_source
                         devices.append(device)
 
+        if devices:
+            _merge_config_sections(devices)
+            for device in devices:
+                if device.get('app') == 'Katapult':
+                    status, kat_error = _query_katapult_status(
+                        iface, device.get('uuid', ''), python_bin, home_dir
+                    )
+                    if kat_error:
+                        device['katapult_query_error'] = kat_error
+                    _apply_katapult_status(device, status)
+                _infer_board_fields(device)
+
         if not devices and not error:
             error = '未找到CAN设备，请确认CAN接口已启用且设备处于Katapult/Klipper模式'
         return devices, error
@@ -915,10 +1423,12 @@ def verify_mcu_connection_status(uuids):
         mcu_statuses = r.json().get('result', {}).get('status', {})
 
         verified_uuids = []
+        returned_uuid_keys = set()
         for sname in can_sections:
             mcu_status = mcu_statuses.get(sname) or mcu_statuses.get(sname.lower(), {})
             is_klipper_ready = (webhooks_state == 'ready')
             is_mcu_lost = sname in lost_mcus or sname.lower() in lost_mcus
+            base_entry = dict(can_uuid_map[sname])
 
             if not is_klipper_ready and is_mcu_lost:
                 logger.info(
@@ -928,23 +1438,33 @@ def verify_mcu_connection_status(uuids):
                 continue
 
             if mcu_status.get('mcu_version'):
-                entry = dict(can_uuid_map[sname])
+                entry = base_entry
                 mcu_constants = mcu_status.get('mcu_constants', {})
-                mcu_model = mcu_constants.get('MCU', '')
-                if mcu_model:
-                    entry['mcu_model'] = mcu_model.lower()
-                entry['mcu_version'] = mcu_status.get('mcu_version', '')
-                entry['mcu_freq'] = mcu_constants.get('CLOCK_FREQ', '')
+                _extract_device_constants(entry, mcu_constants, 'moonraker_mcu_constants')
+                _set_device_field(entry, 'mcu_version', mcu_status.get('mcu_version', ''), 'moonraker_mcu_constants')
+                _infer_board_fields(entry)
                 verified_uuids.append(entry)
+                returned_uuid_keys.add(str(entry.get('uuid', '')).lower())
                 logger.info(
                     f"MCU 验证: [{sname}] 通过 CAN 已连接 "
                     f"(UUID={can_uuid_map[sname]['uuid']}, MCU={mcu_constants.get('MCU','?')})"
                 )
+            elif base_entry.get('app') == 'Katapult':
+                _infer_board_fields(base_entry)
+                verified_uuids.append(base_entry)
+                returned_uuid_keys.add(str(base_entry.get('uuid', '')).lower())
             else:
                 logger.info(
                     f"MCU 验证: [{sname}] 配置了 CAN 但 Klipper 未连接，已跳过 "
                     f"(UUID={can_uuid_map[sname]['uuid']})"
                 )
+
+        for entry in uuids:
+            uuid_key = str(entry.get('uuid', '')).lower()
+            if entry.get('app') == 'Katapult' and uuid_key not in returned_uuid_keys:
+                _infer_board_fields(entry)
+                verified_uuids.append(entry)
+                returned_uuid_keys.add(uuid_key)
 
         return verified_uuids, True
     except requests.ConnectionError:
@@ -1005,24 +1525,29 @@ def search_can_uuid():
 # ==================== 摄像头详情 API ====================
 @system_bp.route('/api/system/video')
 def get_video_devices():
-    """获取摄像头详细信息"""
+    """获取摄像头详细信息（兼容本地/SSH远程模式）"""
     devices = []
-    video_paths = sorted(glob.glob('/dev/video*'))
+    try:
+        # 使用 run_cmd 统一路由，兼容本地和 SSH 远程模式
+        ls_result = run_cmd('ls /dev/video* 2>/dev/null || echo ""',
+                            shell=True, capture_output=True, text=True, timeout=5)
+        video_paths = [p.strip() for p in ls_result.stdout.strip().split('\n') if '/dev/video' in p]
+    except Exception:
+        video_paths = []
+
     for path in video_paths:
         video_name = os.path.basename(path)
         name, index = 'Unknown', ''
         try:
-            name_path = f'/sys/class/video4linux/{video_name}/name'
-            if os.path.exists(name_path):
-                with open(name_path, 'r', encoding='utf-8', errors='replace') as f:
-                    name = f.read().strip()
+            name_result = run_cmd(f'cat /sys/class/video4linux/{video_name}/name 2>/dev/null || echo "Unknown"',
+                                  shell=True, capture_output=True, text=True, timeout=5)
+            name = name_result.stdout.strip() or 'Unknown'
         except Exception:
             pass
         try:
-            index_path = f'/sys/class/video4linux/{video_name}/index'
-            if os.path.exists(index_path):
-                with open(index_path, 'r', encoding='utf-8', errors='replace') as f:
-                    index = f.read().strip()
+            index_result = run_cmd(f'cat /sys/class/video4linux/{video_name}/index 2>/dev/null || echo ""',
+                                   shell=True, capture_output=True, text=True, timeout=5)
+            index = index_result.stdout.strip()
         except Exception:
             pass
         devices.append({'path': path, 'name': name, 'index': index})
@@ -1546,7 +2071,8 @@ def can_topology():
             for dev in verified:
                 uuid = dev.get('uuid', '')
                 cfg_info = cfg_uuid_map.get(uuid, {})
-                dev['section'] = cfg_info.get('section', '')
+                if cfg_info.get('section'):
+                    dev['section'] = cfg_info.get('section', '')
                 dev['connection_status'] = 'unknown'
 
                 if dev.get('app') == 'Katapult':

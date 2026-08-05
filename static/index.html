@@ -347,7 +347,7 @@
                             <div class="form-group">
                                 <label class="form-label" data-i18n="form.device_id">🔍 设备 ID</label>
                                 <div class="input-with-button">
-                                    <select class="form-control form-select" id="flashDeviceId" onchange="refreshFlashPlan(false)">
+                                    <select class="form-control form-select" id="flashDeviceId" onchange="onFlashDeviceIdChange()">
                                         <option value="">-- 点击刷新扫描 --</option>
                                     </select>
                                     <select id="flashCanIface" class="form-control" style="width:auto;min-width:100px;" title="CAN接口选择">
@@ -355,6 +355,7 @@
                                     </select>
                                     <button class="btn btn-secondary" onclick="refreshDeviceIds()">🔄</button>
                                 </div>
+                                <div id="flashDeviceCompareHint" style="display:none;margin-top:6px;font-size:12px;padding:6px 10px;border-radius:4px;border-left:4px solid var(--info-color);background:rgba(33,150,243,.10);line-height:1.5;"></div>
                                 <div id="flashCanSearchError" style="display:none;"></div>
                             </div>
                             <div class="form-group">
@@ -1311,10 +1312,10 @@
 
     <script src="/static/js/i18n.js?v=20260724a"></script>
     <script src="/static/js/notifications.js?v=20260724a"></script>
-    <script src="/static/js/app.js?v=20260727a"></script>
+    <script src="/static/js/app.js?v=20260805b"></script>
     <script src="/static/js/mcu-presets.js?v=20260320f"></script>
-    <script src="/static/js/config-manager.js?v=20260320f"></script>
-    <script src="/static/js/firmware-compile.js?v=20260724a"></script>
+    <script src="/static/js/config-manager.js?v=20260803a"></script>
+    <script src="/static/js/firmware-compile.js?v=20260805d"></script>
     <script src="/static/js/firmware-update.js?v=20260320f"></script>
     <script src="/static/js/klipper-parser.js?v=20260702b"></script>
     <script src="/static/js/config-generator.js?v=20260724a"></script>

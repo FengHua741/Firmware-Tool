@@ -10,6 +10,7 @@ let _commGroupedOptions = {}; // 按类型分组的通信选项
 let _commAllOptions = [];     // 所有通信选项（带compatible_processors）
 let _bridgeCanOptions = [];   // STM32 桥接CAN引脚选项
 let _rp2040CanGpio = null;    // RP2040 CAN GPIO 配置
+let _lastDetectedCanDevicesByUuid = {}; // 烧录设备列表中识别到的 CAN 节点详情
 
 const CAN_BITRATE_DEFAULT = '1000000';
 const CAN_BITRATE_LABELS = {
@@ -197,10 +198,26 @@ async function onCompileMcuPlatformChange() {
 
 // MCU 型号选择变化
 async function onCompileMcuModelChange() {
-    const mcuId = document.getElementById('compileMcuModel').value;
+    const modelSelect = document.getElementById('compileMcuModel');
+    const mcuId = modelSelect.value;
+    const selectedOption = modelSelect.options[modelSelect.selectedIndex];
 
     if (!mcuId) {
         document.getElementById('compileMcuDetails').style.display = 'none';
+        return;
+    }
+
+    if (selectedOption?.dataset?.detectedMcu) {
+        try {
+            const data = JSON.parse(selectedOption.dataset.detectedMcu);
+            currentCompileMcu = data;
+            await displayCompileMcuDetails(data);
+            const selectedDev = _lastDetectedCanDevicesByUuid[String(document.getElementById('flashDeviceId')?.value || '').toLowerCase()];
+            _renderFlashDeviceCompare(selectedDev || null);
+        } catch (error) {
+            console.error('加载识别 MCU 详情失败:', error);
+            showError(`加载识别 MCU 详情失败: ${error.message || error}`);
+        }
         return;
     }
 
@@ -216,6 +233,8 @@ async function onCompileMcuModelChange() {
             if (blSection && blSection.style.display !== 'none') {
                 await loadBlAddressOptions();
             }
+            const selectedDev = _lastDetectedCanDevicesByUuid[String(document.getElementById('flashDeviceId')?.value || '').toLowerCase()];
+            _renderFlashDeviceCompare(selectedDev || null);
         } else {
             showError(`加载 MCU 详情失败: ${data.error || mcuId}`);
         }
@@ -262,7 +281,7 @@ async function displayCompileMcuDetails(data) {
     // 根据 MCU 预设自动设置烧录模式（自定义模式）
     // 如果从预设产品切换过来，保留预设配置的烧录模式，不覆盖
     const flashModeEl = document.getElementById('flashMode');
-    if (flashModeEl && typeof MCU_PRESETS !== 'undefined' && !window._fromPreset) {
+    if (flashModeEl && typeof MCU_PRESETS !== 'undefined' && !window._fromPreset && !window._preserveFlashMode) {
         let defaultFlash = null;
         for (const platform in MCU_PRESETS) {
             const found = MCU_PRESETS[platform].find(m => m.id === mcu.id);
@@ -282,6 +301,9 @@ async function displayCompileMcuDetails(data) {
     }
     if (window._fromPreset) {
         window._fromPreset = false;
+    }
+    if (window._preserveFlashMode) {
+        window._preserveFlashMode = false;
     }
 
     document.getElementById('compileMcuDetails').style.display = 'block';
@@ -474,6 +496,8 @@ function onCompileConnectionChange() {
     if (commType === 'can' || commType === 'usbcanbridge') {
         _showCanBitrateSelector(connGroup);
     }
+    const selectedDev = _lastDetectedCanDevicesByUuid[String(document.getElementById('flashDeviceId')?.value || '').toLowerCase()];
+    _renderFlashDeviceCompare(selectedDev || null);
 }
 
 function _insertAfterCompileConnectionOptions(connGroup, container) {
@@ -575,6 +599,8 @@ function onCompileCanBitrateChange() {
     if (select.value === 'custom' && !customInput.value) {
         customInput.value = CAN_BITRATE_DEFAULT;
     }
+    const selectedDev = _lastDetectedCanDevicesByUuid[String(document.getElementById('flashDeviceId')?.value || '').toLowerCase()];
+    _renderFlashDeviceCompare(selectedDev || null);
 }
 
 function _normalizeCanBitrate(value) {
@@ -610,6 +636,476 @@ function _setSelectedCanBitrate(value) {
         customInput.value = bitrate;
         customInput.style.display = '';
     }
+}
+
+function _compileSourceLabel(source) {
+    const labels = {
+        klipper_identify: '实读',
+        moonraker_mcu_constants: '实读',
+        katapult_protocol: 'KAT读取',
+        firmware_inferred: '固件推断',
+        board_config_inferred: '数据库推断',
+    };
+    return labels[source] || source || '';
+}
+
+function _compileFormatFrequency(value) {
+    if (value === 'internal') return 'Internal clock';
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return String(value || '');
+    if (num >= 1000000) return `${(num / 1000000).toFixed(2).replace(/\.?0+$/, '')} MHz`;
+    if (num >= 1000) return `${(num / 1000).toFixed(2).replace(/\.?0+$/, '')} kHz`;
+    return `${num} Hz`;
+}
+
+function _compileFormatBitrate(value) {
+    const bitrate = _normalizeCanBitrate(value);
+    const num = Number(bitrate);
+    if (!Number.isFinite(num) || num <= 0) return String(value || '');
+    if (num >= 1000000) return `${(num / 1000000).toFixed(2).replace(/\.?0+$/, '')} Mbps`;
+    if (num >= 1000) return `${(num / 1000).toFixed(2).replace(/\.?0+$/, '')} kbps`;
+    return `${num} bps`;
+}
+
+function _compileNormalizeMcu(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '').replace(/xx$/, '');
+}
+
+function _compileBaseMcuKey(value) {
+    const normalized = _compileNormalizeMcu(value);
+    if (!normalized) return '';
+    const stm32 = normalized.match(/^(stm32[a-z]\d[a-z0-9]{2})/);
+    if (stm32) return stm32[1];
+    const n32 = normalized.match(/^(n32[a-z]\d{3})/);
+    if (n32) return n32[1];
+    return normalized;
+}
+
+function _compileMcuNamesCompatible(a, b) {
+    const aNorm = _compileNormalizeMcu(a);
+    const bNorm = _compileNormalizeMcu(b);
+    if (!aNorm || !bNorm) return false;
+    if (aNorm === bNorm) return true;
+    const aBase = _compileBaseMcuKey(aNorm);
+    const bBase = _compileBaseMcuKey(bNorm);
+    if (aBase && bBase && aBase === bBase) return true;
+    return (aNorm.startsWith(bNorm) && aNorm.length <= bNorm.length + 4)
+        || (bNorm.startsWith(aNorm) && bNorm.length <= aNorm.length + 4);
+}
+
+function _findCompileMcuMatch(mcuModel) {
+    const target = _compileNormalizeMcu(mcuModel);
+    if (!target) return null;
+    let compatibleMatch = null;
+    for (const [platform, platformData] of Object.entries(compileMcuDatabase || {})) {
+        const mcus = platformData?.mcus || {};
+        for (const [mcuId, mcuInfo] of Object.entries(mcus)) {
+            const names = [
+                mcuId,
+                mcuInfo?.id,
+                mcuInfo?.name,
+                mcuInfo?.config_symbol,
+            ];
+            if (names.some(name => _compileNormalizeMcu(name) === target)) {
+                return { platform, mcuId, match_type: 'exact' };
+            }
+            if (!compatibleMatch && names.some(name => _compileMcuNamesCompatible(name, target))) {
+                compatibleMatch = { platform, mcuId, match_type: 'compatible' };
+            }
+        }
+    }
+    return compatibleMatch;
+}
+
+function _inferCompilePlatformFromMcu(mcuModel) {
+    const normalized = _compileNormalizeMcu(mcuModel);
+    if (!normalized) return null;
+    if (normalized.startsWith('stm32') || normalized.startsWith('n32')) {
+        return { platform: 'STM32', platform_key: 'stm32' };
+    }
+    if (normalized.startsWith('rp2040') || normalized.startsWith('rp2350')) {
+        return { platform: 'RP2040', platform_key: 'rp2040' };
+    }
+    if (normalized.startsWith('samd') || normalized.startsWith('samc') || normalized.startsWith('same')) {
+        return { platform: 'ATSAMD', platform_key: 'atsamd' };
+    }
+    if (normalized.startsWith('lpc176')) {
+        return { platform: 'LPC176x', platform_key: 'lpc176x' };
+    }
+    if (normalized.startsWith('hc32f460')) {
+        return { platform: 'HC32F460', platform_key: 'hc32f460' };
+    }
+    if (normalized.startsWith('sam3') || normalized.startsWith('sam4') || normalized.startsWith('same70')) {
+        return { platform: 'ATSAM', platform_key: 'atsam' };
+    }
+    if (normalized.startsWith('atmega') || normalized.startsWith('at90') || normalized.startsWith('lgt8')) {
+        return { platform: 'AVR', platform_key: 'avr' };
+    }
+    return null;
+}
+
+function _makeDetectedCompileMcuDetails(dev, platformInfo) {
+    const normalized = _compileNormalizeMcu(dev?.mcu_model);
+    const displayName = dev?.mcu_model ? String(dev.mcu_model).toUpperCase() : normalized.toUpperCase();
+    return {
+        success: true,
+        platform: platformInfo.platform,
+        platform_key: platformInfo.platform_key,
+        detected_fallback: true,
+        mcu: {
+            id: normalized,
+            name: `${displayName} (识别)`,
+            crystals: dev?.crystal ? [String(dev.crystal)] : [],
+            bl_offsets: dev?.bl_offset ? [String(dev.bl_offset)] : []
+        },
+        flash_modes: [],
+        connections: []
+    };
+}
+
+function _ensureCompileOption(select, value, label, dataset = {}) {
+    if (!select || !value) return null;
+    let option = [...select.options].find(opt => opt.value === value);
+    if (!option) {
+        option = new Option(label || value, value);
+        select.appendChild(option);
+    } else if (label) {
+        option.textContent = label;
+    }
+    Object.entries(dataset || {}).forEach(([key, val]) => {
+        option.dataset[key] = val;
+    });
+    return option;
+}
+
+function _compileConnectionTypeFromDetected(value) {
+    const raw = String(value || '').toLowerCase();
+    if (!raw) return '';
+    if (raw.includes('usb') && raw.includes('can')) return 'usbcanbridge';
+    if (raw.includes('can')) return 'can';
+    if (raw.includes('usb')) return 'usb';
+    if (raw.includes('serial') || raw.includes('uart') || raw.includes('串口')) return 'serial';
+    return '';
+}
+
+function _compileConnectionDisplay(type) {
+    const labels = {
+        usbcanbridge: 'USB桥接CAN',
+        can: 'CANBUS',
+        usb: 'USB',
+        serial: '串口/UART',
+    };
+    return labels[type] || type || '-';
+}
+
+function _compileCanPinsParts(value) {
+    if (!value) return [];
+    return String(value).split(',').map(v => v.trim()).filter(Boolean);
+}
+
+function _compileNormalizePin(value) {
+    return String(value || '').trim().toLowerCase().replace(/^[!^~]+/, '').replace(/^gpio/, '');
+}
+
+function _compileSelectOptionByPins(select, pins) {
+    if (!select || !pins || pins.length < 2) return false;
+    const pinText = pins.map(p => String(p || '').toUpperCase().replace(/^[!^~]+/, '')).join('/');
+    const pinCompact = pinText.replace(/[^A-Z0-9]/g, '');
+    for (let i = 0; i < select.options.length; i++) {
+        const opt = select.options[i];
+        const text = [
+            opt.textContent,
+            opt.value,
+            opt.dataset ? opt.dataset.comm : '',
+        ].map(v => String(v || '').toUpperCase()).join(' ');
+        const compact = text.replace(/[^A-Z0-9]/g, '');
+        if (text.includes(pinText) || compact.includes(pinCompact)) {
+            select.value = opt.value;
+            return true;
+        }
+    }
+    return false;
+}
+
+async function _selectCompileMcuFromDetected(dev, changes) {
+    if (!compileMcuDatabase || Object.keys(compileMcuDatabase).length === 0) {
+        await loadCompileMcuDatabase();
+    }
+    let match = _findCompileMcuMatch(dev?.mcu_model);
+    const platformInfo = !match ? _inferCompilePlatformFromMcu(dev?.mcu_model) : null;
+    if (!match) {
+        if (!platformInfo) {
+            if (dev) dev._compile_match_error = `未能从 ${dev?.mcu_model || ''} 推断编译平台`;
+            return false;
+        }
+        const detectedDetails = _makeDetectedCompileMcuDetails(dev, platformInfo);
+        match = {
+            platform: platformInfo.platform,
+            mcuId: detectedDetails.mcu.id,
+            match_type: 'detected_fallback',
+            detected_details: detectedDetails
+        };
+    }
+    if (dev) {
+        dev._compile_match_error = '';
+        dev._compile_match_type = match.match_type || '';
+    }
+
+    const customMode = document.querySelector('input[name="compileMode"][value="custom"]');
+    if (customMode) customMode.checked = true;
+    const presetSection = document.getElementById('compilePresetSection');
+    const customSection = document.getElementById('compileCustomSection');
+    if (presetSection) presetSection.style.display = 'none';
+    if (customSection) customSection.style.display = 'block';
+
+    const platformSelect = document.getElementById('compileMcuPlatform');
+    const modelSelect = document.getElementById('compileMcuModel');
+    if (!platformSelect || !modelSelect) return false;
+    if (!platformSelect.options.length || ![...platformSelect.options].some(opt => opt.value === match.platform)) {
+        loadCompileMcuPlatforms(false);
+    }
+    if (![...platformSelect.options].some(opt => opt.value === match.platform)) {
+        _ensureCompileOption(platformSelect, match.platform, `${match.platform} (识别)`);
+    }
+    if (platformSelect.value !== match.platform) {
+        platformSelect.value = match.platform;
+        await onCompileMcuPlatformChange();
+        changes.push(`MCU平台 ${match.platform}`);
+    } else if (![...modelSelect.options].some(opt => opt.value === match.mcuId)) {
+        await onCompileMcuPlatformChange();
+    }
+    if (match.detected_details) {
+        _ensureCompileOption(
+            modelSelect,
+            match.mcuId,
+            `${match.detected_details.mcu.name}`,
+            { detectedMcu: JSON.stringify(match.detected_details) }
+        );
+        modelSelect.disabled = false;
+    }
+    if (modelSelect.value !== match.mcuId) {
+        modelSelect.value = match.mcuId;
+        window._preserveFlashMode = true;
+        await onCompileMcuModelChange();
+        const suffix = match.match_type === 'detected_fallback' ? ' (识别值)' : '';
+        changes.push(`MCU ${match.mcuId.toUpperCase()}${suffix}`);
+    }
+    return true;
+}
+
+function _setCompileDetectedStartupPin(dev, changes) {
+    const input = document.getElementById('compileStartupPin');
+    if (!input || !dev?.startup_pin) return false;
+    if (input.value === String(dev.startup_pin)) return false;
+    input.value = String(dev.startup_pin);
+    changes.push(`启动引脚 ${dev.startup_pin}`);
+    return true;
+}
+
+function _setCompileDetectedBlOffset(dev, changes) {
+    const select = document.getElementById('compileBlOffset');
+    const value = dev?.bl_offset;
+    if (!select || value === undefined || value === null || value === '') return false;
+    const before = select.value;
+    const label = dev.bl_offset_label || formatCompileBlOffset(value, currentCompileMcu?.mcu?.id || '');
+    const changed = _setCompileSelectValue(select, String(value), `${label} (识别)`);
+    if (changed && before !== select.value) {
+        changes.push(`BL偏移 ${label}`);
+        return true;
+    }
+    return false;
+}
+
+function _setCompileDetectedCrystal(dev, changes) {
+    const select = document.getElementById('compileCrystal');
+    const value = dev?.crystal;
+    if (!select || value === undefined || value === null || value === '') return false;
+    const before = select.value;
+    const label = dev.crystal_label || _compileFormatFrequency(value);
+    const changed = _setCompileSelectValue(select, String(value), `${label} (实读)`);
+    const crystalGroup = select.closest('.form-group');
+    if (crystalGroup && select.options.length > 1) {
+        crystalGroup.style.display = 'block';
+    }
+    if (changed && before !== select.value) {
+        changes.push(`晶振 ${label}`);
+        return true;
+    }
+    return false;
+}
+
+function _applyDetectedCanDeviceToCompile(dev) {
+    if (!dev || !currentCompileMcu) return [];
+    const changes = [];
+    const detectedMcu = _compileNormalizeMcu(dev.mcu_model);
+    const selectedMcu = _compileNormalizeMcu(currentCompileMcu.mcu?.id);
+    if (detectedMcu && selectedMcu && !_compileMcuNamesCompatible(detectedMcu, selectedMcu)) return [];
+
+    const desiredComm = _compileConnectionTypeFromDetected(dev.inferred_connection);
+    const connSelect = document.getElementById('compileConnection');
+    if (!desiredComm || !connSelect || ![...connSelect.options].some(opt => opt.value === desiredComm)) {
+        _setCompileDetectedCrystal(dev, changes);
+        _setCompileDetectedStartupPin(dev, changes);
+        _setCompileDetectedBlOffset(dev, changes);
+        return changes;
+    }
+
+    if (connSelect.value !== desiredComm) {
+        connSelect.value = desiredComm;
+        onCompileConnectionChange();
+        changes.push(`连接方式 ${_compileConnectionDisplay(desiredComm)}`);
+    }
+
+    const pins = _compileCanPinsParts(dev.can_pins);
+    if (desiredComm === 'usbcanbridge') {
+        if (_compileSelectOptionByPins(document.getElementById('compileBridgeCanPin'), pins)) {
+            changes.push(`桥接CAN引脚 ${dev.can_pins}`);
+        }
+    } else if (desiredComm === 'can') {
+        if (_compileSelectOptionByPins(document.getElementById('compileConnectionDetail'), pins)) {
+            changes.push(`CAN引脚 ${dev.can_pins}`);
+        }
+    }
+
+    if (_rp2040CanGpio && pins.length >= 2) {
+        const rxInput = document.getElementById('compileRp2040CanRx');
+        const txInput = document.getElementById('compileRp2040CanTx');
+        const rx = _compileNormalizePin(pins[0]);
+        const tx = _compileNormalizePin(pins[1]);
+        if (rxInput && rx && rxInput.value !== rx) {
+            rxInput.value = rx;
+            changes.push(`CAN RX gpio${rx}`);
+        }
+        if (txInput && tx && txInput.value !== tx) {
+            txInput.value = tx;
+            changes.push(`CAN TX gpio${tx}`);
+        }
+    }
+
+    if (dev.canbus_frequency && (desiredComm === 'can' || desiredComm === 'usbcanbridge')) {
+        const before = _getSelectedCanBitrate();
+        _setSelectedCanBitrate(dev.canbus_frequency);
+        if (_getSelectedCanBitrate() !== before) {
+            changes.push(`CAN速率 ${_compileFormatBitrate(dev.canbus_frequency)}`);
+        }
+    }
+    _setCompileDetectedStartupPin(dev, changes);
+    _setCompileDetectedBlOffset(dev, changes);
+    _setCompileDetectedCrystal(dev, changes);
+    return changes;
+}
+
+async function _applyDetectedCanDeviceParams(dev) {
+    const changes = [];
+    if (!dev) return changes;
+    dev._compile_match_error = '';
+
+    if (dev.mcu_model) {
+        const selectedMcu = currentCompileMcu?.mcu?.id;
+        if (!selectedMcu || !_compileMcuNamesCompatible(selectedMcu, dev.mcu_model)) {
+            await _selectCompileMcuFromDetected(dev, changes);
+        }
+    }
+
+    const applied = _applyDetectedCanDeviceToCompile(dev);
+    if (Array.isArray(applied)) {
+        applied.forEach(item => {
+            if (item && !changes.includes(item)) changes.push(item);
+        });
+    }
+    return changes;
+}
+
+function _renderFlashDeviceCompare(dev) {
+    const hint = document.getElementById('flashDeviceCompareHint');
+    if (!hint) return;
+    if (!dev) {
+        hint.style.display = 'none';
+        hint.innerHTML = '';
+        return;
+    }
+
+    const lines = [];
+    const warnings = [];
+    const fieldSources = dev.field_sources || {};
+    const detectedMcu = dev.mcu_model ? String(dev.mcu_model).toUpperCase() : '';
+    const selectedMcu = currentCompileMcu?.mcu?.id || '';
+    const detectedComm = _compileConnectionTypeFromDetected(dev.inferred_connection);
+    const selectedComm = document.getElementById('compileConnection')?.value || '';
+
+    if (detectedMcu) lines.push(`识别 MCU: ${detectedMcu}`);
+    if (dev.mcu_version) lines.push(`固件: ${dev.mcu_version}`);
+    if (dev.inferred_connection) {
+        const src = _compileSourceLabel(fieldSources.inferred_connection);
+        lines.push(`连接方式: ${dev.inferred_connection}${src ? ` (${src})` : ''}`);
+    }
+    if (dev.canbus_frequency) lines.push(`CAN速率: ${_compileFormatBitrate(dev.canbus_frequency)}`);
+    if (dev.can_pins) lines.push(`CAN引脚: ${dev.can_pins}`);
+    if (dev.startup_pin) lines.push(`启动引脚: ${dev.startup_pin}`);
+    if (dev.bl_offset_label) lines.push(`BL偏移: ${dev.bl_offset_label}`);
+    if (dev.crystal) {
+        const src = _compileSourceLabel(fieldSources.crystal);
+        const label = dev.crystal_label || _compileFormatFrequency(dev.crystal);
+        lines.push(`晶振: ${label}${src ? ` (${src})` : ''}`);
+    }
+    if (dev.crystal_pins) lines.push(`晶振引脚: ${dev.crystal_pins}`);
+    if (dev.mcu_freq) lines.push(`主频: ${_compileFormatFrequency(dev.mcu_freq)}`);
+
+    if (selectedMcu && detectedMcu && !_compileMcuNamesCompatible(selectedMcu, detectedMcu)) {
+        warnings.push(`当前编译 MCU 为 ${selectedMcu}，与设备 ${detectedMcu} 不一致`);
+    } else if (dev._compile_match_error) {
+        warnings.push(dev._compile_match_error);
+    } else if (dev._compile_match_type === 'detected_fallback') {
+        warnings.push('编译 MCU 数据库无精确型号，已按设备识别值填入自定义参数');
+    } else if (!selectedMcu && detectedMcu) {
+        warnings.push('当前尚未选择编译 MCU，仅显示设备固件信息用于对照');
+    }
+    if (selectedComm && detectedComm && selectedComm !== detectedComm) {
+        warnings.push(`当前连接方式为 ${_compileConnectionDisplay(selectedComm)}，设备识别为 ${_compileConnectionDisplay(detectedComm)}`);
+    }
+    if ((selectedComm === 'can' || selectedComm === 'usbcanbridge') && dev.canbus_frequency) {
+        const selectedBitrate = _getSelectedCanBitrate();
+        const detectedBitrate = _normalizeCanBitrate(dev.canbus_frequency);
+        if (selectedBitrate && detectedBitrate && selectedBitrate !== detectedBitrate) {
+            warnings.push(`当前 CAN 速率为 ${_compileFormatBitrate(selectedBitrate)}，设备识别为 ${_compileFormatBitrate(detectedBitrate)}`);
+        }
+    }
+    const selectedStartupPin = document.getElementById('compileStartupPin')?.value || '';
+    if (selectedStartupPin && dev.startup_pin && selectedStartupPin !== String(dev.startup_pin)) {
+        warnings.push(`当前启动引脚为 ${selectedStartupPin}，设备识别为 ${dev.startup_pin}`);
+    }
+    const selectedBlOffset = document.getElementById('compileBlOffset')?.value || '';
+    if (selectedBlOffset && dev.bl_offset && String(selectedBlOffset) !== String(dev.bl_offset)) {
+        warnings.push(`当前 BL 偏移为 ${formatCompileBlOffset(selectedBlOffset, selectedMcu)}，设备识别为 ${dev.bl_offset_label || dev.bl_offset}`);
+    }
+    const selectedCrystal = document.getElementById('compileCrystal')?.value || '';
+    if (selectedCrystal && dev.crystal && String(selectedCrystal) !== String(dev.crystal)) {
+        warnings.push(`当前晶振为 ${_compileFormatFrequency(selectedCrystal)}，设备识别为 ${dev.crystal_label || _compileFormatFrequency(dev.crystal)}`);
+    }
+
+    hint.style.display = 'block';
+    hint.style.borderLeftColor = warnings.length ? 'var(--warning-color)' : 'var(--success-color)';
+    hint.style.background = warnings.length ? 'rgba(255,193,7,.12)' : 'rgba(76,175,80,.10)';
+    hint.innerHTML = [
+        `<div><strong>固件识别对照</strong>: ${lines.map(escapeHtml).join(' · ') || escapeHtml(dev.uuid || '')}</div>`,
+        warnings.length ? `<div style="color:var(--warning-color);margin-top:4px;">${warnings.map(escapeHtml).join('；')}</div>` : ''
+    ].filter(Boolean).join('');
+}
+
+async function _matchSelectedFlashDevice(notify = true) {
+    const select = document.getElementById('flashDeviceId');
+    const dev = select ? _lastDetectedCanDevicesByUuid[String(select.value || '').toLowerCase()] : null;
+    const changes = await _applyDetectedCanDeviceParams(dev);
+    _renderFlashDeviceCompare(dev);
+    if (notify && changes.length) {
+        showSuccess(`已按所选 CAN ID 匹配: ${changes.join('、')}`);
+    }
+    return changes;
+}
+
+async function onFlashDeviceIdChange() {
+    await _matchSelectedFlashDevice(true);
+    refreshFlashPlan(false);
 }
 
 function onCompileConnectionDetailChange() {
@@ -1168,6 +1664,7 @@ async function refreshDeviceIds() {
     const canErrDiv = document.getElementById('flashCanSearchError');
     const previousValue = select.value;
     const canIface = canIfaceSelect ? canIfaceSelect.value : 'can0';
+    _lastDetectedCanDevicesByUuid = {};
 
     if (canErrDiv) canErrDiv.style.display = 'none';
     select.innerHTML = '<option value="">-- 正在扫描 --</option>';
@@ -1262,6 +1759,9 @@ async function refreshDeviceIds() {
                 let canOptsHtml = `<option disabled>━━━━━━━━ CAN 设备 (${escapeHtml(canIface)}) ━━━━━━━━</option>`;
 
                 canData.uuids.forEach(d => {
+                    if (d.uuid) {
+                        _lastDetectedCanDevicesByUuid[String(d.uuid).toLowerCase()] = d;
+                    }
                     // 根据应用类型和来源构建标签
                     let icon = '';
                     let appLabel = '';
@@ -1288,11 +1788,21 @@ async function refreshDeviceIds() {
                     // 第二部分：MCU 型号和频率
                     if (d.mcu_model) {
                         const mcuName = String(d.mcu_model).toUpperCase();
-                        const mcuDisplay = d.mcu_freq ? `${mcuName} @ ${d.mcu_freq}` : mcuName;
+                        const mcuDisplay = d.mcu_freq ? `${mcuName} @ ${_compileFormatFrequency(d.mcu_freq)}` : mcuName;
                         parts.push(mcuDisplay);
                     }
                     if (d.mcu_version) {
                         parts.push(d.mcu_version);
+                    }
+                    if (d.crystal) {
+                        parts.push(`晶振${d.crystal_label || _compileFormatFrequency(d.crystal)}`);
+                    }
+                    if (d.inferred_connection) {
+                        const src = _compileSourceLabel((d.field_sources || {}).inferred_connection);
+                        parts.push(`${d.inferred_connection}${src ? `(${src})` : ''}`);
+                    }
+                    if (d.canbus_frequency) {
+                        parts.push(_compileFormatBitrate(d.canbus_frequency));
                     }
                     const bracketInfo = parts.length > 0 ? ` [${parts.join(' / ')}]` : '';
 
@@ -1333,9 +1843,16 @@ async function refreshDeviceIds() {
                 }
             }
         }
+        const selectedDev = _lastDetectedCanDevicesByUuid[String(select.value || '').toLowerCase()];
+        if (selectedDev) {
+            await _matchSelectedFlashDevice(true);
+        } else {
+            _renderFlashDeviceCompare(null);
+        }
     } catch (error) {
         console.error('扫描设备失败:', error);
         select.innerHTML = '<option value="">-- 扫描失败 --</option>';
+        _renderFlashDeviceCompare(null);
     }
 }
 

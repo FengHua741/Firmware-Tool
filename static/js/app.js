@@ -345,6 +345,112 @@ async function diagnoseCanNetwork() {
     }
 }
 
+function canFieldSourceLabel(source) {
+    const labels = {
+        klipper_identify: '实读',
+        moonraker_mcu_constants: '实读',
+        katapult_protocol: 'KAT读取',
+        firmware_inferred: '固件推断',
+        board_config_inferred: '数据库推断',
+    };
+    return labels[source] || source || '';
+}
+
+function canFieldLine(dev, key, label, formatter) {
+    const value = dev[key];
+    if (value === undefined || value === null || value === '') return '';
+    const source = canFieldSourceLabel((dev.field_sources || {})[key]);
+    const display = formatter ? formatter(value) : value;
+    return `${label}: ${display}${source ? ` (${source})` : ''}`;
+}
+
+function canUnavailableLine(dev, key, label) {
+    if (dev.app !== 'Katapult' || dev[key]) return '';
+    return `${label}: 旧KAT未上报，无法仅凭固件确认`;
+}
+
+function canFormatPins(value) {
+    if (!value) return '';
+    if (typeof value === 'object' && !Array.isArray(value)) {
+        return Object.entries(value)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(', ');
+    }
+    return String(value);
+}
+
+function canFormatFrequency(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return String(value);
+    if (num >= 1000000 && num % 1000000 === 0) {
+        return `${num / 1000000} MHz`;
+    }
+    if (num >= 1000000) {
+        return `${(num / 1000000).toFixed(2).replace(/\.?0+$/, '')} MHz`;
+    }
+    if (num >= 1000 && num % 1000 === 0) {
+        return `${num / 1000} kHz`;
+    }
+    if (num >= 1000) {
+        return `${(num / 1000).toFixed(2).replace(/\.?0+$/, '')} kHz`;
+    }
+    return `${num} Hz`;
+}
+
+function canFormatBitrate(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return String(value);
+    if (num >= 1000000 && num % 1000000 === 0) {
+        return `${num / 1000000} Mbps`;
+    }
+    if (num >= 1000000) {
+        return `${(num / 1000000).toFixed(2).replace(/\.?0+$/, '')} Mbps`;
+    }
+    if (num >= 1000 && num % 1000 === 0) {
+        return `${num / 1000} kbps`;
+    }
+    if (num >= 1000) {
+        return `${(num / 1000).toFixed(2).replace(/\.?0+$/, '')} kbps`;
+    }
+    return `${num} bps`;
+}
+
+function canConnectionLine(dev) {
+    const value = dev.inferred_connection || dev.board_inference?.connection_label;
+    if (!value) return '';
+    const source = canFieldSourceLabel(
+        (dev.field_sources || {}).inferred_connection || dev.board_inference?.source || 'board_config_inferred'
+    );
+    return `连接方式: ${value}${source ? ` (${source})` : ''}`;
+}
+
+function canDetailLines(dev) {
+    return [
+        `UUID: ${dev.uuid || 'N/A'}`,
+        `应用: ${dev.app || 'Unknown'}`,
+        dev.mcu_model ? `MCU: ${String(dev.mcu_model).toUpperCase()}` : '',
+        canFieldLine(dev, 'mcu_version', '固件'),
+        canFieldLine(dev, 'mcu_freq', '主频', canFormatFrequency),
+        canFieldLine(dev, 'crystal', '晶振', v => v === 'internal' ? 'Internal clock' : canFormatFrequency(v)),
+        canFieldLine(dev, 'crystal_pins', '晶振引脚', canFormatPins),
+        canFieldLine(dev, 'canbus_frequency', 'CAN速率', canFormatBitrate),
+        canFieldLine(dev, 'can_pins', 'CAN引脚', canFormatPins),
+        canUnavailableLine(dev, 'can_pins', 'CAN引脚'),
+        canFieldLine(dev, 'startup_pin', '启动引脚'),
+        canUnavailableLine(dev, 'startup_pin', '启动引脚'),
+        canFieldLine(dev, 'led_pin', 'LED引脚'),
+        canUnavailableLine(dev, 'led_pin', 'LED引脚'),
+        canFieldLine(dev, 'application_start', '应用地址'),
+        canFieldLine(dev, 'bl_offset_label', 'BL偏移'),
+        canFieldLine(dev, 'katapult_protocol', 'KAT协议'),
+        canFieldLine(dev, 'katapult_block_size', '块大小', v => `${v} bytes`),
+        canConnectionLine(dev),
+        dev.katapult_query_error ? `KAT查询: ${dev.katapult_query_error}` : '',
+        dev.section ? `配置: [${dev.section}]` : '',
+        dev.connection_status ? `状态: ${dev.connection_status}` : '',
+    ].filter(Boolean);
+}
+
 // CAN UUID搜索
 async function searchCanUuid() {
     const select = document.getElementById('canIfaceSelect');
@@ -385,15 +491,17 @@ async function searchCanUuid() {
                 const appColor = d.app === 'Klipper' ? '#4caf50' : d.app === 'Katapult' ? '#ff9800' : d.app === 'Klipper (config)' ? '#1976d2' : '#999';
                 // 从 mcu_model 提取可读型号（如 stm32f407xx → STM32F407）
                 const mcuLabel = d.mcu_model ? ` / ${String(d.mcu_model).toUpperCase()}` : '';
-                const freqLabel = d.mcu_freq ? ` @ ${d.mcu_freq}` : '';
+                const freqLabel = d.canbus_frequency ? ` @ CAN ${canFormatBitrate(d.canbus_frequency)}` : d.mcu_freq ? ` @ ${canFormatFrequency(d.mcu_freq)}` : '';
                 const versionLabel = d.mcu_version ? ` / ${d.mcu_version}` : '';
                 const uuid = escapeHtml(d.uuid);
+                const details = canDetailLines(d).filter(line => !line.startsWith('UUID:') && !line.startsWith('应用:'));
                 return `
                 <div class="id-item">
                     <span class="id-text">
                         <span style="font-weight:600;">${uuid}</span>
                         <span style="font-size:11px;color:${appColor};margin-left:8px;">[${escapeHtml(appDisplay + mcuLabel + freqLabel + versionLabel)}]</span>
                         ${d.section ? `<span style="font-size:11px;color:var(--text-secondary);margin-left:6px;">${escapeHtml(d.section)}</span>` : ''}
+                        ${details.length ? `<span style="display:block;font-size:11px;color:var(--text-secondary);margin-top:4px;line-height:1.5;">${details.map(escapeHtml).join(' · ')}</span>` : ''}
                     </span>
                     <button class="btn btn-sm btn-secondary" onclick="copyToClipboard('${escapeJsString(d.uuid)}')">复制</button>
                 </div>
@@ -1082,10 +1190,32 @@ async function testSshConnection() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (data.success) {
-            resultEl.textContent = data.message || '连接成功';
+            resultEl.innerHTML = data.message || '连接成功';
             resultEl.style.color = '#28a745';
         } else {
-            resultEl.textContent = data.error || '连接失败';
+            let errorHtml = data.error || '连接失败';
+            // 根据错误类型提供对应的操作建议
+            switch (data.error_type) {
+                case 'host_key_mismatch':
+                    errorHtml += ' <button class="btn btn-sm btn-warning" onclick="clearHostKeys()" style="margin-left:8px;padding:2px 8px;font-size:12px;">清除主机密钥</button>';
+                    break;
+                case 'connection_reset':
+                    errorHtml += '<br><small style="color:#888;">💡 建议：检查目标设备 SSH 服务状态，稍后重试</small>';
+                    break;
+                case 'connection_refused':
+                    errorHtml += '<br><small style="color:#888;">💡 建议：确认目标设备已开机且 SSH 服务已启动</small>';
+                    break;
+                case 'no_route':
+                    errorHtml += '<br><small style="color:#888;">💡 建议：检查 IP 地址是否正确，是否在同一网络</small>';
+                    break;
+                case 'timeout':
+                    errorHtml += '<br><small style="color:#888;">💡 建议：检查防火墙设置，确认目标设备可达</small>';
+                    break;
+                case 'auth_failed':
+                    errorHtml += '<br><small style="color:#888;">💡 建议：检查用户名和密码是否正确</small>';
+                    break;
+            }
+            resultEl.innerHTML = errorHtml;
             resultEl.style.color = '#dc3545';
         }
     } catch (error) {
@@ -1093,6 +1223,25 @@ async function testSshConnection() {
         resultEl.style.color = '#dc3545';
     }
     if (btnEl) btnEl.disabled = false;
+}
+
+// 清除已保存的主机密钥（主机密钥变更后使用）
+async function clearHostKeys() {
+    try {
+        const response = await fetch('/api/settings/ssh-credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clear_host_keys: true })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showSuccess(data.message || '主机密钥已清除，请重新测试连接');
+        } else {
+            showError(data.message || '清除失败');
+        }
+    } catch (e) {
+        showError('清除主机密钥失败: ' + e.message);
+    }
 }
 
 // ==================== 工具函数 ====================
@@ -1822,15 +1971,7 @@ function renderCanTopology(data, container) {
 
 function showCanNodeDetail(el, devJson) {
     const dev = JSON.parse(devJson);
-    const lines = [
-        `UUID: ${dev.uuid || 'N/A'}`,
-        `应用: ${dev.app || 'Unknown'}`,
-        dev.mcu_model ? `MCU: ${String(dev.mcu_model).toUpperCase()}` : '',
-        dev.mcu_freq ? `频率: ${dev.mcu_freq}` : '',
-        dev.mcu_version ? `固件: ${dev.mcu_version}` : '',
-        dev.section ? `配置: [${dev.section}]` : '',
-        `状态: ${dev.connection_status || 'unknown'}`,
-    ].filter(Boolean);
+    const lines = canDetailLines(dev);
 
     const existing = document.querySelector('.can-node-detail-popup');
     if (existing) existing.remove();
