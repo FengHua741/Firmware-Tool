@@ -2,7 +2,7 @@
   "bl_default_flash": "UF2",
   "bl_flash_support": "支持",
   "bl_offset": "16384",
-  "boot_pins": "!gpio5",
+  "boot_pins": "!gpio18",
   "can_gpio": {
     "rx": 1,
     "tx": 0
@@ -18,16 +18,15 @@
     "custom_config": "",
     "device_id": "",
     "enabled": false,
-    "flash_mode": "UF2",
     "katapult_mode": "USB"
   },
   "flash_modes": [
     "CAN"
   ],
-  "id": "sht36_v3",
+  "id": "tool-lite",
   "manufacturer": "FLY",
   "mcu": "rp2040",
-  "name": "FLY-SHT36 V3",
+  "name": "TOOL-LITE",
   "platform": "RP2040",
   "type": "toolboard"
 }

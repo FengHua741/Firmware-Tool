@@ -388,7 +388,7 @@ Firmware-Tool/
 | `/api/system/serial` | GET | 串口设备列表 |
 | `/api/system/lsusb` | GET | USB 设备列表 |
 | `/api/system/can-iface` | GET | CAN 接口列表 |
-| `/api/system/can-uuid` | POST | CAN 设备 UUID 扫描；Klipper 节点可返回 MCU 型号与固件版本 |
+| `/api/system/can-uuid` | POST | CAN 设备 UUID 扫描；Klipper 节点可返回 identify 常量，Katapult 节点可返回应用地址并计算 BL 偏移 |
 | `/api/system/video` | GET | 摄像头设备 |
 | `/api/system/ids` | GET | 汇总 USB、CAN、摄像头、Katapult USB 与 RP BOOT 设备 |
 | `/api/system/versions` | GET | 系统版本信息 |
@@ -498,7 +498,7 @@ Firmware-Tool/
 
 `src/canbus_query.py` 由 `/api/system/can-uuid` 在本地模式优先调用；SSH/FAST-SSH 模式会临时上传到远端 `/tmp/firmware-tool-canbus_query.py` 后执行。脚本通过 Python 直接运行，无单独构建步骤。
 
-MCU 型号和固件版本来自 Klipper 节点的 identify 字典。CanBoot/Katapult 节点通常只能返回 UUID 与应用类型。
+MCU 型号、固件版本、CAN 速率、CAN 保留引脚和启动引脚来自 Klipper 节点的 identify 字典。Klipper 节点的连接方式优先由固件常量推断，例如 `CANBUS_BRIDGE=1` 会标记为 USB桥接CAN，`CANBUS_FREQUENCY` 或 `RESERVE_PINS_CAN` 会标记为 CANBUS。Katapult 节点可通过 `flashtool.py -s` 读取 MCU 型号、Katapult 版本、协议版本、块大小和应用启动地址，并由应用启动地址计算 BL 偏移。旧 Katapult 固件不直接上报 CAN RX/TX、LED 引脚或启动引脚；这些字段仅在命中板卡数据库时标记为数据库推断。固件没有足够信息时，连接方式才会结合板卡库候选兜底归纳为 USB桥接CAN、CANBUS、USB 或串口/UART。
 
 ## API 使用约定
 
