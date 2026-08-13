@@ -89,6 +89,39 @@ SSH_RECONNECT_COOLDOWN = 10
 SSH_RECONNECT_MAX_INTERVAL = 120
 
 
+def _get_disk_usage():
+    """获取磁盘使用情况：优先选择容量最大的真实数据分区。
+
+    FlyOS-Fast 的 / 是只读 squashfs 系统分区（通常 100% 占用），
+    真实数据分区是 /overlay，必须跳过虚拟/只读文件系统避免误报。
+    """
+    try:
+        best = None
+        for part in psutil.disk_partitions(all=False):
+            dev = (part.device or '').lower()
+            fstype = (part.fstype or '').lower()
+            mp = part.mountpoint
+            # 跳过虚拟/只读/临时文件系统（含 overlay 挂载与 squashfs 只读根分区）
+            if (fstype in ('tmpfs', 'devtmpfs', 'squashfs', 'ramfs', 'overlay', 'overlayfs', 'zram')
+                    or 'overlay' in dev or dev.startswith('/dev/zram')
+                    or mp.startswith(('/run/', '/dev/', '/sys/', '/proc/', '/var/log'))):
+                continue
+            try:
+                usage = psutil.disk_usage(mp)
+            except OSError:
+                continue
+            if usage.total <= 0:
+                continue
+            if best is None or usage.total > best.total:
+                best = usage
+        return best or psutil.disk_usage('/')
+    except Exception:
+        try:
+            return psutil.disk_usage('/')
+        except Exception:
+            return None
+
+
 def _collect_remote_resources():
     """通过 SSH 单次命令采集远程系统资源"""
     global _remote_cpu_prev
@@ -104,7 +137,7 @@ def _collect_remote_resources():
             "echo '===FRQ==='; cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo 0; "
             "echo '===CNT==='; nproc; "
             "echo '===MEM==='; free -b | grep '^Mem:'; "
-            "echo '===DSK==='; df -B1 --output=source,size,used,target 2>/dev/null | grep -vE '^(tmpfs|devtmpfs|overlayfs|Filesystem|/dev/zram)' | sort -k2 -rn | head -1; "
+            "echo '===DSK==='; df -B1 --output=source,size,used,target 2>/dev/null | grep -vE '^(tmpfs|devtmpfs|overlayfs|squashfs|Filesystem|/dev/zram)' | sort -k2 -rn | head -1; "
             "echo '===NET==='; ip -br -4 addr show 2>/dev/null | grep -iE '^(eth|en|wlan|wlo)'; "
             "echo '===VER==='; flyos-fast-ota --version 2>&1 | head -1; "
             "echo '===BRD==='; cat /proc/cmdline 2>/dev/null; "
@@ -340,7 +373,7 @@ def resource_monitor():
             else:
                 cpu_percent = psutil.cpu_percent(interval=1)
                 memory = psutil.virtual_memory()
-                disk = psutil.disk_usage('/')
+                disk = _get_disk_usage() or psutil.disk_usage('/')
 
                 resource_history['cpu'].append(cpu_percent)
                 resource_history['memory'].append(memory.percent)
@@ -397,7 +430,7 @@ def get_system_resources():
                 'used': round(memory.used / (1024**3), 1),
                 'percent': memory.percent
             }
-            disk = psutil.disk_usage('/')
+            disk = _get_disk_usage() or psutil.disk_usage('/')
             disk_info = {
                 'total': round(disk.total / (1024**3), 1),
                 'used': round(disk.used / (1024**3), 1),
