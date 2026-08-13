@@ -1771,6 +1771,7 @@ def flash_firmware():
 
                 if is_fast_ssh_mode():
                     logger.info('FAST-SSH 模式：使用 CAN 直接烧录')
+                    yield f'data: [LOG] 正在通过 CAN ({can_iface}) 烧录设备 {can_uuid}...\n\n'
                     fast_flashtool = os.path.join(home_dir, 'klipper', 'lib', 'katapult', 'flashtool.py')
                     fast_flash_can = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
                     if path_exists(fast_flashtool):
@@ -1783,12 +1784,15 @@ def flash_firmware():
                         _err_msg = f"未找到烧录工具。请确认 Klipper 已安装。\n查找路径:\n  {fast_flashtool}\n  {fast_flash_can}"
                         yield f'data: {json.dumps({"error": _err_msg})}\n\n'
                         return
+                    yield f'data: [LOG] 执行烧录命令: {os.path.basename(cmd.split()[1])}\n\n'
                     result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
                 else:
                     reset_cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -i {shlex.quote(can_iface)} -r -u {shlex.quote(can_uuid)}'
                     logger.info(f'CAN 重置命令：{reset_cmd}')
+                    yield f'data: [LOG] 发送 CAN 复位命令到 {can_uuid}...\n\n'
                     run_cmd(reset_cmd, shell=True, capture_output=True, text=True, timeout=30)
                     logger.info('等待设备重新枚举...')
+                    yield f'data: [LOG] 等待设备进入 Katapult 模式...\n\n'
                     katapult_device = None
                     for _ in range(20):
                         time.sleep(0.5)

@@ -469,6 +469,58 @@ class SSHManager:
                     self._mark_connection_success()
                     logger.info(f"SSH 连接成功: {cfg['ssh_user']}@{host}:{cfg.get('ssh_port', 22)}")
                     return self._client
+                except paramiko.BadHostKeyException as e:
+                    # 主机密钥不匹配：目标设备可能已更换/重装系统
+                    last_error = ConnectionError(
+                        f"SSH 连接失败: 主机密钥不匹配 — 设备 {host} 的密钥已变更。"
+                        f"请运行 'ssh-keygen -f ~/.firmware-tool/known_hosts -R {host}' 清除旧密钥后重试。"
+                    )
+                    logger.warning(f"SSH Host key mismatch for {host}")
+                    break  # 主机密钥错误不会因重试而解决，直接跳出
+                except paramiko.SSHException as e:
+                    err_str = str(e)
+                    # SSH 协议层错误，区分不同场景给出诊断建议
+                    if 'Error reading SSH protocol banner' in err_str:
+                        # 连接建立后被远端重置（RST），通常表示 SSH 服务过载/重启中
+                        last_error = ConnectionError(
+                            f"SSH 连接失败: 与 {host}:{cfg.get('ssh_port', 22)} 建立连接后"
+                            f"被远端重置 — 目标设备 SSH 服务可能过载、正在重启或端口上运行的不是 SSH 服务。"
+                            f"请稍后重试。"
+                        )
+                        logger.warning(f"SSH protocol banner read failed for {host}: {err_str}")
+                        # 这类错误不因立即重试而解决，但仍尝试一次
+                    elif 'Authentication failed' in err_str or 'authentication' in err_str.lower():
+                        last_error = ConnectionError(
+                            f"SSH 认证失败: 用户名或密码错误 ({cfg.get('ssh_user', '')}@{host})"
+                        )
+                        break  # 认证错误重试无意义
+                    else:
+                        last_error = e
+                        logger.warning(f"SSH 连接尝试 {attempt + 1}/{self.CONNECT_RETRIES} 失败: {e}")
+                    if attempt < self.CONNECT_RETRIES - 1:
+                        time.sleep(self.CONNECT_RETRY_INTERVAL)
+                except (TimeoutError, OSError) as e:
+                    # 网络层错误（超时、拒绝连接等）
+                    err_str = str(e)
+                    if 'Connection refused' in err_str or 'Errno 111' in err_str:
+                        last_error = ConnectionError(
+                            f"SSH 连接失败: {host}:{cfg.get('ssh_port', 22)} 端口未开放，"
+                            f"请检查目标设备是否在线及 SSH 服务是否运行。"
+                        )
+                    elif 'No route to host' in err_str or 'Errno 113' in err_str:
+                        last_error = ConnectionError(
+                            f"SSH 连接失败: 无法到达 {host}，请检查网络连接及 IP 地址是否正确。"
+                        )
+                    elif 'timed out' in err_str.lower() or 'Timeout' in err_str:
+                        last_error = ConnectionError(
+                            f"SSH 连接超时: {host}:{cfg.get('ssh_port', 22)} 无响应，"
+                            f"请检查网络及防火墙设置。"
+                        )
+                    else:
+                        last_error = e
+                    logger.warning(f"SSH 连接尝试 {attempt + 1}/{self.CONNECT_RETRIES} 失败: {e}")
+                    if attempt < self.CONNECT_RETRIES - 1:
+                        time.sleep(self.CONNECT_RETRY_INTERVAL)
                 except Exception as e:
                     last_error = e
                     logger.warning(f"SSH 连接尝试 {attempt + 1}/{self.CONNECT_RETRIES} 失败: {e}")

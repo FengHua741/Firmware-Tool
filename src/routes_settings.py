@@ -252,6 +252,24 @@ def test_local_connection():
 @settings_bp.route('/api/settings/ssh-test', methods=['POST'])
 def test_ssh_connection():
     """测试 SSH 连接"""
+    def _detect_error_type(msg):
+        """根据错误消息识别错误类型"""
+        if not msg:
+            return None
+        if '主机密钥' in msg or 'Host key' in msg:
+            return 'host_key_mismatch'
+        if '被远端重置' in msg or 'protocol banner' in msg or 'Connection reset' in msg:
+            return 'connection_reset'
+        if '端口未开放' in msg or 'Connection refused' in msg:
+            return 'connection_refused'
+        if '无法到达' in msg or 'No route to host' in msg:
+            return 'no_route'
+        if '连接超时' in msg or 'timed out' in msg:
+            return 'timeout'
+        if '认证失败' in msg or 'Authentication failed' in msg:
+            return 'auth_failed'
+        return None
+
     try:
         manager = SSHManager.get_instance()
         manager.disconnect()
@@ -259,9 +277,18 @@ def test_ssh_connection():
         if success:
             return jsonify({'success': True, 'message': message})
         else:
-            return jsonify({'success': False, 'error': message}), 200
+            return jsonify({
+                'success': False,
+                'error': message,
+                'error_type': _detect_error_type(message)
+            }), 200
     except Exception as e:
-        return jsonify({'success': False, 'error': safe_error(e)}), 200
+        err_msg = safe_error(e)
+        return jsonify({
+            'success': False,
+            'error': err_msg,
+            'error_type': _detect_error_type(err_msg)
+        }), 200
 
 
 @settings_bp.route('/api/ssh/status')
