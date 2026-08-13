@@ -306,6 +306,28 @@ async function selectConfigFile(manufacturer, boardType, configId, nodeId) {
 // ==================== 编辑器 ====================
 
 function switchEditorTab(mode) {
+    // 从 JSON 切换到表单：先解析 JSON，同步到 data，再重新渲染表单
+    if (currentEditorMode === 'json' && mode === 'form') {
+        const jsonEditor = document.getElementById('cmJsonEditor');
+        if (jsonEditor) {
+            try {
+                const data = JSON.parse(jsonEditor.value);
+                currentConfigFile.data = data;
+            } catch (e) {
+                showError('JSON 格式错误，请先修正: ' + e.message);
+                return;
+            }
+        }
+        currentEditorMode = mode;
+        renderEditor();
+        return;
+    }
+
+    // 从表单切换到 JSON：先同步表单到 JSON 编辑器
+    if (currentEditorMode === 'form' && mode === 'json') {
+        syncFormToJson();
+    }
+
     currentEditorMode = mode;
     document.querySelectorAll('.cm-tab').forEach(el => el.classList.remove('active'));
     document.querySelector(`.cm-tab[data-mode="${mode}"]`).classList.add('active');
@@ -364,6 +386,9 @@ function renderEditor() {
     // 绑定表单事件
     bindFormEvents();
 
+    // 重新绑定 JSON 编辑器监听器（因为 renderEditor 重建了 DOM）
+    setupConfigManagerListeners();
+
     // 初始化MCU下拉框（如果已有平台值）
     const platformEl = document.getElementById('cmPlatform');
     if (platformEl && platformEl.value) {
@@ -377,6 +402,12 @@ function renderEditor() {
 function renderFormPanel(data) {
     const flashModes = data.flash_modes || [];
     const connections = data.connections || [];
+    const canGpio = data.can_gpio || {};
+
+    // CAN GPIO 引脚显示条件：RP2040 系列 MCU 或配置中已有 can_gpio 字段
+    const isRp2040 = ['rp2040', 'rp2350'].includes(String(data.mcu || '').toLowerCase());
+    const hasCanGpio = canGpio.rx !== undefined || canGpio.tx !== undefined;
+    const showCanGpio = isRp2040 || hasCanGpio;
 
     // 烧录方式 checkbox HTML
     const allFlashModes = ['DFU', 'KAT', 'CAN', 'CAN_BRIDGE_DFU', 'CAN_BRIDGE_KAT', 'UF2', 'TF', 'HOST'];
@@ -479,6 +510,21 @@ function renderFormPanel(data) {
                         </div>
                     </div>
                 </div>
+                <div class="cm-form-row" id="cmCanGpioRow" style="${showCanGpio ? '' : 'display:none;'}">
+                    <div class="cm-form-field" style="flex: 2;">
+                        <label>CAN GPIO 引脚 <small style="color:var(--text-secondary);font-weight:normal;">（RP2040 系列）</small></label>
+                        <div style="display:flex;gap:6px;">
+                            <div style="flex:1;">
+                                <small>RX GPIO</small>
+                                <input type="number" id="cmCanRx" class="cm-input" min="0" max="29" value="${escapeHtml(canGpio.rx ?? '')}" placeholder="例如: 4">
+                            </div>
+                            <div style="flex:1;">
+                                <small>TX GPIO</small>
+                                <input type="number" id="cmCanTx" class="cm-input" min="0" max="29" value="${escapeHtml(canGpio.tx ?? '')}" placeholder="例如: 5">
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- 烧录配置 -->
@@ -567,6 +613,9 @@ async function onCmMcuPlatformChange() {
     mcuEl.innerHTML = '<option value="">-- 选择型号 --</option>';
     mcuEl.disabled = !platform;
 
+    // 平台变化时更新 CAN GPIO 字段显隐（清空型号后隐藏）
+    updateCanGpioFieldVisibility();
+
     if (!platform) return;
 
     try {
@@ -601,6 +650,9 @@ async function onCmMcuModelChange() {
     const blOffsetEl = document.getElementById('cmBlOffset');
     const connTagsEl = document.getElementById('cmConnTags');
     if (!platformEl || !mcuEl || !mcuEl.value) return;
+
+    // 更新 CAN GPIO 字段显隐（RP2040 系列显示 RX/TX）
+    updateCanGpioFieldVisibility();
 
     const platform = platformEl.value;
     const mcuId = mcuEl.value;
@@ -676,7 +728,7 @@ function formatBlOffset(offset, mcuId) {
 
 function bindFormEvents() {
     // 表单字段变化时，同步更新 JSON 编辑器
-    const formIds = ['cmName', 'cmManufacturer', 'cmType', 'cmPlatform', 'cmMcu', 'cmCrystal', 'cmBlOffset', 'cmBootPins', 'cmDefaultFlash', 'cmFwUpdateEnabled', 'cmKatapultMode', 'cmDeviceId', 'cmUpdateFlashMode'];
+    const formIds = ['cmName', 'cmManufacturer', 'cmType', 'cmPlatform', 'cmMcu', 'cmCrystal', 'cmBlOffset', 'cmBootPins', 'cmDefaultFlash', 'cmFwUpdateEnabled', 'cmKatapultMode', 'cmDeviceId', 'cmUpdateFlashMode', 'cmCanRx', 'cmCanTx'];
     formIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -692,6 +744,21 @@ function bindFormEvents() {
 
     // 初始化名称到ID的显示
     syncNameToIdDisplay();
+
+    // 初始化 CAN GPIO 字段显隐
+    updateCanGpioFieldVisibility();
+}
+
+// 根据 MCU 型号更新 CAN GPIO 引脚字段的显隐状态
+function updateCanGpioFieldVisibility() {
+    const row = document.getElementById('cmCanGpioRow');
+    if (!row) return;
+    const mcuEl = document.getElementById('cmMcu');
+    const mcu = mcuEl ? mcuEl.value : (currentConfigFile && currentConfigFile.data ? currentConfigFile.data.mcu : '');
+    const isRp = ['rp2040', 'rp2350'].includes(String(mcu).toLowerCase());
+    const hasGpio = !!(currentConfigFile && currentConfigFile.data && currentConfigFile.data.can_gpio &&
+        (currentConfigFile.data.can_gpio.rx !== undefined || currentConfigFile.data.can_gpio.tx !== undefined));
+    row.style.display = (isRp || hasGpio) ? '' : 'none';
 }
 
 function syncNameToIdDisplay() {
@@ -823,6 +890,18 @@ function collectFormData() {
         }
     }
 
+    // CAN GPIO 引脚（RP2040 系列，RX/TX）
+    const canRx = getVal('cmCanRx');
+    const canTx = getVal('cmCanTx');
+    if (canRx !== '' || canTx !== '') {
+        const gpio = {};
+        if (canRx !== '') gpio.rx = canRx;
+        if (canTx !== '') gpio.tx = canTx;
+        data.can_gpio = gpio;
+    } else {
+        delete data.can_gpio;
+    }
+
     // 固件更新
     const fwEnabled = getVal('cmFwUpdateEnabled') === 'true';
     if (fwEnabled) {
@@ -841,6 +920,10 @@ function collectFormData() {
 
 function syncFormToJson() {
     const data = collectFormData();
+    // 同步更新 currentConfigFile.data，确保数据一致性
+    if (currentConfigFile) {
+        currentConfigFile.data = data;
+    }
     const jsonEditor = document.getElementById('cmJsonEditor');
     if (jsonEditor) {
         jsonEditor.value = JSON.stringify(data, null, 2);
@@ -849,12 +932,12 @@ function syncFormToJson() {
 
 function syncJsonToForm() {
     const jsonEditor = document.getElementById('cmJsonEditor');
-    if (!jsonEditor || currentEditorMode !== 'json') return;
+    if (!jsonEditor) return;
 
     try {
         const data = JSON.parse(jsonEditor.value);
         currentConfigFile.data = data;
-        // 如果当前在 JSON 模式，不强制刷新表单，避免打断编辑；切换回表单时会重新渲染
+        // 如果在 JSON 模式下，只更新 data 不刷新表单；切换回表单时通过 switchEditorTab 重新渲染
     } catch (e) {
         // JSON 格式错误，忽略
     }
