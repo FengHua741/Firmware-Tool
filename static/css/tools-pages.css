@@ -190,6 +190,8 @@
 .cg-board-image-container { display:none; margin-top:10px; }
 .cg-board-map.empty .cg-board-image-stage { display:none; }
 .cg-board-map.empty .cg-board-pin-info { margin-top:0; }
+.cg-toolboard-map.empty .cg-board-image-stage { display:none; }
+.cg-toolboard-map.empty .cg-board-pin-info { margin-top:0; }
 .cg-board-image-stage { position:relative; display:inline-block; max-width:100%; line-height:0; border-radius:8px; border:1px solid var(--border-color); overflow:hidden; background:var(--bg-color); }
 .cg-board-image { display:block; max-width:100%; max-height:360px; object-fit:contain; }
 .cg-board-overlay { position:absolute; inset:0; pointer-events:none; }

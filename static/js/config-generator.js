@@ -351,10 +351,10 @@ function cgBoardTypeLabel(type) {
     }[type] || type;
 }
 
-function cgBoardLayoutItems() {
-    if (!_currentBoardLayout) return [];
+function cgLayoutItems(layout) {
+    if (!layout) return [];
     const items = [];
-    Object.entries(_currentBoardLayout).forEach(([group, entries]) => {
+    Object.entries(layout).forEach(([group, entries]) => {
         if (group === 'img' || !Array.isArray(entries)) return;
         entries.forEach(entry => {
             if (!entry?.name) return;
@@ -379,9 +379,13 @@ function cgBoardLayoutItems() {
     return items;
 }
 
-function cgBoardLayoutBaseSize(imgEl) {
-    const info = _currentBoardLayout?.img || {};
-    const zoom = Number(info.Zoom || info.zoom || 1) || 1;
+function cgBoardLayoutItems() {
+    return cgLayoutItems(_currentBoardLayout);
+}
+
+function cgLayoutBaseSize(layout, imgEl, items=cgLayoutItems(layout)) {
+    const info = layout?.img || {};
+    const legacyZoom = Number(info.Zoom || info.zoom || 1) || 1;
     const rawOffsetX = Number(info.OffsetX ?? info.offsetX ?? 0);
     const rawOffsetY = Number(info.OffsetY ?? info.offsetY ?? 0);
     const offsetX = Number.isFinite(rawOffsetX) ? rawOffsetX : 0;
@@ -392,48 +396,45 @@ function cgBoardLayoutBaseSize(imgEl) {
     const explicitCoordHeight = Number(info.CoordHeight ?? info.coordHeight ?? info.DisplayHeight ?? info.displayHeight);
     if (explicitCoordWidth > 0 && explicitCoordHeight > 0) {
         return {
-            width: explicitCoordWidth * zoom,
-            height: explicitCoordHeight * zoom,
-            zoom,
+            width: explicitCoordWidth,
+            height: explicitCoordHeight,
+            zoom: 1,
             offsetX,
             offsetY
         };
     }
-    const items = cgBoardLayoutItems();
-    const minX = items.length ? Math.min(...items.map(item => item.left)) : 0;
-    const minY = items.length ? Math.min(...items.map(item => item.top)) : 0;
     const maxX = Math.max(...items.map(item => item.left + item.width), 0);
     const maxY = Math.max(...items.map(item => item.top + item.height), 0);
     if (maxX > 0 && maxY > 0) {
-        const spanX = Math.max(maxX - minX, 1);
-        const spanY = Math.max(maxY - minY, 1);
-        const rawPaddingRatio = Number(info.PaddingRatio ?? info.paddingRatio ?? 0.02);
-        const paddingRatio = Number.isFinite(rawPaddingRatio) && rawPaddingRatio >= 0 ? rawPaddingRatio : 0.02;
-        let width = maxX + Math.max(8, spanX * paddingRatio);
-        let height = maxY + Math.max(6, spanY * paddingRatio);
         const aspect = naturalWidth / naturalHeight;
-        if (Number.isFinite(aspect) && aspect > 0) {
-            if (width / height > aspect) {
-                height = width / aspect;
-            } else {
-                width = height * aspect;
-            }
+        // 旧坐标编辑器在约 1000px 宽的画布上保存接口框，却只记录了原图尺寸。
+        // 不能再用最外侧接口反推画布，否则图片边缘没有接口时所有框都会被拉伸。
+        const legacyCanvasWidth = 1000 * Math.max(legacyZoom, 0.1);
+        let width = Math.max(legacyCanvasWidth, maxX + 8);
+        let height = Number.isFinite(aspect) && aspect > 0 ? width / aspect : maxY + 6;
+        if (height < maxY + 6 && Number.isFinite(aspect) && aspect > 0) {
+            height = maxY + 6;
+            width = height * aspect;
         }
         return {
-            width: width * zoom,
-            height: height * zoom,
-            zoom,
+            width,
+            height,
+            zoom: 1,
             offsetX,
             offsetY
         };
     }
     return {
-        width: naturalWidth * zoom || 1,
-        height: naturalHeight * zoom || 1,
-        zoom,
+        width: naturalWidth || 1,
+        height: naturalHeight || 1,
+        zoom: 1,
         offsetX,
         offsetY
     };
+}
+
+function cgBoardLayoutBaseSize(imgEl) {
+    return cgLayoutBaseSize(_currentBoardLayout, imgEl, cgBoardLayoutItems());
 }
 
 function cgMainKeyRawPins(key) {
@@ -1493,6 +1494,7 @@ function renderToolboardConflictPanel() {
             : '<i class="fas fa-info-circle"></i> 尚未在其他选项卡中使用';
     });
     cgRefreshBoardHotspotUsage();
+    cgRenderAllToolboardMaps();
 }
 
 function cgToolboardOwns(claims, func) {
@@ -2024,7 +2026,11 @@ function switchCgTab(n) {
 }
 
 function validateCgStep(tab) {
-    if (tab === 1) return !!document.getElementById('cgBoard')?.value;
+    if (tab === 1) {
+        return !!document.getElementById('cgBoard')?.value &&
+            !!document.getElementById('cgPrinterModel')?.value &&
+            !!_currentPreset;
+    }
     if (tab === 2) {
         // 轴分配完整性：至少分配了一个轴，且无重复轴
         const assigned = [];
@@ -2041,7 +2047,8 @@ function updateCgProgress() {
     if (!bar) return;
     let done = 0;
     const total = 6;
-    if (document.getElementById('cgBoard')?.value) done++;                                    // Tab1 机器设置
+    if (document.getElementById('cgBoard')?.value &&
+        document.getElementById('cgPrinterModel')?.value && _currentPreset) done++;            // Tab1 机器设置
     const assigned = new Set();
     document.querySelectorAll('[id^="cgAxis_"]').forEach(sel => { if (sel.value) assigned.add(sel.value); });
     if (assigned.size > 0 && assigned.size === document.querySelectorAll('[id^="cgAxis_"]').length) done++;  // Tab2 轴分配
@@ -2102,10 +2109,95 @@ async function loadMachinePresets() {
 function populatePrinterModels() {
     const sel = document.getElementById('cgPrinterModel');
     if (!sel || !_machineList.length) return;
-    sel.innerHTML = _machineList.map(m =>
+    sel.innerHTML = '<option value="">-- 选择打印机型号 --</option>' + _machineList.map(m =>
         `<option value="${cgEscapeHtml(m.id)}">${cgEscapeHtml(m.name)} (${cgEscapeHtml(m.drive_count)}驱动, ${cgEscapeHtml(m.geometry?.type || '?')})</option>`
     ).join('') + `<option value="custom">✏️ 自定义打印机</option>`;
     // 不自动加载第一个预设：由用户选择时再加载（避免额外请求与覆盖用户选择）
+}
+
+function cgCurrentKinematics() {
+    const isCustom = document.getElementById('cgPrinterModel')?.value === 'custom';
+    const requested = isCustom
+        ? document.getElementById('cgCustomKinematics')?.value
+        : _currentPreset?.geometry?.type;
+    return requested === 'corexy' ? 'corexy' : 'cartesian';
+}
+
+function cgCustomDimension(id, fallback) {
+    const value = Number(document.getElementById(id)?.value);
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function cgBuildCustomPrinterPreset() {
+    const kinematics = cgCurrentKinematics();
+    const axisCount = Number(document.getElementById('cgCustomAxisCount')?.value || 4);
+    const xMax = cgCustomDimension('cgCustomXMax', 250);
+    const yMax = cgCustomDimension('cgCustomYMax', 250);
+    const zMax = cgCustomDimension('cgCustomZMax', 250);
+    const axesByCount = {
+        3: ['X', 'Y', 'Z'],
+        4: ['X', 'Y', 'Z', 'E'],
+        5: ['X', 'Y', 'Z', 'Z1', 'E'],
+        6: ['X', 'Y', 'Z', 'Z1', 'Z2', 'E'],
+    };
+    const axes = axesByCount[axisCount] || axesByCount[4];
+    const drives = axes.map(axis => {
+        if (axis === 'E') return {axis: 'E', microstepping: 16};
+        const isZ = axis.startsWith('Z');
+        return {
+            axis,
+            rotation_distance: isZ ? 8 : 40,
+            microstepping: 16,
+            homing_speed: isZ ? 10 : 50,
+            position_min: 0,
+            position_max: isZ ? zMax : (axis.startsWith('X') ? xMax : yMax),
+            position_endstop: 0,
+            homing_positive_dir: false,
+        };
+    });
+    const meshMargin = Math.max(5, Math.min(30, Math.floor(Math.min(xMax, yMax) * 0.12)));
+    return {
+        id: 'custom',
+        name: '自定义打印机',
+        geometry: {type: kinematics, mins: [0, 0, 0], maxes: [xMax, yMax, zMax]},
+        drives,
+        extruder: {},
+        bed: {},
+        probe: {
+            type: 'bltouch', x_offset: 0, y_offset: 0, z_offset: 2,
+            speed: 5, second_speed: 5, samples: 1, sample_retract_dist: 2,
+        },
+        bed_mesh: {
+            speed: 50,
+            horizontal_move_z: 5,
+            mesh_min: `${meshMargin},${meshMargin}`,
+            mesh_max: `${Math.max(meshMargin, xMax - meshMargin)},${Math.max(meshMargin, yMax - meshMargin)}`,
+            probe_count: '4,4',
+            algorithm: 'bicubic',
+        },
+        kinematics: {
+            max_velocity: 300, max_accel: 3000,
+            max_z_velocity: 15, max_z_accel: 100, square_corner_velocity: 5,
+        },
+    };
+}
+
+function onCustomPrinterChange() {
+    if (document.getElementById('cgPrinterModel')?.value !== 'custom') return;
+    _currentPreset = cgBuildCustomPrinterPreset();
+    if (!_currentMapping) return;
+    renderDriverAssignment();
+    renderMotionParams();
+    renderHeaterConfig();
+    renderFanConfig();
+    renderExtruderParams();
+    renderBedParams();
+    renderEndstopConfig();
+    renderProbeConfig();
+    renderHomingParams();
+    renderLevelingParams();
+    smartAutoAssign();
+    renderProbeCheckPanel();
 }
 async function _loadFullPreset(machineId) {
     try {
@@ -2379,11 +2471,16 @@ function smartAutoAssign() {
 // ========== 打印机型号 ==========
 async function onPrinterModelChange() {
     const modelId = document.getElementById('cgPrinterModel').value;
-    if (!modelId) return;
     const customSection = document.getElementById('cgCustomPrinterSection');
+    _currentPreset = null;
+    if (!modelId) {
+        if (customSection) customSection.style.display = 'none';
+        updateCgProgress();
+        return;
+    }
     if (modelId === 'custom') {
         if (customSection) customSection.style.display = 'block';
-        _currentPreset = { geometry:{type:'corexy'}, drives:[], extruder:{}, bed:{} };
+        onCustomPrinterChange();
         return;
     }
     if (customSection) customSection.style.display = 'none';
@@ -2606,7 +2703,8 @@ function validateProbeSetup() {
         warnings.push('已启用探针，但未启用 bed_mesh、screws_tilt_adjust 或 z_tilt。');
     }
 
-    const checkNozzlePoint = (point, label) => {
+    // bed_mesh 使用探针坐标，因此需要换算成喷嘴实际移动位置。
+    const checkProbeCoordinate = (point, label) => {
         if (!point) {
             errors.push(`${label} 坐标格式应为 x,y。`);
             return;
@@ -2617,11 +2715,25 @@ function validateProbeSetup() {
         }
     };
 
+    // safe_z_home、screws_tilt_adjust 和 z_tilt 的坐标按 Klipper 定义均为喷嘴坐标。
+    const checkNozzleCoordinate = (point, label) => {
+        if (!point) {
+            errors.push(`${label} 坐标格式应为 x,y。`);
+            return;
+        }
+        if (!cgInRange(point.x, xBounds) || !cgInRange(point.y, yBounds)) {
+            errors.push(`${label} 的喷嘴坐标 ${point.x.toFixed(1)},${point.y.toFixed(1)} 超出 X/Y 行程。`);
+        }
+    };
+
     if (document.getElementById('cgOptBedMesh')?.checked) {
         const meshMin = cgParsePoint(document.getElementById('cgBMMeshMin')?.value);
         const meshMax = cgParsePoint(document.getElementById('cgBMMeshMax')?.value);
-        checkNozzlePoint(meshMin, 'mesh_min');
-        checkNozzlePoint(meshMax, 'mesh_max');
+        checkProbeCoordinate(meshMin, 'mesh_min');
+        checkProbeCoordinate(meshMax, 'mesh_max');
+        if (meshMin && meshMax && (meshMin.x >= meshMax.x || meshMin.y >= meshMax.y)) {
+            errors.push('mesh_max 必须在 X/Y 两个方向都大于 mesh_min。');
+        }
         const probeCount = String(document.getElementById('cgBMProbeCount')?.value || '').split(',').map(v => parseInt(v.trim(), 10));
         if (probeCount.length < 2 || probeCount.some(v => !Number.isFinite(v) || v < 2)) {
             warnings.push('probe_count 建议使用 x,y 格式且每个方向至少 2 个点。');
@@ -2631,7 +2743,7 @@ function validateProbeSetup() {
     if (document.getElementById('cgOptScrewsTilt')?.checked) {
         ['cgSTScrew1', 'cgSTScrew2', 'cgSTScrew3', 'cgSTScrew4'].forEach((id, idx) => {
             const raw = document.getElementById(id)?.value || '';
-            if (raw.trim()) checkNozzlePoint(cgParsePoint(raw), `screw${idx + 1}`);
+            if (raw.trim()) checkNozzleCoordinate(cgParsePoint(raw), `screw${idx + 1}`);
         });
     }
 
@@ -2643,7 +2755,7 @@ function validateProbeSetup() {
         if (zTiltPoints.length < 2) {
             errors.push('z_tilt 至少需要两个有效 points 坐标。');
         }
-        zTiltPoints.forEach((point, idx) => checkNozzlePoint(point, `z_tilt point ${idx + 1}`));
+        zTiltPoints.forEach((point, idx) => checkNozzleCoordinate(point, `z_tilt point ${idx + 1}`));
     }
 
     if (document.getElementById('cgOptSafeZHome')?.checked) {
@@ -2651,13 +2763,7 @@ function validateProbeSetup() {
         if (!homePoint) {
             errors.push('safe_z_home 坐标格式无效。');
         } else {
-            if (!cgInRange(homePoint.x, xBounds) || !cgInRange(homePoint.y, yBounds)) {
-                errors.push('safe_z_home 的喷嘴坐标超出 X/Y 行程。');
-            }
-            const probeContact = {x: homePoint.x + xOff, y: homePoint.y + yOff};
-            if (!cgInRange(probeContact.x, xBounds) || !cgInRange(probeContact.y, yBounds)) {
-                errors.push(`safe_z_home 触发时探针位置为 ${probeContact.x.toFixed(1)},${probeContact.y.toFixed(1)}，超出热床/行程范围。`);
-            }
+            checkNozzleCoordinate(homePoint, 'safe_z_home');
         }
     }
 
@@ -2681,15 +2787,136 @@ function renderProbeCheckPanel() {
 }
 
 // ========== 工具板 ==========
+function cgReleaseToolboardImage(tb) {
+    if (tb?.imageUrl?.startsWith('blob:')) URL.revokeObjectURL(tb.imageUrl);
+    if (tb) tb.imageUrl = '';
+}
+
+function cgEnsureToolboardMap(index) {
+    const root = document.getElementById(`cgTBImageMap${index}`);
+    if (!root) return null;
+    if (!root.querySelector('.cg-board-image-stage') || !root.querySelector('.cg-board-overlay')) {
+        root.innerHTML = `<div class="cg-board-image-stage">
+            <img class="cg-board-image" alt="工具板接口位置">
+            <div class="cg-board-overlay" aria-label="工具板接口热区"></div>
+        </div>
+        <div class="cg-board-pin-info"><i class="fas fa-info-circle"></i> 选择工具板后显示图片与接口位置。</div>`;
+    }
+    return {
+        root,
+        img: root.querySelector('.cg-board-image'),
+        overlay: root.querySelector('.cg-board-overlay'),
+        panel: root.querySelector('.cg-board-pin-info'),
+    };
+}
+
+function cgToolboardKeyUsages(index, key) {
+    const tb = _toolboardData[index];
+    if (!tb) return [];
+    const usages = [];
+    const driveIndex = cgToolboardDriveKeys(tb.mapping || {}).indexOf(key);
+    if (driveIndex >= 0 && tb.axes?.[driveIndex]) usages.push(`${tb.axes[driveIndex]}轴`);
+    const assigned = tb.funcAssigns?.[key];
+    if (typeof assigned === 'string' && assigned) {
+        usages.push(TOOLBOARD_FUNCTION_LABELS[assigned] || assigned);
+    } else if (assigned && typeof assigned === 'object' && assigned.axis) {
+        usages.push(assigned.axis === 'probe' ? '探针' : `${String(assigned.axis).toUpperCase()}限位`);
+    }
+    if (tb.funcAssigns?.__adxl === 'adxl' && /adxl|lis2dw/i.test(key)) usages.push('ADXL/共振测试');
+    return [...new Set(usages)];
+}
+
+function cgToolboardKeyPinSummary(tb, key) {
+    const value = tb?.mapping?.[key];
+    if (value == null) return '未找到引脚映射';
+    if (typeof value !== 'object' || Array.isArray(value)) return cgEscapeHtml(cgRawPin(value) || String(value));
+    const labels = {
+        step_pin: 'STEP', dir_pin: 'DIR', enable_pin: 'EN', uart_pin: 'UART',
+        diag_pin: 'DIAG', cs_pin: 'CS', pin: 'PIN', gpio: 'GPIO'
+    };
+    const pins = Object.entries(labels)
+        .filter(([field]) => value[field] != null)
+        .map(([field, label]) => `${label}=${cgEscapeHtml(cgRawPin(value[field]))}`);
+    return pins.length ? pins.join('、') : cgEscapeHtml(JSON.stringify(value));
+}
+
+function cgToolboardPinInfoHtml(index, item) {
+    const tb = _toolboardData[index];
+    const usages = cgToolboardKeyUsages(index, item.key);
+    return `<strong>${cgEscapeHtml(item.label)}</strong> <span>${cgEscapeHtml(cgBoardTypeLabel(item.type))}</span>
+        <div class="cg-board-pin-meta">
+            <span>接口: <code>${cgEscapeHtml(item.key)}</code></span>
+            <span>位置: <code>x=${item.left}, y=${item.top}, ${item.width}x${item.height}</code></span>
+        </div>
+        <div>真实 pin: ${cgToolboardKeyPinSummary(tb, item.key)}</div>
+        <div>当前用途: ${usages.length ? usages.map(cgEscapeHtml).join('、') : '未分配'}</div>`;
+}
+
+function cgSelectToolboardHotspot(index, key) {
+    const tb = _toolboardData[index];
+    if (!tb) return;
+    tb.selectedPin = key;
+    cgRenderToolboardMap(index);
+}
+
+function cgRenderToolboardMap(index) {
+    const tb = _toolboardData[index];
+    const parts = cgEnsureToolboardMap(index);
+    if (!parts) return;
+    parts.overlay.innerHTML = '';
+    const items = cgLayoutItems(tb?.layout);
+    if (!tb?.boardId || !tb.mapping || !tb.imageUrl) {
+        parts.root.classList.add('empty');
+        const message = tb?.imageStatus === 'loading' ? '正在加载工具板图片...'
+            : tb?.imageStatus === 'error' ? '工具板数据或图片加载失败。'
+            : '当前工具板没有可用图片。';
+        parts.panel.innerHTML = `<i class="fas fa-info-circle"></i> ${message}`;
+        parts.img.onload = null;
+        parts.img.removeAttribute('src');
+        return;
+    }
+    parts.root.classList.remove('empty');
+    if (parts.img.src !== tb.imageUrl) parts.img.src = tb.imageUrl;
+    if (!parts.img.complete || !parts.img.naturalWidth) {
+        parts.img.onload = () => cgRenderToolboardMap(index);
+        return;
+    }
+    const base = cgLayoutBaseSize(tb.layout, parts.img, items);
+    items.forEach(item => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `cg-board-hotspot type-${item.type}`;
+        if (cgToolboardKeyUsages(index, item.key).length) btn.classList.add('used');
+        if (item.key === tb.selectedPin) btn.classList.add('active');
+        btn.style.left = `${(((item.left + base.offsetX) * base.zoom) / base.width) * 100}%`;
+        btn.style.top = `${(((item.top + base.offsetY) * base.zoom) / base.height) * 100}%`;
+        btn.style.width = `${((item.width * base.zoom) / base.width) * 100}%`;
+        btn.style.height = `${((item.height * base.zoom) / base.height) * 100}%`;
+        btn.title = `${item.label} / ${item.key}`;
+        btn.setAttribute('aria-label', `${item.label} / ${item.key}`);
+        btn.onclick = () => cgSelectToolboardHotspot(index, item.key);
+        parts.overlay.appendChild(btn);
+    });
+    const selected = items.find(item => item.key === tb.selectedPin);
+    parts.panel.innerHTML = selected
+        ? cgToolboardPinInfoHtml(index, selected)
+        : `<i class="fas fa-info-circle"></i> ${items.length ? '点击图片上的接口查看位置、真实 pin 和当前用途。' : '当前工具板没有接口坐标数据。'}`;
+}
+
+function cgRenderAllToolboardMaps() {
+    _toolboardData.forEach((_, index) => cgRenderToolboardMap(index));
+}
+
 function onToolCountChange() {
     const count = parseInt(document.getElementById('cgToolCount').value);
     const container = document.getElementById('cgToolboardConfig');
     const inner = document.getElementById('cgToolboardContainer');
     container.style.display = count>0?'block':'none'; inner.innerHTML='';
+    _toolboardData.slice(count).forEach(cgReleaseToolboardImage);
     _toolboardData = _toolboardData.slice(0, count);
     const brand = document.getElementById('cgBrand').value || 'FLY';
     for (let i=0; i<count; i++) {
-        if (!_toolboardData[i]) _toolboardData[i] = {boardId:'',name:`toolhead${i||''}`,role:'custom',connType:'can',serial:'',mapping:null,boardInfo:null,axes:[],funcAssigns:{}};
+        if (!_toolboardData[i]) _toolboardData[i] = {boardId:'',name:`toolhead${i||''}`,role:'custom',connType:'can',serial:'',mapping:null,boardInfo:null,layout:null,imageUrl:'',imageStatus:'',selectedPin:'',axes:[],funcAssigns:{}};
         if (!_toolboardData[i].role) _toolboardData[i].role = 'custom';
         const tb=_toolboardData[i], div=document.createElement('div');
         div.className='cg-tb-block';
@@ -2700,6 +2927,7 @@ function onToolCountChange() {
             <div class="cg-row" style="margin-top:8px;"><label>型号：</label><select id="cgTBBoard${i}" onchange="onToolBoardSelect(${i})" style="min-width:220px;"><option value="">选择工具板型号</option></select><span id="cgTBInfo${i}" class="cg-hint"></span></div>
             <div class="cg-row" style="margin-top:8px;"><label>连接：</label><select id="cgTBConn${i}" onchange="_toolboardData[${i}].connType=this.value;renderToolboardConflictPanel();"><option value="can">CAN</option><option value="usb">USB</option><option value="serial">串口</option></select>
             <label>地址：</label><input type="text" id="cgTBSerial${i}" placeholder="canbus_uuid 或 /dev/serial/by-id/..." style="flex:1;min-width:220px;" value="${cgEscapeHtml(tb.serial)}" oninput="_toolboardData[${i}].serial=this.value;renderToolboardConflictPanel();"></div>
+            <div id="cgTBImageMap${i}" class="cg-toolboard-map empty" style="margin-top:10px;"></div>
             <div id="cgTBConflict${i}" class="cg-toolboard-mini" style="margin-top:8px;"></div></div>`;
         inner.appendChild(div);
         const cs=document.getElementById(`cgTBConn${i}`); if(cs) cs.value=tb.connType;
@@ -2716,23 +2944,46 @@ function onToolCountChange() {
         }
     }
     _toolboardData.forEach((tb,i)=>{if(tb.boardId){const s=document.getElementById(`cgTBBoard${i}`);if(s)s.value=tb.boardId;}});
+    cgRenderAllToolboardMaps();
     renderToolboardConflictPanel();
     if (_currentMapping) { renderDriverAssignment(); renderEndstopConfig(); renderProbeConfig(); renderHeaterConfig(); renderFanConfig(); }
 }
 function toggleToolboardPanel(i) { const p=document.getElementById(`cgTBPanel${i}`); if(p) p.style.display=p.style.display==='none'?'block':'none'; }
 async function onToolBoardSelect(i) {
     const boardId=document.getElementById(`cgTBBoard${i}`).value;
-    _toolboardData[i].boardId=boardId;
+    const tb = _toolboardData[i];
+    const loadSeq = (tb.loadSeq || 0) + 1;
+    tb.loadSeq = loadSeq;
+    tb.boardId=boardId;
+    tb.selectedPin='';
+    cgReleaseToolboardImage(tb);
+    tb.mapping=null;
+    tb.boardInfo=null;
+    tb.layout=null;
+    tb.imageStatus=boardId?'loading':'';
     const info=document.getElementById(`cgTBInfo${i}`);
-    if(!boardId){_toolboardData[i].mapping=null;renderToolboardConflictPanel();if(_currentMapping){renderDriverAssignment();renderEndstopConfig();renderProbeConfig();renderHeaterConfig();renderFanConfig();}return;}
+    cgRenderToolboardMap(i);
+    if(!boardId){tb.mapping=null;tb.boardInfo=null;tb.layout=null;tb.imageStatus='';if(info)info.textContent='';cgRenderToolboardMap(i);renderToolboardConflictPanel();if(_currentMapping){renderDriverAssignment();renderEndstopConfig();renderProbeConfig();renderHeaterConfig();renderFanConfig();}return;}
     try {
-        const r=await fetch(`/api/tools/boards/${encodeURIComponent(boardId)}/mapping`); if(!r.ok){cgShowToast(`HTTP ${r.status}`,'error');return;} const d=await r.json();
-        if(!d.success){cgShowToast(d.error,'error');return;}
-        _toolboardData[i].mapping=d.mapping; _toolboardData[i].boardInfo=d.board_info;
+        const r=await fetch(`/api/tools/boards/${encodeURIComponent(boardId)}/mapping`); if(!r.ok) throw new Error(`HTTP ${r.status}`); const d=await r.json();
+        if(!d.success) throw new Error(d.error || '工具板数据加载失败');
+        if (!_toolboardData[i] || _toolboardData[i].loadSeq !== loadSeq || _toolboardData[i].boardId !== boardId) return;
+        tb.mapping=d.mapping; tb.boardInfo=d.board_info; tb.layout=d.layout; tb.imageStatus=d.board_info?.image?'loading':'';
         const bi=d.board_info; info.textContent=`${bi.drive_count}驱动, ${bi.heat_count}加热, ${bi.fan_count}风扇`;
         const cs=document.getElementById(`cgTBConn${i}`);
         if(cs&&bi.connections){cs.innerHTML=bi.connections.map(c=>{const v=c.includes('CAN')?'can':c.includes('USB')?'usb':'serial';return `<option value="${cgEscapeHtml(v)}">${cgEscapeHtml(c)}</option>`;}).join('');cs.value=_toolboardData[i].connType;}
         const defaultedExtruder = cgApplyToolboardExtruderDefaults(i);
+        cgRenderToolboardMap(i);
+        if (bi.image) {
+            const imageUrl = await cgBoardImageUrl(boardId);
+            if (!_toolboardData[i] || _toolboardData[i].loadSeq !== loadSeq || _toolboardData[i].boardId !== boardId) {
+                if (imageUrl?.startsWith('blob:')) URL.revokeObjectURL(imageUrl);
+                return;
+            }
+            tb.imageStatus = imageUrl ? 'loaded' : 'error';
+            tb.imageUrl = imageUrl;
+            cgRenderToolboardMap(i);
+        }
         renderToolboardConflictPanel();
         if (_currentMapping) {
             renderDriverAssignment(); renderEndstopConfig(); renderProbeConfig(); renderHeaterConfig(); renderFanConfig();
@@ -2742,7 +2993,13 @@ async function onToolBoardSelect(i) {
                 validateAxisAssignment();
             }
         }
-    } catch(e){cgShowToast('加载工具板失败: '+e.message,'error');}
+    } catch(e){
+        if (_toolboardData[i]?.loadSeq === loadSeq && _toolboardData[i]?.boardId === boardId) {
+            tb.imageStatus='error';
+            cgRenderToolboardMap(i);
+        }
+        cgShowToast('加载工具板失败: '+e.message,'error');
+    }
 }
 function renderToolboardDrivers(i) {
     const c=document.getElementById(`cgTBDriverContainer${i}`), m=_toolboardData[i].mapping; if(!m){c.innerHTML='';return;}
@@ -2843,7 +3100,7 @@ function renderMotionParams() {
     const c=document.getElementById('cgMotionContainer'); if(!c||!_currentMapping) return;
     const cp=_currentPreset||{}; const cpDrives=cp.drives||[];
     const _defM={rotation_distance:40,microsteps:16,homing_speed:50,position_min:0,position_max:200,position_endstop:0};
-    const kinType = cp.geometry?.type === 'corexy' ? 'corexy' : 'cartesian';
+    const kinType = cgCurrentKinematics();
     const isCoreXY = kinType === 'corexy';
     // 重渲染时清除手动覆盖标记（新预设生效）
     resetMotionOverrides();
@@ -2892,7 +3149,7 @@ function syncMotionParam(axis, param, value) {
         _motionManualOverride[`${axis}:${param}`] = true;
     }
     const cp = _currentPreset || {};
-    const kinType = cp.geometry?.type === 'corexy' ? 'corexy' : 'cartesian';
+    const kinType = cgCurrentKinematics();
     const isCoreXY = kinType === 'corexy';
     let targets = [];
     if (isCoreXY && (axis === 'X' || axis === 'Y')) {
@@ -3344,7 +3601,7 @@ function renderHomingParams() {
     const cp=_currentPreset||{}; const cpDrives=cp.drives||[];
     let h='';
     // 归位说明（仅支持 cartesian / corexy）
-    const kinType = cp.geometry?.type === 'cartesian' ? 'cartesian' : 'corexy';
+    const kinType = cgCurrentKinematics();
     if (kinType === 'corexy') {
         h += '<div class="cg-corexy-info"><strong><i class="fas fa-info-circle"></i> CoreXY 归位说明</strong>';
         h += '<ul><li>X/Y 电机联动：归位任意轴时两个电机同时运动</li>';
@@ -3648,6 +3905,11 @@ function renderHomingVisualization() {
 // ========== 配置生成 ==========
 function generateConfig() {
     if (!_currentMapping || !_currentBoardInfo) { cgShowToast('请先选择主板','error'); switchCgTab(1); return; }
+    if (!document.getElementById('cgPrinterModel')?.value || !_currentPreset) {
+        cgShowToast('请先选择打印机型号','error');
+        switchCgTab(1);
+        return;
+    }
     if (!validateAxisAssignment()) { cgHighlightError(null,'存在重复轴分配，请检查步骤3的驱动器分配后再生成'); return; }
     const probeCheck = validateProbeSetup();
     if (!probeCheck.ok) {
@@ -3700,7 +3962,7 @@ function generateConfig() {
     const cornerVel=document.getElementById('cgCornerVel')?.value||5.0;
     config += B('机型和加速度');
     config += '[printer]                       # 打印机设置\n';
-    config += P(`kinematics: ${(_currentPreset?.geometry?.type==='cartesian'?'cartesian':'corexy')}`,'运动学结构');
+    config += P(`kinematics: ${cgCurrentKinematics()}`,'运动学结构');
     config += P(`max_velocity: ${maxVel}`,'最大速度');
     config += P(`max_accel: ${maxAccel}`,'最大加速度');
     config += P(`max_z_velocity: ${maxZVel}`,'Z轴最大速度');
@@ -4434,6 +4696,7 @@ function copyConfig() {
     }
 }
 function resetForm() {
+    _toolboardData.forEach(cgReleaseToolboardImage);
     switchCgTab(1);
     document.getElementById('cgBrand').innerHTML='<option value="">加载中...</option>';
     document.getElementById('cgBoard').innerHTML='<option value="">-- 选择型号 --</option>';

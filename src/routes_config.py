@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 import os
 import re
 import json
+import tempfile
 
 from shared import (
     config, logger, BASE_DIR, BOARD_CONFIGS_DIR, CONFIGS_DIR,
@@ -36,6 +37,69 @@ def _path_in_board_configs(path):
         return os.path.commonpath([os.path.realpath(path), real_base]) == real_base
     except ValueError:
         return False
+
+
+def _resolve_config_identity(manufacturer, board_type, config_id):
+    """校验板卡配置身份并返回规范化字段和绝对路径。"""
+    raw_manufacturer = str(manufacturer or '')
+    raw_board_type = str(board_type or '')
+    raw_config_id = str(config_id or '')
+    manufacturer = sanitize_manufacturer(raw_manufacturer)
+    board_type = sanitize_config_id(raw_board_type)
+    config_id = sanitize_config_id(raw_config_id)
+    if not manufacturer or manufacturer != raw_manufacturer:
+        raise ValueError('无效的厂家名称')
+    if not _is_board_config_type(board_type) or board_type != raw_board_type:
+        raise ValueError('无效的产品类型')
+    if not config_id or config_id != raw_config_id:
+        raise ValueError('无效的配置 ID')
+
+    path = os.path.join(BOARD_CONFIGS_DIR, manufacturer, board_type, f'{config_id}.json')
+    if not _path_in_board_configs(path):
+        raise ValueError('非法路径')
+    return manufacturer, board_type, config_id, path
+
+
+def _write_json_atomic(path, data):
+    """在目标目录内原子替换 JSON，避免中途退出留下半个配置文件。"""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', dir=os.path.dirname(path),
+            prefix='.config-', suffix='.tmp', delete=False
+        ) as temp_file:
+            temp_path = temp_file.name
+            json.dump(data, temp_file, ensure_ascii=False, indent=2)
+            temp_file.write('\n')
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+        os.replace(temp_path, path)
+        temp_path = None
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def _validate_config_payload(data):
+    if not isinstance(data, dict):
+        raise ValueError('请求体必须是 JSON 对象')
+    name = data.get('name')
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError('产品名称不能为空')
+    data['name'] = name.strip()
+    if len(data['name']) > 200:
+        raise ValueError('产品名称过长')
+    for key in ('flash_modes', 'connections'):
+        value = data.get(key)
+        if value is not None and (
+            not isinstance(value, list) or not all(isinstance(item, str) for item in value)
+        ):
+            raise ValueError(f'{key} 必须是字符串数组')
+    if data.get('can_gpio') is not None and not isinstance(data['can_gpio'], dict):
+        raise ValueError('can_gpio 必须是对象')
+    if data.get('firmware_update') is not None and not isinstance(data['firmware_update'], dict):
+        raise ValueError('firmware_update 必须是对象')
 
 KLIPPER_MCU_LIST = {
     "STM32": {
@@ -134,8 +198,9 @@ def generate_id_from_name(name):
 def list_configs(manufacturer):
     """获取指定厂家的所有配置"""
     try:
-        manufacturer = sanitize_manufacturer(manufacturer)
-        if not manufacturer:
+        raw_manufacturer = str(manufacturer or '')
+        manufacturer = sanitize_manufacturer(raw_manufacturer)
+        if not manufacturer or manufacturer != raw_manufacturer:
             return jsonify({'error': '无效的厂家名称'}), 400
         configs = []
         board_types = []
@@ -168,7 +233,7 @@ def list_configs(manufacturer):
 
 @board_config_bp.route('/get/<manufacturer>/<config_id>', methods=['GET'])
 def get_config(manufacturer, config_id):
-    """获取单个配置详情"""
+    """兼容旧客户端：按厂家和 ID 查找配置（新客户端应使用精确身份接口）。"""
     try:
         manufacturer = sanitize_manufacturer(manufacturer)
         if not manufacturer:
@@ -193,46 +258,152 @@ def get_config(manufacturer, config_id):
         return jsonify({'error': safe_error(e)}), 500
 
 
+@board_config_bp.route('/item/<manufacturer>/<board_type>/<config_id>', methods=['GET'])
+def get_config_item(manufacturer, board_type, config_id):
+    """按 厂家/类型/ID 精确获取单个配置。"""
+    try:
+        manufacturer, board_type, config_id, filepath = _resolve_config_identity(
+            manufacturer, board_type, config_id
+        )
+        if not os.path.isfile(filepath):
+            return jsonify({'error': '配置不存在'}), 404
+        with open(filepath, 'r', encoding='utf-8') as f:
+            cfg_data = json.load(f)
+        if not isinstance(cfg_data, dict):
+            return jsonify({'error': '配置文件必须包含 JSON 对象'}), 422
+
+        # 路径是配置的唯一身份，避免文件内容中的旧元数据让前端写错位置。
+        cfg_data['manufacturer'] = manufacturer
+        cfg_data['type'] = board_type
+        cfg_data['id'] = config_id
+        return jsonify(cfg_data)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except (OSError, json.JSONDecodeError) as e:
+        logger.error(f"读取配置失败: {e}")
+        return jsonify({'error': safe_error(e)}), 500
+
+
+@board_config_bp.route('/item/<manufacturer>/<board_type>/<config_id>', methods=['PUT'])
+def update_config_item(manufacturer, board_type, config_id):
+    """更新配置；身份变化时移动文件，不在旧位置留下重复项。"""
+    try:
+        source_mfr, source_type, source_id, source_path = _resolve_config_identity(
+            manufacturer, board_type, config_id
+        )
+        if not os.path.isfile(source_path):
+            return jsonify({'success': False, 'error': '配置不存在'}), 404
+
+        data = request.get_json(silent=True)
+        _validate_config_payload(data)
+        target_mfr, target_type, target_id, target_path = _resolve_config_identity(
+            data.get('manufacturer', source_mfr),
+            data.get('type', source_type),
+            data.get('id', source_id),
+        )
+
+        if source_path != target_path and os.path.exists(target_path):
+            return jsonify({
+                'success': False,
+                'error': f'目标配置已存在: {target_mfr}/{target_type}/{target_id}'
+            }), 409
+
+        data['manufacturer'] = target_mfr
+        data['type'] = target_type
+        data['id'] = target_id
+        _write_json_atomic(target_path, data)
+        if source_path != target_path:
+            try:
+                os.remove(source_path)
+            except Exception:
+                # 移动没有完成时撤销新副本，保证不会留下两个同源配置。
+                try:
+                    os.remove(target_path)
+                except OSError:
+                    pass
+                raise
+
+        logger.info(
+            f"更新配置：{source_mfr}/{source_type}/{source_id} -> "
+            f"{target_mfr}/{target_type}/{target_id}"
+        )
+        return jsonify({
+            'success': True,
+            'message': '配置已保存',
+            'manufacturer': target_mfr,
+            'type': target_type,
+            'id': target_id,
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"更新配置失败: {e}")
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
+
+
+@board_config_bp.route('/item/<manufacturer>/<board_type>/<config_id>', methods=['DELETE'])
+def delete_config_item(manufacturer, board_type, config_id):
+    """按完整身份删除配置，避免同 ID 的其他类型被误删。"""
+    try:
+        manufacturer, board_type, config_id, filepath = _resolve_config_identity(
+            manufacturer, board_type, config_id
+        )
+        if not os.path.isfile(filepath):
+            return jsonify({'success': False, 'error': '配置不存在'}), 404
+        os.remove(filepath)
+        logger.info(f"删除配置：{manufacturer}/{board_type}/{config_id}")
+        return jsonify({'success': True})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"删除配置失败: {e}")
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
+
+
 @board_config_bp.route('/create/<manufacturer>', methods=['POST'])
 def create_config(manufacturer):
     """创建新配置"""
     try:
-        data = request.get_json(silent=True) or {}
+        data = request.get_json(silent=True)
+        _validate_config_payload(data)
 
-        if not data or 'name' not in data:
-            return jsonify({'error': 'Missing required fields'}), 400
-
-        manufacturer = sanitize_manufacturer(manufacturer)
-        if not manufacturer:
+        raw_manufacturer = str(manufacturer or '')
+        manufacturer = sanitize_manufacturer(raw_manufacturer)
+        if not manufacturer or manufacturer != raw_manufacturer:
             return jsonify({'error': '无效的厂家名称'}), 400
 
-        product_type = _normalize_board_type(data.get('type', 'mainboard'))
+        raw_product_type = str(data.get('type', 'mainboard'))
+        product_type = sanitize_config_id(raw_product_type)
+        if not _is_board_config_type(product_type) or product_type != raw_product_type:
+            return jsonify({'error': '无效的产品类型'}), 400
 
-        config_id = sanitize_config_id(data.get('id') or generate_id_from_name(data['name']))
+        requested_id = data.get('id')
+        raw_config_id = str(requested_id) if requested_id else generate_id_from_name(data['name'])
+        config_id = sanitize_config_id(raw_config_id)
+        if requested_id and config_id != raw_config_id:
+            return jsonify({'error': '无效的配置ID'}), 400
         if not config_id:
             return jsonify({'error': '无效的配置ID'}), 400
         data['manufacturer'] = manufacturer
         data['type'] = product_type
         data['id'] = config_id
 
-        type_dir = os.path.join(CONFIGS_DIR, manufacturer, product_type)
-        if not _path_in_board_configs(type_dir):
-            return jsonify({'error': '非法路径'}), 403
-        os.makedirs(type_dir, exist_ok=True)
-
-        filepath = os.path.join(type_dir, f"{config_id}.json")
+        _, _, _, filepath = _resolve_config_identity(manufacturer, product_type, config_id)
         if os.path.exists(filepath):
             return jsonify({'error': '配置 ID 已存在'}), 409
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+        _write_json_atomic(filepath, data)
 
         logger.info(f"创建配置：{manufacturer}/{product_type}/{config_id}.json")
 
         return jsonify({
             'success': True,
             'id': config_id,
+            'manufacturer': manufacturer,
+            'type': product_type,
             'path': filepath
         })
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': safe_error(e)}), 500
 
@@ -341,8 +512,7 @@ def upload_config():
 
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-                with open(save_path, 'w', encoding='utf-8') as f:
-                    json.dump(cfg_data, f, indent=2, ensure_ascii=False)
+                _write_json_atomic(save_path, cfg_data)
                 uploaded_count += 1
                 logger.info(f"上传文件：{save_path}")
 
@@ -470,12 +640,11 @@ def get_all_configs():
 def save_board_config():
     """保存配置（支持更新）"""
     try:
-        config_data = request.get_json(silent=True) or {}
-        if not isinstance(config_data, dict):
-            return jsonify({'success': False, 'error': '请求体必须是 JSON 对象'}), 400
+        config_data = request.get_json(silent=True)
+        _validate_config_payload(config_data)
 
         manufacturer = sanitize_manufacturer(config_data.get('manufacturer', 'FLY'))
-        board_type = _normalize_board_type(config_data.get('type', 'mainboard'))
+        board_type = sanitize_config_id(str(config_data.get('type', 'mainboard')))
         config_id = sanitize_config_id(config_data.get('id'))
 
         if not manufacturer:
@@ -490,6 +659,12 @@ def save_board_config():
                 'error': '缺少配置 ID'
             }), 400
 
+        if not _is_board_config_type(board_type):
+            return jsonify({
+                'success': False,
+                'error': '无效的产品类型'
+            }), 400
+
         config_data['manufacturer'] = manufacturer
         config_data['type'] = board_type
         config_data['id'] = config_id
@@ -500,8 +675,7 @@ def save_board_config():
         os.makedirs(config_dir, exist_ok=True)
 
         config_path = os.path.join(config_dir, f"{config_id}.json")
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config_data, f, ensure_ascii=False, indent=2)
+        _write_json_atomic(config_path, config_data)
 
         return jsonify({
             'success': True,
@@ -509,6 +683,8 @@ def save_board_config():
             'path': config_path
         })
 
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         logger.error(f"保存配置失败: {e}")
         return jsonify({

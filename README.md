@@ -107,6 +107,8 @@ Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板
 ### 配置管理
 - 主板配置创建 / 编辑 / 删除 / 上传
 - MCU 型号数据库（自动从 Klipper 源码解析）
+- 晶振、Bootloader 偏移与默认通信接口按当前 MCU 联动，通信选项来自 Klipper Kconfig
+- 配置以“厂家 / 产品类型 / ID”为唯一身份，修改身份时同步移动 JSON 文件
 - JSON 配置文件版本管理
 
 ### Klipper 配置生成器
@@ -114,12 +116,14 @@ Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板
 - 生成配置页内置配置解析器，可上传或远程加载 printer.cfg 及 include 文件
 - 解析器可识别引脚分配、驱动器配置、传感器型号，并执行重复 section、引脚冲突与 Mainsail 宏基准比对
 - 主板与打印机型号选择，自动匹配引脚映射与运动学参数
+- 自定义机型支持 Cartesian / CoreXY、轴数与 XYZ 行程联动，未选机型时禁止生成
 - 驱动器轴分配与 TMC 驱动配置（TMC2209/5160/2240 等），采样电阻/Rref 动态切换
 - Z 限位/调平传感器三种模式：仅物理限位 / 物理限位 + 探针 / 探针替代 Z 限位（`probe:z_virtual_endstop`）
 - BL-Touch、Voron Tap、电感/微动类探针支持，可选择主板或工具板作为探针来源并自动生成 MCU 前缀
-- 探针上拉/反相 pin 修饰符、`safe_z_home` 联动、`bed_mesh` / `safe_z_home` / `z_tilt` / `screws_tilt_adjust` 可达区域检查
+- 探针上拉/反相 pin 修饰符、`safe_z_home` 联动，并按 Klipper 的探针/喷嘴坐标语义检查 `bed_mesh` / `safe_z_home` / `z_tilt` / `screws_tilt_adjust` 可达区域
 - 启用探针时生成 `QUERY_PROBE`、`PROBE_CALIBRATE`、BLTouch 调试等检查清单注释
 - 工具板按子 MCU 管理，轴、限位、探针、加热、风扇、断料/堵料检测在对应选项卡中直接选择主板或工具板接口
+- 选择工具板型号后加载对应板卡图片和接口热区，点击可查看真实 pin 与当前用途
 - 工具板 `serial` / `canbus_uuid` 可留空，填写后才检查格式；新增工具板型号后默认将首个驱动、HE、TH 分配给挤出机
 - 工具板驱动电流、驱动类型、采样电阻/Rref 可在轴分配页配置
 - 对应选项卡内按坐标 JSON 显示板卡接口热区，支持悬停高亮、点击查看物理位置/真实 pin，并提供常用快捷分配
@@ -462,6 +466,7 @@ Firmware-Tool/
 |------|------|------|
 | `/api/config/list/<manufacturer>` | GET | 列出指定厂家的板卡配置 |
 | `/api/config/get/<manufacturer>/<config_id>` | GET | 读取指定板卡配置 |
+| `/api/config/item/<manufacturer>/<board_type>/<config_id>` | GET / PUT / DELETE | 按完整身份读取、更新或删除板卡配置 |
 | `/api/config/create/<manufacturer>` | POST | 创建板卡配置 |
 | `/api/config/delete/<manufacturer>/<config_id>` | DELETE | 删除板卡配置 |
 | `/api/config/upload` | POST | 上传板卡配置 JSON |

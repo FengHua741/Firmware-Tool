@@ -1071,16 +1071,16 @@
                                 <div class="cg-param-grid">
                                     <div class="cg-param-item">
                                         <label>运动学类型：</label>
-                                        <select id="cgCustomKinematics">
+                                        <select id="cgCustomKinematics" onchange="onCustomPrinterChange()">
                                             <option value="corexy">CoreXY</option>
                                             <option value="cartesian">Cartesian (笛卡尔)</option>
-                                            <option value="delta">Delta</option>
-                                            <option value="polar">Polar</option>
+                                            <option value="delta" disabled>Delta（当前生成器暂不支持）</option>
+                                            <option value="polar" disabled>Polar（当前生成器暂不支持）</option>
                                         </select>
                                     </div>
                                     <div class="cg-param-item">
                                         <label>轴数：</label>
-                                        <select id="cgCustomAxisCount">
+                                        <select id="cgCustomAxisCount" onchange="onCustomPrinterChange()">
                                             <option value="3">3轴 (XYZ)</option>
                                             <option value="4">4轴 (XYZ+E)</option>
                                             <option value="5">5轴 (XYZ+Z2+E)</option>
@@ -1089,15 +1089,15 @@
                                     </div>
                                     <div class="cg-param-item">
                                         <label>X行程(mm)：</label>
-                                        <input type="number" id="cgCustomXMax" value="250" class="cg-xs">
+                                        <input type="number" id="cgCustomXMax" value="250" min="1" step="1" class="cg-xs" onchange="onCustomPrinterChange()">
                                     </div>
                                     <div class="cg-param-item">
                                         <label>Y行程(mm)：</label>
-                                        <input type="number" id="cgCustomYMax" value="250" class="cg-xs">
+                                        <input type="number" id="cgCustomYMax" value="250" min="1" step="1" class="cg-xs" onchange="onCustomPrinterChange()">
                                     </div>
                                     <div class="cg-param-item">
                                         <label>Z行程(mm)：</label>
-                                        <input type="number" id="cgCustomZMax" value="250" class="cg-xs">
+                                        <input type="number" id="cgCustomZMax" value="250" min="1" step="1" class="cg-xs" onchange="onCustomPrinterChange()">
                                     </div>
                                 </div>
                             </div>
