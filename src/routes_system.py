@@ -1042,12 +1042,24 @@ def _board_match_score(board, device):
     return score
 
 
+def _apply_can_mcu_defaults(device):
+    """补充无法从运行中固件实读、但编译时必须明确的 CAN MCU 默认值。"""
+    mcu_model = _normalize_mcu_name(device.get('mcu_model'))
+    connection = _normalize_connection_label(device.get('inferred_connection'))
+    is_can = connection == 'CANBUS' or bool(device.get('canbus_frequency') or device.get('can_pins'))
+    if mcu_model == 'rp2040' and is_can and not device.get('bl_offset'):
+        _set_device_field(device, 'bl_offset', '16384', 'mcu_can_default')
+        _set_device_field(device, 'bl_offset_hex', '0x4000', 'mcu_can_default')
+        _set_device_field(device, 'bl_offset_label', '16 KB', 'mcu_can_default')
+    return device
+
+
 def _infer_board_fields(device):
     try:
         boards = load_all_boards()
     except Exception as e:
         logger.warning(f'板卡数据库加载失败，跳过 KAT 引脚推断: {e}')
-        return device
+        return _apply_can_mcu_defaults(device)
 
     candidates = []
     for manufacturer, type_map in (boards or {}).items():
@@ -1061,7 +1073,7 @@ def _infer_board_fields(device):
         label = _preferred_connection_label([], device)
         if label:
             _set_device_field(device, 'inferred_connection', label, 'klipper_identify')
-        return device
+        return _apply_can_mcu_defaults(device)
     candidates.sort(key=lambda item: item[0], reverse=True)
     best = candidates[0]
     if len(candidates) > 1 and candidates[1][0] == best[0]:
@@ -1074,7 +1086,7 @@ def _infer_board_fields(device):
         }
         if connection_summary.get('connection_label') and not device.get('inferred_connection'):
             _set_device_field(device, 'inferred_connection', connection_summary['connection_label'], 'board_config_inferred')
-        return device
+        return _apply_can_mcu_defaults(device)
 
     _score, manufacturer, board_type, board_id, board = best
     connection_summary = _candidate_connection_summary([best], device)
@@ -1108,7 +1120,7 @@ def _infer_board_fields(device):
         _set_device_field(device, 'bl_offset', board_offset, 'board_config_inferred')
         _set_device_field(device, 'bl_offset_label', _format_offset_label(board_offset), 'board_config_inferred')
 
-    return device
+    return _apply_can_mcu_defaults(device)
 
 
 def _parse_info_json(line):
@@ -1448,7 +1460,30 @@ def verify_mcu_connection_status(uuids):
             for m in re.finditer(r"Lost communication with MCU '([^']+)'", msg):
                 lost_mcus.append(m.group(1))
 
-        query_str = '&'.join(urllib.parse.quote(s) for s in can_sections)
+        # configfile.settings 会把 section 名归一化为小写，但 Moonraker 的运行
+        # 对象仍可能保留原始大小写（例如配置键 mcu t0、对象名 mcu T0）。
+        # 查询前按 objects/list 做一次不区分大小写的映射，否则会得到空状态。
+        section_object_names = {name: name for name in can_sections}
+        try:
+            objects_response = requests.get(f'{base}/printer/objects/list', timeout=5)
+            if objects_response.status_code == 200:
+                object_names = objects_response.json().get('result', {}).get('objects', [])
+                object_name_map = {
+                    str(name).lower(): str(name)
+                    for name in object_names
+                    if str(name).lower().startswith('mcu')
+                }
+                section_object_names = {
+                    name: object_name_map.get(name.lower(), name)
+                    for name in can_sections
+                }
+        except Exception as e:
+            logger.warning(f'Moonraker MCU 对象名映射失败，使用配置名称查询: {e}')
+
+        query_str = '&'.join(
+            urllib.parse.quote(section_object_names[name])
+            for name in can_sections
+        )
         r = requests.get(f'{base}/printer/objects/query?{query_str}', timeout=5)
         if r.status_code != 200:
             return uuids, True
@@ -1458,9 +1493,15 @@ def verify_mcu_connection_status(uuids):
         verified_uuids = []
         returned_uuid_keys = set()
         for sname in can_sections:
-            mcu_status = mcu_statuses.get(sname) or mcu_statuses.get(sname.lower(), {})
+            object_name = section_object_names.get(sname, sname)
+            mcu_status = (
+                mcu_statuses.get(object_name)
+                or mcu_statuses.get(sname)
+                or mcu_statuses.get(sname.lower(), {})
+            )
             is_klipper_ready = (webhooks_state == 'ready')
-            is_mcu_lost = sname in lost_mcus or sname.lower() in lost_mcus
+            lost_mcu_names = {str(name).lower() for name in lost_mcus}
+            is_mcu_lost = sname.lower() in lost_mcu_names or object_name.lower() in lost_mcu_names
             base_entry = dict(can_uuid_map[sname])
 
             if not is_klipper_ready and is_mcu_lost:

@@ -250,25 +250,6 @@
                                 </div>
                             </div>
 
-                            <!-- 预设配置的高级选项 -->
-                            <div id="compilePresetAdvanced" style="display:none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #e9ecef;">
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label class="form-label" data-i18n="form.connection_override">🔌 连接方式（覆盖）</label>
-                                        <select class="form-control form-select" id="compilePresetConnection">
-                                            <option value="">-- 使用预设 --</option>
-                                            <option value="USB">USB</option>
-                                            <option value="CAN">CAN</option>
-                                            <option value="SERIAL">Serial</option>
-                                            <option value="CAN_BRIDGE">USB转CAN桥接</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group" style="flex: 2;">
-                                        <label class="form-label" data-i18n="form.startup_pin">🚀 启动引脚（可选）</label>
-                                        <input type="text" class="form-control" id="compilePresetStartupPin" placeholder="例如: PA2 或 gpio5">
-                                    </div>
-                                </div>
-                            </div>
                         </div>
 
                         <!-- 自定义主控模式 -->
@@ -328,7 +309,7 @@
                             <button class="btn btn-secondary" onclick="exportCompileConfig()">📤 <span data-i18n="btn.export_config">导出配置</span></button>
                             <button class="btn btn-secondary" onclick="document.getElementById('importConfigFile').click()">📥 <span data-i18n="btn.import_config">导入配置</span></button>
                             <input type="file" id="importConfigFile" accept=".json" style="display:none" onchange="importCompileConfig(event)">
-                            <button class="btn btn-success btn-lg" onclick="compileFirmware()">🔨 <span data-i18n="btn.compile_firmware">编译固件</span></button>
+                            <button class="btn btn-success btn-lg" id="compileFirmwareBtn" onclick="compileFirmware()">🔨 <span data-i18n="btn.compile_firmware">编译固件</span></button>
                             <button class="btn btn-secondary" onclick="resetCompileForm()">🔄 <span data-i18n="btn.reset">重置</span></button>
                         </div>
 
@@ -350,7 +331,7 @@
                                     <select class="form-control form-select" id="flashDeviceId" onchange="onFlashDeviceIdChange()">
                                         <option value="">-- 点击刷新扫描 --</option>
                                     </select>
-                                    <select id="flashCanIface" class="form-control" style="width:auto;min-width:100px;" title="CAN接口选择">
+                                    <select id="flashCanIface" class="form-control" style="width:auto;min-width:100px;" title="CAN接口选择" onchange="onFlashCanIfaceChange()">
                                         <option value="can0">can0</option>
                                     </select>
                                     <button class="btn btn-secondary" onclick="refreshDeviceIds()">🔄</button>
@@ -364,6 +345,8 @@
                                     <option value="DFU">USB/DFU</option>
                                     <option value="KAT">USB/KAT (Katapult)</option>
                                     <option value="CAN">CAN Bus</option>
+                                    <option value="CAN_BRIDGE_DFU">USB转CAN桥接/DFU</option>
+                                    <option value="CAN_BRIDGE_KAT">USB转CAN桥接/Katapult</option>
                                     <option value="UF2">UF2 (Mass Storage)</option>
                                     <option value="HOST">HOST (上位机烧录)</option>
                                     <option value="TF">TF卡 (下载firmware.bin)</option>
@@ -459,7 +442,7 @@
                         <div class="form-row">
                             <div class="form-group" style="flex: 2;">
                                 <label class="form-label" data-i18n="form.upload_bl">📤 或上传 BL 文件</label>
-                                <div class="upload-area" id="blUploadArea" style="padding: 20px;">
+                                <div class="upload-area" id="blUploadArea" style="padding: 20px; cursor:pointer;" role="button" tabindex="0">
                                     <p>拖拽 BL 文件 (.bin / .uf2) 到此处</p>
                                     <input type="file" id="blFileInput" accept=".bin,.uf2" style="display:none;">
                                 </div>
@@ -472,7 +455,7 @@
                             </label>
                         </div>
                         <div class="form-row">
-                            <button class="btn btn-warning" onclick="flashBootloader()">🔥 <span data-i18n="btn.flash_bl">烧录 BL</span></button>
+                            <button class="btn btn-warning" id="flashBootloaderBtn" onclick="flashBootloader()">🔥 <span data-i18n="btn.flash_bl">烧录 BL</span></button>
                         </div>
                         <div id="blFlashResult" class="flash-result" style="display:none; margin-top: 15px;">
                             <div class="result-box"></div>
@@ -1312,10 +1295,10 @@
 
     <script src="/static/js/i18n.js?v=20260724a"></script>
     <script src="/static/js/notifications.js?v=20260724a"></script>
-    <script src="/static/js/app.js?v=20260805b"></script>
+    <script src="/static/js/app.js?v=20260818b"></script>
     <script src="/static/js/mcu-presets.js?v=20260320f"></script>
     <script src="/static/js/config-manager.js?v=20260803a"></script>
-    <script src="/static/js/firmware-compile.js?v=20260805d"></script>
+    <script src="/static/js/firmware-compile.js?v=20260818c"></script>
     <script src="/static/js/firmware-update.js?v=20260320f"></script>
     <script src="/static/js/klipper-parser.js?v=20260702b"></script>
     <script src="/static/js/config-generator.js?v=20260724a"></script>

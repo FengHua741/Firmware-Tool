@@ -352,6 +352,7 @@ function canFieldSourceLabel(source) {
         katapult_protocol: 'KAT读取',
         firmware_inferred: '固件推断',
         board_config_inferred: '数据库推断',
+        mcu_can_default: '默认',
     };
     return labels[source] || source || '';
 }
@@ -424,6 +425,11 @@ function canConnectionLine(dev) {
     return `连接方式: ${value}${source ? ` (${source})` : ''}`;
 }
 
+function canFormatSection(value) {
+    const section = String(value || '').trim().replace(/^\[+|\]+$/g, '');
+    return section ? `[${section}]` : '';
+}
+
 function canDetailLines(dev) {
     return [
         `UUID: ${dev.uuid || 'N/A'}`,
@@ -432,7 +438,6 @@ function canDetailLines(dev) {
         canFieldLine(dev, 'mcu_version', '固件'),
         canFieldLine(dev, 'mcu_freq', '主频', canFormatFrequency),
         canFieldLine(dev, 'crystal', '晶振', v => v === 'internal' ? 'Internal clock' : canFormatFrequency(v)),
-        canFieldLine(dev, 'crystal_pins', '晶振引脚', canFormatPins),
         canFieldLine(dev, 'canbus_frequency', 'CAN速率', canFormatBitrate),
         canFieldLine(dev, 'can_pins', 'CAN引脚', canFormatPins),
         canUnavailableLine(dev, 'can_pins', 'CAN引脚'),
@@ -446,7 +451,7 @@ function canDetailLines(dev) {
         canFieldLine(dev, 'katapult_block_size', '块大小', v => `${v} bytes`),
         canConnectionLine(dev),
         dev.katapult_query_error ? `KAT查询: ${dev.katapult_query_error}` : '',
-        dev.section ? `配置: [${dev.section}]` : '',
+        dev.section ? `配置: ${canFormatSection(dev.section)}` : '',
         dev.connection_status ? `状态: ${dev.connection_status}` : '',
     ].filter(Boolean);
 }
@@ -1226,7 +1231,7 @@ async function testSshConnection() {
 }
 
 // 清除已保存的主机密钥（主机密钥变更后使用）
-async function clearHostKeys() {
+async function clearHostKeys(reconnectAfter = false) {
     try {
         const response = await fetch('/api/settings/ssh-credentials', {
             method: 'POST',
@@ -1236,6 +1241,7 @@ async function clearHostKeys() {
         const data = await response.json();
         if (data.success) {
             showSuccess(data.message || '主机密钥已清除，请重新测试连接');
+            if (reconnectAfter) await manualReconnect();
         } else {
             showError(data.message || '清除失败');
         }
@@ -1542,18 +1548,21 @@ async function manualReconnect() {
             content.style.background = 'rgba(76,175,80,0.1)';
             content.style.color = 'var(--success-color)';
             content.style.border = '1px solid rgba(76,175,80,0.3)';
-            content.innerHTML = `<span>${data.message}</span><span></span>`;
+            content.innerHTML = `<span>${escapeHtml(data.message || 'SSH 连接成功')}</span><span></span>`;
         } else {
             _lastSshConnected = false;
             content.style.background = 'rgba(244,67,54,0.08)';
             content.style.color = '#d32f2f';
             content.style.border = '1px solid rgba(244,67,54,0.25)';
+            const clearHostKeyButton = data.error_type === 'host_key_mismatch'
+                ? '<button onclick="clearHostKeys(true)" style="padding:6px 16px;border:1px solid rgba(255,152,0,0.6);border-radius:4px;background:rgba(255,152,0,0.12);color:#e65100;cursor:pointer;font-size:13px;white-space:nowrap;">清除旧密钥并重连</button>'
+                : '<button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:var(--danger-color);cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>';
             content.innerHTML = `
                 <div style="display:flex;flex-direction:column;gap:4px;">
                     <span style="font-weight:600;">重连失败</span>
-                    <span style="font-size:12px;">${data.error || '未知错误'}</span>
+                    <span style="font-size:12px;">${escapeHtml(data.error || '未知错误')}</span>
                 </div>
-                <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:var(--danger-color);cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
+                ${clearHostKeyButton}
             `;
         }
     } catch (error) {
@@ -1561,7 +1570,7 @@ async function manualReconnect() {
         content.style.color = '#d32f2f';
         content.style.border = '1px solid rgba(244,67,54,0.25)';
         content.innerHTML = `
-            <span>重连请求失败: ${error.message}</span>
+            <span>重连请求失败: ${escapeHtml(error.message)}</span>
             <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:var(--danger-color);cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>
         `;
     }

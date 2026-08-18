@@ -44,6 +44,7 @@ data/config.json
 # Runtime data (auto-generated)
 data/backups/
 data/firmware_history/
+data/bl_uploads/
 data/notifications.json
 src/can_options_cache.json
 

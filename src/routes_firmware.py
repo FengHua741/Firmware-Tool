@@ -3,6 +3,7 @@
 """
 
 from flask import Blueprint, jsonify, request, send_file, Response
+from werkzeug.utils import secure_filename
 import subprocess
 import os
 import posixpath
@@ -13,6 +14,7 @@ import shlex
 import hashlib
 import shutil
 import threading
+import urllib.parse
 
 from shared import (
     config, logger, BASE_DIR, BOARD_CONFIGS_DIR,
@@ -36,6 +38,9 @@ DEFAULT_CANBUS_FREQUENCY = '1000000'
 HOST_PREBUILT_FIRMWARE_DIR = '/usr/lib/firmware/klipper'
 _compile_lock = threading.Lock()
 _flash_lock = threading.Lock()
+_bl_flash_lock = threading.Lock()
+BL_UPLOAD_DIR = os.path.join(BASE_DIR, 'data', 'bl_uploads')
+BL_UPLOAD_MAX_BYTES = 4 * 1024 * 1024
 
 
 def load_klipper_rules():
@@ -109,9 +114,19 @@ def _normalize_canbus_frequency(value):
     number = float(match.group(1))
     multiplier = 1000000 if match.group(2) == 'm' else 1000 if match.group(2) == 'k' else 1
     frequency = int(round(number * multiplier))
-    if frequency <= 0:
-        raise ValueError(f'CAN 速率必须大于 0: {value}')
+    if frequency < 10000 or frequency > 5000000:
+        raise ValueError(f'CAN 速率必须在 10000 到 5000000 之间: {value}')
     return str(frequency)
+
+
+def _normalize_rp2040_gpio(value, label):
+    raw = str(value or '').strip()
+    if not re.fullmatch(r'\d+', raw):
+        raise ValueError(f'{label} 必须是 0 到 29 之间的整数')
+    pin = int(raw)
+    if pin < 0 or pin > 29:
+        raise ValueError(f'{label} 必须是 0 到 29 之间的整数')
+    return str(pin)
 
 
 def _device_state(device):
@@ -135,6 +150,60 @@ def _annotate_devices(devices):
     for device in devices:
         device.setdefault('state', _device_state(device))
     return devices
+
+
+def _dfu_device_id(vid_pid, serial='', usb_path=''):
+    value = f'dfu:{str(vid_pid or "").lower()}'
+    if serial:
+        value += ';serial=' + urllib.parse.quote(str(serial), safe='')
+    if usb_path:
+        value += ';path=' + urllib.parse.quote(str(usb_path), safe='')
+    return value
+
+
+def _dfu_device_filter(device):
+    """将 UI 的唯一 DFU 标识转换成 dfu-util 过滤参数。"""
+    raw = str(device or '').strip()
+    if not raw or raw == 'dfu':
+        return ''
+    payload = raw[4:] if raw.startswith('dfu:') else raw
+    parts = payload.split(';')
+    vid_pid = parts[0].lower()
+    if not re.fullmatch(r'[0-9a-f]{4}:[0-9a-f]{4}', vid_pid):
+        raise ValueError('DFU 设备 ID 无效')
+    filters = [f'-d {shlex.quote(vid_pid)}']
+    for part in parts[1:]:
+        key, sep, encoded = part.partition('=')
+        if not sep:
+            continue
+        value = urllib.parse.unquote(encoded)
+        if key == 'serial' and value:
+            filters.append(f'-S {shlex.quote(value)}')
+        elif key == 'path' and value:
+            filters.append(f'-p {shlex.quote(value)}')
+    return ' '.join(filters)
+
+
+def _openocd_target_for_mcu(mcu_id):
+    """根据 MCU 型号选择 OpenOCD target，未知型号不允许猜测。"""
+    value = str(mcu_id or '').strip().lower().replace('-', '').replace('_', '')
+    mappings = (
+        (('stm32f0',), 'stm32f0x'),
+        (('stm32f1',), 'stm32f1x'),
+        (('stm32f2',), 'stm32f2x'),
+        (('stm32f3',), 'stm32f3x'),
+        (('stm32f4',), 'stm32f4x'),
+        (('stm32f7',), 'stm32f7x'),
+        (('stm32g0',), 'stm32g0x'),
+        (('stm32g4',), 'stm32g4x'),
+        (('stm32h7',), 'stm32h7x'),
+        (('stm32l0',), 'stm32l0'),
+        (('stm32l4',), 'stm32l4x'),
+    )
+    for prefixes, target in mappings:
+        if value.startswith(prefixes):
+            return target
+    return ''
 
 
 def _manifest_path(klipper_path):
@@ -421,7 +490,9 @@ def _file_sha256(path):
 
 def _firmware_download_name(path):
     ext = os.path.splitext(str(path or ''))[1].lower()
-    return f'firmware{ext}' if ext in ('.bin', '.uf2', '.hex') else 'firmware.bin'
+    if ext in ('.bin', '.uf2', '.hex'):
+        return f'firmware{ext}'
+    return secure_filename(os.path.basename(str(path or ''))) or 'firmware'
 
 
 def _klipper_commit(klipper_path):
@@ -507,6 +578,35 @@ def _load_manifest(klipper_path):
         return manifest
     except json.JSONDecodeError:
         return None
+
+
+def _manifest_matches_firmware(manifest, firmware_path):
+    """验证 manifest 是否确实描述当前待烧录文件。"""
+    if not manifest:
+        return False, '未找到固件 manifest'
+    firmware = manifest.get('firmware') or {}
+    expected_path = firmware.get('path', '')
+    if not firmware_path or not expected_path:
+        return False, 'manifest 缺少固件路径'
+    actual_path = expand_klipper_path(firmware_path)
+    manifest_path = expand_klipper_path(expected_path)
+    if _normalize_fs_path(actual_path) != _normalize_fs_path(manifest_path):
+        return False, '当前固件路径与 manifest 不一致'
+    if not path_exists(actual_path):
+        return False, '当前固件文件不存在'
+    expected_size = firmware.get('size')
+    if expected_size not in (None, ''):
+        try:
+            if int(expected_size) != int(get_file_size(actual_path)):
+                return False, '当前固件大小与 manifest 不一致'
+        except (TypeError, ValueError):
+            return False, 'manifest 固件大小无效'
+    expected_sha = str(firmware.get('sha256') or '').strip().lower()
+    if expected_sha:
+        actual_sha = _file_sha256(actual_path).lower()
+        if not actual_sha or actual_sha != expected_sha:
+            return False, '当前固件校验值与 manifest 不一致'
+    return True, ''
 
 
 def _create_manifest(klipper_path, firmware_path, firmware_size, mcu_info, request_data,
@@ -595,15 +695,20 @@ def _recommended_flash_mode(manifest, firmware_path='', device_id=''):
 def _flash_plan(manifest, firmware_path, flash_mode='', device_id='', can_iface='can0'):
     if not firmware_path and manifest:
         firmware_path = (manifest.get('firmware') or {}).get('path', '')
-    recommended = _recommended_flash_mode(manifest or {}, firmware_path, device_id)
+    manifest_valid, manifest_error = _manifest_matches_firmware(manifest, firmware_path)
+    effective_manifest = manifest if manifest_valid else None
+    recommended = _recommended_flash_mode(effective_manifest or {}, firmware_path, device_id)
     selected = flash_mode or recommended
     effective_selected = {'CAN_BRIDGE_DFU': 'DFU', 'CAN_BRIDGE_KAT': 'KAT'}.get(selected, selected)
     errors = []
     warnings = []
     ext = os.path.splitext(firmware_path or '')[1].lower()
-    is_nobl = _is_nobl_build(manifest)
-    has_known_offset = _manifest_has_known_bl_offset(manifest)
-    bl_offset = _manifest_bl_offset(manifest)
+    is_nobl = _is_nobl_build(effective_manifest)
+    has_known_offset = _manifest_has_known_bl_offset(effective_manifest)
+    bl_offset = _manifest_bl_offset(effective_manifest)
+
+    if manifest and not manifest_valid:
+        warnings.append(f'manifest 未用于本次预检：{manifest_error}')
 
     if not firmware_path:
         errors.append('未找到固件路径，请先编译或选择固件文件')
@@ -615,17 +720,25 @@ def _flash_plan(manifest, firmware_path, flash_mode='', device_id='', can_iface=
     if effective_selected == 'DFU' and has_known_offset and not is_nobl:
         errors.append(f'DFU 仅用于 NOBL（无 Bootloader 偏移）固件，当前 BL 偏移为 {bl_offset}')
     elif effective_selected == 'DFU' and not has_known_offset:
-        warnings.append('无法确认当前固件是否为 NOBL，DFU 仅建议用于无 Bootloader 偏移固件')
-    if effective_selected == 'DFU' and device_id and not str(device_id).startswith('dfu:'):
-        warnings.append('当前设备不是 DFU 设备，请确认主板已进入 DFU 模式')
+        errors.append('无法确认当前固件是否为 NOBL；请先在本工具中重新编译，再使用 DFU 烧录')
+    if effective_selected == 'DFU' and not device_id:
+        errors.append('DFU 烧录需要先选择明确的 DFU 设备')
+    elif effective_selected == 'DFU' and not str(device_id).startswith('dfu:'):
+        errors.append('当前选择不是 DFU 设备，请重新扫描并选择')
     if effective_selected in ('KAT', 'CAN') and not device_id:
         errors.append('Katapult/CAN 烧录需要先选择设备 ID 或 CAN UUID')
+    if effective_selected == 'KAT' and str(device_id).startswith(('dfu:', 'rp2040_boot')):
+        errors.append('Katapult 烧录必须选择 CAN UUID 或 Katapult USB 串口设备')
     if effective_selected == 'CAN' and device_id and not re.match(r'^(can\d+:)?[a-fA-F0-9]{8,32}$', str(device_id)):
-        warnings.append('CAN 烧录建议选择 CAN UUID 设备')
+        errors.append('CAN 烧录必须选择有效的 CAN UUID 设备')
+    if effective_selected == 'UF2' and device_id != 'rp2040_boot':
+        errors.append('UF2 烧录需要先选择 RP2040/RP2350 BOOT 设备')
+    if effective_selected == 'TF' and ext != '.bin':
+        errors.append('TF 卡烧录仅支持 .bin 固件，不能将其他格式重命名为 firmware.bin')
 
     dfu_address = ''
-    if manifest:
-        dfu_address = (manifest.get('build') or {}).get('flash_application_address', '')
+    if effective_manifest:
+        dfu_address = (effective_manifest.get('build') or {}).get('flash_application_address', '')
 
     return {
         'recommended_mode': recommended,
@@ -635,6 +748,8 @@ def _flash_plan(manifest, firmware_path, flash_mode='', device_id='', can_iface=
         'dfu_address': dfu_address,
         'bl_offset': bl_offset,
         'is_nobl': is_nobl,
+        'manifest_valid': manifest_valid,
+        'manifest_error': manifest_error,
         'can_iface': can_iface,
         'errors': errors,
         'warnings': warnings,
@@ -661,7 +776,7 @@ def _decorate_bl_firmware(fw, manufacturer, board_type='', board_id='', board_na
     path = fw.get('path', '')
     rel_path = os.path.relpath(path, os.path.join(BOARD_CONFIGS_DIR, manufacturer, 'BL'))
     ext = os.path.splitext(path)[1].lower()
-    recommended_tool = 'rp2040_flash' if ext == '.uf2' else 'dfu-util'
+    recommended_tool = 'rp2040_flash' if ext == '.uf2' else 'openocd' if ext == '.hex' else 'dfu-util'
     category = rel_path.split(os.sep, 1)[0] if os.sep in rel_path else ''
     match_text = _norm_match_text(rel_path + ' ' + fw.get('name', ''))
     tokens = [_norm_match_text(board_id), _norm_match_text(board_name)]
@@ -947,6 +1062,10 @@ def _build_klipper_config_lines(
             logs.append(f"USB-CAN桥接CAN引脚: {bridge_option.get('display')}")
 
     if platform_key == 'rp2040' and resolved_comm_type in ('can', 'usbcanbridge'):
+        rp2040_can_rx_gpio = _normalize_rp2040_gpio(rp2040_can_rx_gpio, 'RP2040 CAN RX GPIO')
+        rp2040_can_tx_gpio = _normalize_rp2040_gpio(rp2040_can_tx_gpio, 'RP2040 CAN TX GPIO')
+        if rp2040_can_rx_gpio == rp2040_can_tx_gpio:
+            raise ValueError('RP2040 CAN RX 与 TX 不能使用同一个 GPIO')
         config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_RX={rp2040_can_rx_gpio}')
         config_lines.append(f'CONFIG_RPXXXX_CANBUS_GPIO_TX={rp2040_can_tx_gpio}')
 
@@ -1005,8 +1124,29 @@ def get_all_bl_firmwares():
                             all_firmwares.append(decorated)
                     except Exception:
                         pass
+        uploaded_firmwares = []
+        if os.path.isdir(BL_UPLOAD_DIR):
+            for name in sorted(os.listdir(BL_UPLOAD_DIR)):
+                path = os.path.join(BL_UPLOAD_DIR, name)
+                ext = os.path.splitext(name)[1].lower()
+                if not os.path.isfile(path) or ext not in ('.bin', '.uf2'):
+                    continue
+                uploaded_firmwares.append({
+                    'path': path,
+                    'name': name,
+                    'relative_path': f'已上传/{name}',
+                    'manufacturer': '',
+                    'category': 'Uploaded',
+                    'ext': ext,
+                    'recommended_tool': 'rp2040_flash' if ext == '.uf2' else 'dfu-util',
+                    'default_address': '0x08000000',
+                    'match_score': 0,
+                    'size': os.path.getsize(path),
+                    'uploaded': True,
+                })
         matched = [fw for fw in all_firmwares if fw.get('match_score', 0) > 0]
-        files = matched if (board_id or board_name) and matched else all_firmwares
+        all_firmwares.extend(uploaded_firmwares)
+        files = (matched + uploaded_firmwares) if (board_id or board_name) and matched else all_firmwares
         files.sort(key=lambda x: (-x.get('match_score', 0), x.get('relative_path', x.get('name', '')).lower()))
         return jsonify({
             'files': files,
@@ -1020,6 +1160,46 @@ def get_all_bl_firmwares():
         })
     except Exception as e:
         return jsonify({'error': safe_error(e)}), 500
+
+
+@firmware_bp.route('/api/firmware/bl/upload', methods=['POST'])
+def upload_bl_firmware():
+    """上传临时 BL 固件；文件仅保存在受限的应用数据目录。"""
+    uploaded = request.files.get('file')
+    if not uploaded or not uploaded.filename:
+        return jsonify({'success': False, 'error': '未选择 BL 文件'}), 400
+    original_name = secure_filename(uploaded.filename)
+    if not original_name:
+        return jsonify({'success': False, 'error': 'BL 文件名无效'}), 400
+    ext = os.path.splitext(original_name)[1].lower()
+    if ext not in ('.bin', '.uf2'):
+        return jsonify({'success': False, 'error': '仅支持 .bin 或 .uf2 BL 文件'}), 400
+    content = uploaded.stream.read(BL_UPLOAD_MAX_BYTES + 1)
+    if not content:
+        return jsonify({'success': False, 'error': 'BL 文件不能为空'}), 400
+    if len(content) > BL_UPLOAD_MAX_BYTES:
+        return jsonify({'success': False, 'error': 'BL 文件不能超过 4 MB'}), 413
+
+    os.makedirs(BL_UPLOAD_DIR, exist_ok=True)
+    digest = hashlib.sha256(content).hexdigest()[:12]
+    stem = secure_filename(os.path.splitext(original_name)[0]) or 'bootloader'
+    stored_name = f'{stem}-{digest}{ext}'
+    stored_path = os.path.join(BL_UPLOAD_DIR, stored_name)
+    with open(stored_path, 'wb') as output:
+        output.write(content)
+    return jsonify({
+        'success': True,
+        'file': {
+            'path': stored_path,
+            'name': original_name,
+            'stored_name': stored_name,
+            'relative_path': f'已上传/{original_name}',
+            'ext': ext,
+            'size': len(content),
+            'uploaded': True,
+            'recommended_tool': 'rp2040_flash' if ext == '.uf2' else 'dfu-util',
+        }
+    })
 
 @firmware_bp.route('/api/firmware/bl-firmwares/<manufacturer>')
 @firmware_bp.route('/api/firmware/bl-firmwares/<manufacturer>/<board_type>')
@@ -1161,6 +1341,7 @@ def compile_firmware():
         kconfig_klipper_path = expand_klipper_path(raw_klipper_path, force_local=True)
 
         config_data = data.get('config')
+        board_config_data = data.get('board_config') if isinstance(data.get('board_config'), dict) else None
         if config_data:
             mcu_arch = config_data.get('platform', config_data.get('平台', 'STM32'))
             processor = config_data.get('mcu', config_data.get('处理器', 'STM32F072')).upper()
@@ -1187,6 +1368,10 @@ def compile_firmware():
             rp2040_can_rx_gpio = data.get('rp2040_can_rx_gpio', '4')
             rp2040_can_tx_gpio = data.get('rp2040_can_tx_gpio', '5')
             canbus_frequency = data.get('canbus_frequency', DEFAULT_CANBUS_FREQUENCY)
+
+            if not str(comm_type or '').strip():
+                yield f'data: {json.dumps({"error": "请选择通信方式"})}\n\n'
+                return
 
         if not path_exists(klipper_path):
             yield f'data: {json.dumps({"error": f"Klipper目录不存在: {klipper_path}"})}\n\n'
@@ -1344,7 +1529,7 @@ def compile_firmware():
             }
             manifest = _create_manifest(
                 klipper_path, firmware_path, firmware_size, mcu_info,
-                data, config_data, compile_values
+                data, config_data or board_config_data, compile_values
             )
             manifest_path = _write_manifest(klipper_path, manifest)
 
@@ -1496,6 +1681,8 @@ def detect_devices():
                 devnum = devnum_match.group(1) if devnum_match else ''
                 serial_match = re.search(r'serial="([^"]+)"', line)
                 serial = serial_match.group(1) if serial_match else ''
+                path_match = re.search(r'path="([^"]+)"', line)
+                usb_path = path_match.group(1) if path_match else ''
                 dedup_key = f'{vid_pid}:{devnum}'
                 if dedup_key in seen_dfu:
                     continue
@@ -1504,7 +1691,7 @@ def detect_devices():
                 display_parts = [f'{chip_name} DFU' if chip_name else f'DFU ({vid_pid})']
                 if serial:
                     display_parts.append(f'SN:{serial}')
-                devices.append({'id': f'dfu:{vid_pid}', 'name': ' '.join(display_parts), 'type': 'dfu', 'vid_pid': vid_pid, 'serial': serial, 'devnum': devnum})
+                devices.append({'id': _dfu_device_id(vid_pid, serial, usb_path), 'name': ' '.join(display_parts), 'type': 'dfu', 'vid_pid': vid_pid, 'serial': serial, 'devnum': devnum, 'usb_path': usb_path})
                 found_dfu = True
 
             if not found_dfu:
@@ -1570,6 +1757,8 @@ def detect_devices():
                         devnum = devnum_match.group(1) if devnum_match else ''
                         serial_match = re.search(r'serial="([^"]+)"', line)
                         serial = serial_match.group(1) if serial_match else ''
+                        path_match = re.search(r'path="([^"]+)"', line)
+                        usb_path = path_match.group(1) if path_match else ''
                         dedup_key = f'{vid_pid}:{devnum}'
                         if dedup_key in seen_dfu:
                             continue
@@ -1578,7 +1767,7 @@ def detect_devices():
                         display_parts = [f'{chip_name} DFU' if chip_name else f'DFU ({vid_pid})']
                         if serial:
                             display_parts.append(f'SN:{serial}')
-                        devices.append({'id': f'dfu:{vid_pid}', 'name': ' '.join(display_parts), 'type': 'dfu', 'vid_pid': vid_pid, 'serial': serial, 'devnum': devnum})
+                        devices.append({'id': _dfu_device_id(vid_pid, serial, usb_path), 'name': ' '.join(display_parts), 'type': 'dfu', 'vid_pid': vid_pid, 'serial': serial, 'devnum': devnum, 'usb_path': usb_path})
                         found_dfu = True
                 if not found_dfu:
                     for vidpid, chip_name in DFU_KNOWN_DEVICES.items():
@@ -1691,12 +1880,7 @@ def flash_firmware():
             if device == 'rp2040_boot':
                 flash_mode = 'UF2'
             else:
-                if device and device != 'dfu':
-                    dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
-                    safe_device = shlex.quote(dfu_vid_pid)
-                    device_filter = f'-d {safe_device}'
-                else:
-                    device_filter = ''
+                device_filter = _dfu_device_filter(device)
                 safe_address = shlex.quote(dfu_address)
 
                 def _run_dfu():
@@ -1787,6 +1971,13 @@ def flash_firmware():
                     yield f'data: [LOG] 执行烧录命令: {os.path.basename(cmd.split()[1])}\n\n'
                     result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
                 else:
+                    before_result = run_cmd(
+                        "ls /dev/serial/by-id/* 2>/dev/null",
+                        shell=True, capture_output=True, text=True, timeout=5
+                    )
+                    devices_before_reset = {
+                        line.strip() for line in (before_result.stdout or '').splitlines() if line.strip()
+                    }
                     reset_cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -i {shlex.quote(can_iface)} -r -u {shlex.quote(can_uuid)}'
                     logger.info(f'CAN 重置命令：{reset_cmd}')
                     yield f'data: [LOG] 发送 CAN 复位命令到 {can_uuid}...\n\n'
@@ -1799,14 +1990,13 @@ def flash_firmware():
                         find_result = run_cmd("ls /dev/serial/by-id/* 2>/dev/null", shell=True, capture_output=True, text=True, timeout=5)
                         if find_result.stdout.strip():
                             lines = [l.strip() for l in find_result.stdout.strip().split('\n') if l.strip()]
-                            for line in lines:
-                                if re.search(r'(Klipper|Katapult|STM32)', line, re.IGNORECASE):
-                                    katapult_device = line
-                                    break
-                            if not katapult_device and lines:
-                                katapult_device = lines[0]
-                            if katapult_device:
+                            new_devices = [line for line in lines if line not in devices_before_reset]
+                            if len(new_devices) == 1:
+                                katapult_device = new_devices[0]
                                 break
+                            if len(new_devices) > 1:
+                                yield f'data: {json.dumps({"error": "CAN 复位后出现多个新 USB 设备，无法安全确定目标，请拔除无关设备后重试", "devices": new_devices})}\n\n'
+                                return
                         logger.info(f'轮询中... ({_+1}/20)')
 
                     if katapult_device:
@@ -2165,11 +2355,14 @@ def get_bl_address_options():
 @firmware_bp.route('/api/firmware/bl/flash', methods=['POST'])
 def flash_bl_firmware():
     """烧录BL固件 (Katapult/Bootloader)"""
+    if not _bl_flash_lock.acquire(blocking=False):
+        return jsonify({'error': '已有 BL 烧录任务正在执行，请稍后再试'}), 409
     try:
         data = request.get_json(silent=True) or {}
         bl_firmware_path = data.get('bl_firmware_path', '')
         device = data.get('device_id', data.get('device', ''))
         flash_mode = data.get('flash_mode', 'DFU')
+        mcu_id = str(data.get('mcu_id') or '').strip()
         dfu_offset = str(data.get('dfu_offset', '')).strip()
         platform_key = str(data.get('platform_key') or 'stm32').strip().lower()
         dfu_address = data.get('dfu_address', '0x08000000')
@@ -2181,8 +2374,30 @@ def flash_bl_firmware():
 
         if not bl_firmware_path or not os.path.exists(bl_firmware_path):
             return jsonify({'error': f'BL固件文件不存在: {bl_firmware_path}'}), 400
-        if not _path_under(bl_firmware_path, [os.path.join(BASE_DIR, 'board_configs')]):
+        if not _path_under(bl_firmware_path, [BOARD_CONFIGS_DIR, BL_UPLOAD_DIR]):
             return jsonify({'error': 'BL固件路径不在允许目录内'}), 403
+
+        firmware_ext = os.path.splitext(bl_firmware_path)[1].lower()
+        if flash_mode == 'UF2':
+            if device != 'rp2040_boot':
+                return jsonify({'error': 'UF2 烧录必须选择处于 BOOTSEL 模式的 RP2040/RP2350 设备'}), 400
+            if firmware_ext != '.uf2':
+                return jsonify({'error': 'UF2 烧录仅支持 .uf2 BL 固件'}), 400
+            if platform_key not in ('rp2040', 'rp2350', 'rp2'):
+                return jsonify({'error': f'当前 MCU 平台 {platform_key} 与 UF2 烧录方式不兼容'}), 400
+        elif flash_mode == 'DFU':
+            if not str(device).startswith('dfu:'):
+                return jsonify({'error': 'DFU 烧录必须选择明确的 DFU 设备'}), 400
+            if platform_key != 'stm32':
+                return jsonify({'error': f'当前 MCU 平台 {platform_key} 与 STM32 DFU 烧录方式不兼容'}), 400
+            if firmware_ext != '.bin':
+                return jsonify({'error': 'STM32 DFU 烧录仅支持原始 .bin BL 固件'}), 400
+        elif flash_mode in ('st-flash', 'openocd') and platform_key != 'stm32':
+            return jsonify({'error': f'当前 MCU 平台 {platform_key} 与 STM32 调试器烧录方式不兼容'}), 400
+        elif flash_mode == 'st-flash' and firmware_ext != '.bin':
+            return jsonify({'error': 'st-flash 仅支持原始 .bin BL 固件'}), 400
+        elif flash_mode == 'openocd' and firmware_ext not in ('.bin', '.hex'):
+            return jsonify({'error': 'OpenOCD BL 烧录仅支持 .bin 或 .hex 固件'}), 400
 
         if flash_mode in ('DFU', 'st-flash', 'openocd') and not _valid_flash_address(dfu_address):
             return jsonify({'error': f'烧录地址无效: {dfu_address}'}), 400
@@ -2191,11 +2406,7 @@ def flash_bl_firmware():
             bl_firmware_path = upload_bl_firmware_for_remote(bl_firmware_path)
 
         if flash_mode == 'DFU':
-            if device and device != 'dfu':
-                dfu_vid_pid = device.replace('dfu:', '', 1) if device.startswith('dfu:') else device
-                device_filter = f'-d {shlex.quote(dfu_vid_pid)}'
-            else:
-                device_filter = ''
+            device_filter = _dfu_device_filter(device)
             safe_address = shlex.quote(dfu_address)
 
             if erase_flash:
@@ -2284,8 +2495,11 @@ def flash_bl_firmware():
             result = run_cmd(stflash_cmd, shell=True, capture_output=True, text=True, timeout=60)
 
         elif flash_mode == 'openocd':
+            openocd_target = _openocd_target_for_mcu(mcu_id)
+            if not openocd_target:
+                return jsonify({'error': f'无法根据 MCU 型号选择 OpenOCD target: {mcu_id or "未提供"}'}), 400
             openocd_program = f'program {bl_firmware_path} {dfu_address} verify reset exit'
-            openocd_cmd = f'sudo openocd -f interface/stlink.cfg -f target/stm32f1x.cfg -c {shlex.quote(openocd_program)}'
+            openocd_cmd = f'sudo openocd -f interface/stlink.cfg -f target/{openocd_target}.cfg -c {shlex.quote(openocd_program)}'
             result = run_cmd(openocd_cmd, shell=True, capture_output=True, text=True, timeout=120)
 
         else:
@@ -2298,6 +2512,8 @@ def flash_bl_firmware():
 
     except Exception as e:
         return jsonify({'error': safe_error(e)}), 500
+    finally:
+        _bl_flash_lock.release()
 
 
 # ==================== 编译配置导入/导出 API ====================

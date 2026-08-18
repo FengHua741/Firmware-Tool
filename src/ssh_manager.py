@@ -473,7 +473,8 @@ class SSHManager:
                     # 主机密钥不匹配：目标设备可能已更换/重装系统
                     last_error = ConnectionError(
                         f"SSH 连接失败: 主机密钥不匹配 — 设备 {host} 的密钥已变更。"
-                        f"请运行 'ssh-keygen -f ~/.firmware-tool/known_hosts -R {host}' 清除旧密钥后重试。"
+                        f"请在设置页点击“清除主机密钥”，确认设备身份后重新连接；"
+                        f"也可在服务主机运行 'sudo ssh-keygen -f {KNOWN_HOSTS_PATH} -R {host}'。"
                     )
                     logger.warning(f"SSH Host key mismatch for {host}")
                     break  # 主机密钥错误不会因重试而解决，直接跳出
