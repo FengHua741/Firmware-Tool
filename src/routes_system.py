@@ -2,7 +2,7 @@
 系统管理蓝图 - 系统资源监控、设备检测、服务管理等
 """
 
-from flask import Blueprint, jsonify, request, send_from_directory, Response
+from flask import Blueprint, jsonify, request, send_from_directory
 import subprocess
 import os
 import re
@@ -11,7 +11,6 @@ import time
 import json
 import glob
 import socket
-import pwd
 import psutil
 import requests
 import threading
@@ -20,7 +19,7 @@ from datetime import datetime
 from collections import deque
 
 from shared import (
-    config, logger, BASE_DIR, CONFIG_PATH,
+    config, logger, BASE_DIR,
     DFU_KNOWN_DEVICES, DFU_KNOWN_VIDPIDS,
     run_cmd, run_cmd_check, path_exists, list_dir, is_ssh_mode, is_fast_ssh_mode,
     SSHManager, get_klipper_owner, get_klipper_python_bin, expand_klipper_path,
@@ -1746,25 +1745,74 @@ def get_all_ids():
 
 
 # ==================== 版本与服务 API ====================
+def _normalize_klipper_version(value):
+    """过滤 Klipper/Fly-Klipper 常见的空版本占位符。"""
+    version = str(value or '').strip().splitlines()[0] if str(value or '').strip() else ''
+    if version.lower() in ('', '?', 'unknown', 'none', 'null'):
+        return ''
+    return version[:200]
+
+
+def _detect_klipper_version(klipper_path):
+    """兼容 Git 安装与不包含 .git 的 FlyOS 打包版 Klipper。"""
+    if not path_exists(klipper_path):
+        return '', 'missing'
+
+    if path_exists(os.path.join(klipper_path, '.git')):
+        output = run_cmd(
+            ['git', '-C', klipper_path, 'describe', '--tags', '--always', '--long', '--dirty=-d'],
+            capture_output=True, text=True, timeout=5
+        )
+        version = _normalize_klipper_version(output.stdout) if output.returncode == 0 else ''
+        if version:
+            return version, 'git'
+
+    version_file = os.path.join(klipper_path, 'klippy', '.version')
+    if path_exists(version_file):
+        output = run_cmd(
+            ['head', '-n', '1', version_file],
+            capture_output=True, text=True, timeout=5
+        )
+        version = _normalize_klipper_version(output.stdout) if output.returncode == 0 else ''
+        if version:
+            return version, 'version_file'
+
+    util_path = os.path.join(klipper_path, 'klippy', 'util.py')
+    if path_exists(util_path):
+        script = (
+            'import sys; '
+            'sys.path.insert(0, sys.argv[1]); '
+            'import util; '
+            'info = util.get_git_version(from_file=False) or {}; '
+            'print(info.get("version", ""))'
+        )
+        klippy_path = os.path.join(klipper_path, 'klippy')
+        for interpreter in ('python3', 'python'):
+            output = run_cmd(
+                [interpreter, '-c', script, klippy_path],
+                capture_output=True, text=True, timeout=8
+            )
+            version = _normalize_klipper_version(output.stdout) if output.returncode == 0 else ''
+            if version:
+                return version, 'packaged_source'
+
+    return '', 'unknown'
+
+
 @system_bp.route('/api/system/versions', methods=['GET'])
 def get_versions():
     """获取Klipper版本信息"""
-    result = {'klipper_version': None}
     try:
         klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
-        if path_exists(os.path.join(klipper_path, '.git')):
-            output = run_cmd(
-                ['git', '-C', klipper_path, 'describe', '--tags', '--always'],
-                capture_output=True, text=True, timeout=5
-            )
-            if output.returncode == 0:
-                result['klipper_version'] = output.stdout.strip()
-        else:
-            result['klipper_version'] = '未安装'
+        version, source = _detect_klipper_version(klipper_path)
+        if source == 'missing':
+            return jsonify({'klipper_version': '未安装', 'source': source})
+        if not version:
+            return jsonify({'klipper_version': '未知版本', 'source': source})
+        return jsonify({'klipper_version': version, 'source': source})
     except Exception as e:
         logger.warning(f"获取Klipper版本失败: {e}")
-        result['klipper_version'] = '获取失败'
-    return jsonify(result)
+        return jsonify({'klipper_version': '获取失败', 'source': 'error'})
 
 
 @system_bp.route('/api/system/services', methods=['GET'])
@@ -1955,145 +2003,6 @@ def control_service():
         return jsonify({'success': False, 'error': '服务操作超时'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': safe_error(e)}), 500
-
-
-@system_bp.route('/api/system/check-update', methods=['GET'])
-def check_update():
-    """检查项目更新"""
-    try:
-        stat_info = os.stat(BASE_DIR)
-        uid = stat_info.st_uid
-        user_info = pwd.getpwuid(uid)
-        username = user_info.pw_name
-        home_dir = user_info.pw_dir
-
-        env = os.environ.copy()
-        env['HOME'] = home_dir
-        env['USER'] = username
-
-        run_cmd(
-            ['git', 'config', '--global', '--add', 'safe.directory', BASE_DIR],
-            capture_output=True, env=env
-        )
-
-        current_output = run_cmd(
-            ['git', '-C', BASE_DIR, 'rev-parse', '--short', 'HEAD'],
-            capture_output=True, text=True, timeout=10, env=env
-        )
-        current_version = current_output.stdout.strip() if current_output.returncode == 0 else 'unknown'
-
-        run_cmd(
-            ['git', '-C', BASE_DIR, 'fetch', 'origin'],
-            capture_output=True, timeout=30, env=env
-        )
-
-        remote_output = run_cmd(
-            ['git', '-C', BASE_DIR, 'rev-parse', '--short', 'origin/main'],
-            capture_output=True, text=True, timeout=10, env=env
-        )
-        latest_version = remote_output.stdout.strip() if remote_output.returncode == 0 else current_version
-
-        has_update = current_version != latest_version
-        update_time = None
-        if has_update:
-            time_output = run_cmd(
-                ['git', '-C', BASE_DIR, 'log', '-1', '--format=%cd', '--date=iso', 'origin/main'],
-                capture_output=True, text=True, timeout=10, env=env
-            )
-            update_time = time_output.stdout.strip() if time_output.returncode == 0 else None
-
-        return jsonify({
-            'has_update': has_update,
-            'current_version': current_version,
-            'latest_version': latest_version,
-            'update_time': update_time
-        })
-    except Exception as e:
-        logger.error(f"检查更新失败: {e}")
-        return jsonify({'error': safe_error(e)}), 500
-
-
-@system_bp.route('/api/system/update', methods=['POST'])
-def update_project():
-    """执行项目更新"""
-    def generate():
-        try:
-            stat_info = os.stat(BASE_DIR)
-            uid = stat_info.st_uid
-            user_info = pwd.getpwuid(uid)
-            home_dir = user_info.pw_dir
-
-            env = os.environ.copy()
-            env['HOME'] = home_dir
-            env['USER'] = user_info.pw_name
-
-            run_cmd(
-                ['git', 'config', '--global', '--add', 'safe.directory', BASE_DIR],
-                capture_output=True, env=env
-            )
-
-            yield "开始更新 Firmware-Tool...\n"
-            yield "保存当前配置...\n"
-            config_backup = None
-            if os.path.exists(CONFIG_PATH):
-                with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                    config_backup = f.read()
-
-            status_result = run_cmd(
-                ['git', '-C', BASE_DIR, 'status', '--porcelain'],
-                capture_output=True, text=True, timeout=10, env=env
-            )
-            if status_result.returncode != 0:
-                yield f"错误: 无法检查工作区状态: {status_result.stderr}\n"
-                return
-            dirty_lines = [
-                line for line in (status_result.stdout or '').splitlines()
-                if not line.endswith('data/config.json')
-            ]
-            if dirty_lines:
-                yield "错误: 工作区存在未提交修改，已停止自动更新以避免覆盖本地文件。\n"
-                yield "\n".join(dirty_lines[:20]) + "\n"
-                if len(dirty_lines) > 20:
-                    yield f"... 还有 {len(dirty_lines) - 20} 项\n"
-                return
-
-            yield "拉取最新代码...\n"
-            result = run_cmd(
-                ['git', '-C', BASE_DIR, 'pull', 'origin', 'main'],
-                capture_output=True, text=True, timeout=60, env=env
-            )
-            yield result.stdout
-            if result.stderr:
-                yield f"警告: {result.stderr}\n"
-
-            if result.returncode != 0:
-                yield f"错误: git pull 失败\n"
-                return
-
-            if config_backup:
-                yield "恢复配置...\n"
-                with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-                    f.write(config_backup)
-
-            yield "重启服务...\n"
-            restart_result = run_cmd(
-                ['sudo', 'systemctl', 'restart', 'firmware-tool'],
-                capture_output=True, text=True, timeout=30
-            )
-
-            if restart_result.returncode == 0:
-                yield "服务重启成功！\n"
-            else:
-                yield f"服务重启失败: {restart_result.stderr}\n"
-
-            yield "更新完成！\n"
-
-        except subprocess.TimeoutExpired:
-            yield "错误: 操作超时\n"
-        except Exception as e:
-            yield f"错误: {safe_error(e)}\n"
-
-    return Response(generate(), mimetype='text/plain')
 
 
 # ==================== CAN 总线拓扑 API ====================

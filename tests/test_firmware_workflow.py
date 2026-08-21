@@ -72,6 +72,38 @@ class FirmwareValidationTests(unittest.TestCase):
         self.assertEqual(real['bl_offset'], '32768')
 
 
+class KlipperVersionTests(unittest.TestCase):
+    def test_version_placeholder_is_rejected(self):
+        for value in ('', '?', 'unknown', None):
+            with self.subTest(value=value):
+                self.assertEqual(system._normalize_klipper_version(value), '')
+        self.assertEqual(
+            system._normalize_klipper_version('v1.4.0-g7a684b0850\n'),
+            'v1.4.0-g7a684b0850'
+        )
+
+    def test_packaged_klipper_uses_embedded_source_version(self):
+        def fake_exists(path):
+            return path in ('/data/klipper', '/data/klipper/klippy/util.py')
+
+        completed = type('Completed', (), {
+            'returncode': 0,
+            'stdout': 'v1.4.0-g7a684b0850\n',
+            'stderr': '',
+        })()
+        with mock.patch.object(system, 'path_exists', side_effect=fake_exists), \
+                mock.patch.object(system, 'run_cmd', return_value=completed) as run:
+            version, source = system._detect_klipper_version('/data/klipper')
+
+        self.assertEqual(version, 'v1.4.0-g7a684b0850')
+        self.assertEqual(source, 'packaged_source')
+        self.assertEqual(run.call_args.args[0][0], 'python3')
+
+    def test_missing_klipper_is_distinct_from_unknown_version(self):
+        with mock.patch.object(system, 'path_exists', return_value=False):
+            self.assertEqual(system._detect_klipper_version('/missing'), ('', 'missing'))
+
+
 class ManifestAndPlanTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -233,6 +265,11 @@ class FrontendContractTests(unittest.TestCase):
     def test_manual_reconnect_escapes_server_error(self):
         self.assertIn("escapeHtml(data.error || '未知错误')", self.app_javascript)
         self.assertIn('clearHostKeys(true)', self.app_javascript)
+
+    def test_project_update_feature_is_removed(self):
+        self.assertNotIn('项目更新', self.html)
+        self.assertNotIn('checkForUpdates', self.app_javascript)
+        self.assertNotIn('/api/system/update', self.app_javascript)
 
 
 if __name__ == '__main__':

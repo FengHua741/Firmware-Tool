@@ -398,8 +398,6 @@ Firmware-Tool/
 | `/api/system/versions` | GET | 系统版本信息 |
 | `/api/system/services` | GET | 可管理服务列表与状态 |
 | `/api/system/service` | POST | 控制允许列表中的服务启动、停止、重启或查询状态 |
-| `/api/system/check-update` | GET | 检查项目更新 |
-| `/api/system/update` | POST | 在线更新项目（流式输出） |
 | `/api/system/can-config` | GET/POST | CAN 网络配置 |
 | `/api/system/can-diagnose` | GET | CAN 网络诊断 |
 | `/api/system/can-repair` | POST | 尝试修复 CAN 网络配置 |
@@ -509,7 +507,6 @@ MCU 型号、固件版本、CAN 速率、CAN 保留引脚和启动引脚来自 K
 
 - 返回 JSON 的接口通常包含 `success`、`error`、`message` 或业务数据字段；错误时会返回 4xx/5xx 状态码或 `success: false`。
 - `/api/firmware/compile`、`/api/firmware/flash`、`/api/firmware/install-host`、`/api/firmware/dependencies/install` 使用 `text/event-stream`。
-- `/api/system/update` 使用流式文本输出。
 - 需要路径参数的接口会做路径白名单校验，非法路径返回 403。
 
 ## 常见问题
