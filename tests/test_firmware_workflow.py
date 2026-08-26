@@ -17,9 +17,26 @@ if str(SRC) not in sys.path:
 
 import routes_firmware as firmware
 import routes_system as system
+import kconfig_can_parser as can_parser
 
 
 class FirmwareValidationTests(unittest.TestCase):
+    def test_katapult_flashtool_falls_back_to_klipper_embedded_copy(self):
+        embedded = '/data/klipper/lib/katapult/flashtool.py'
+        with mock.patch.dict(firmware.config, {
+            'katapult_path': '~/katapult',
+            'klipper_path': '~/klipper',
+        }), mock.patch.object(
+            firmware, 'path_exists', side_effect=lambda path: path == embedded
+        ):
+            selected, checked = firmware._find_katapult_flashtool(
+                '/data', '/data/klipper'
+            )
+
+        self.assertEqual(selected, embedded)
+        self.assertIn('/data/katapult/scripts/flashtool.py', checked)
+        self.assertIn(embedded, checked)
+
     def test_can_frequency_boundaries_and_suffixes(self):
         self.assertEqual(firmware._normalize_canbus_frequency('1m'), '1000000')
         self.assertEqual(firmware._normalize_canbus_frequency('500k'), '500000')
@@ -70,6 +87,102 @@ class FirmwareValidationTests(unittest.TestCase):
             'bl_offset': '32768',
         })
         self.assertEqual(real['bl_offset'], '32768')
+
+
+class H503CommunicationTests(unittest.TestCase):
+    def setUp(self):
+        self.platform_data = {
+            'h503_nested_options': {
+                'serial_peripheral': [{
+                    'config_symbol': 'STM32_H503_SERIAL_USART1',
+                    'parent': '',
+                }],
+                'serial_rx': [{
+                    'config_symbol': 'STM32_H503_SERIAL_RX_PA10_AF7',
+                    'parent': 'STM32_H503_SERIAL_USART1',
+                }, {
+                    'config_symbol': 'STM32_H503_SERIAL_RX_PA3_AF7',
+                    'parent': 'STM32_H503_SERIAL_USART2',
+                }],
+                'serial_tx': [{
+                    'config_symbol': 'STM32_H503_SERIAL_TX_PA9_AF7',
+                    'parent': 'STM32_H503_SERIAL_USART1',
+                }],
+                'can_rx': [{
+                    'config_symbol': 'STM32_H503_CAN_RX_PA11',
+                    'available_for_usbcanbridge': False,
+                }, {
+                    'config_symbol': 'STM32_H503_CAN_RX_PB5',
+                    'available_for_usbcanbridge': True,
+                }],
+                'can_tx': [{
+                    'config_symbol': 'STM32_H503_CAN_TX_PA12',
+                    'available_for_usbcanbridge': False,
+                }, {
+                    'config_symbol': 'STM32_H503_CAN_TX_PB6',
+                    'available_for_usbcanbridge': True,
+                }],
+            },
+        }
+
+    def test_h503_capabilities_expose_usb_fdcan_and_usb_can(self):
+        capabilities = can_parser.PROCESSOR_CAPABILITIES['STM32H503']
+        self.assertIn('HAVE_STM32_USBFS', capabilities)
+        self.assertIn('HAVE_STM32_FDCANBUS', capabilities)
+        self.assertIn('HAVE_STM32_USBCANBUS', capabilities)
+
+    def test_h503_serial_requires_matching_peripheral_rx_and_tx(self):
+        symbols, _ = firmware._resolve_h503_extra_symbols(
+            self.platform_data,
+            'STM32H503',
+            'STM32_SERIAL_H503',
+            '',
+            [
+                'STM32_H503_SERIAL_USART1',
+                'STM32_H503_SERIAL_RX_PA10_AF7',
+                'STM32_H503_SERIAL_TX_PA9_AF7',
+            ],
+        )
+        self.assertEqual(symbols, [
+            'STM32_H503_SERIAL_USART1',
+            'STM32_H503_SERIAL_RX_PA10_AF7',
+            'STM32_H503_SERIAL_TX_PA9_AF7',
+        ])
+
+        with self.assertRaisesRegex(ValueError, '不匹配'):
+            firmware._resolve_h503_extra_symbols(
+                self.platform_data,
+                'STM32H503',
+                'STM32_SERIAL_H503',
+                '',
+                [
+                    'STM32_H503_SERIAL_USART1',
+                    'STM32_H503_SERIAL_RX_PA3_AF7',
+                    'STM32_H503_SERIAL_TX_PA9_AF7',
+                ],
+            )
+
+    def test_h503_usb_can_rejects_usb_pa11_pa12_for_fdcan(self):
+        with self.assertRaisesRegex(ValueError, 'PA11/PA12'):
+            firmware._resolve_h503_extra_symbols(
+                self.platform_data,
+                'STM32H503',
+                'STM32_USBCANBUS_PA11_PA12',
+                'STM32_CMENU_CANBUS_H503',
+                ['STM32_H503_CAN_RX_PA11', 'STM32_H503_CAN_TX_PA12'],
+            )
+
+        symbols, _ = firmware._resolve_h503_extra_symbols(
+            self.platform_data,
+            'STM32H503',
+            'STM32_USBCANBUS_PA11_PA12',
+            'STM32_CMENU_CANBUS_H503',
+            ['STM32_H503_CAN_RX_PB5', 'STM32_H503_CAN_TX_PB6'],
+        )
+        self.assertEqual(symbols, [
+            'STM32_H503_CAN_RX_PB5',
+            'STM32_H503_CAN_TX_PB6',
+        ])
 
 
 class KlipperVersionTests(unittest.TestCase):

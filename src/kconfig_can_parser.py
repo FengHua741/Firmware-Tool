@@ -36,6 +36,8 @@ PROCESSOR_CAPABILITIES = {
     'STM32H723': ['MACH_STM32H723', 'MACH_STM32H7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
     'STM32H743': ['MACH_STM32H743', 'MACH_STM32H7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
     'STM32H750': ['MACH_STM32H750', 'MACH_STM32H7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
+    # STM32H5 系列 (USBFS + FDCAN)
+    'STM32H503': ['MACH_STM32H503', 'MACH_STM32H5', 'HAVE_STM32_USBFS', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
     # STM32 无USB系列
     'STM32F031': ['MACH_STM32F031', 'MACH_STM32F0'],
     'STM32F070': ['MACH_STM32F070', 'MACH_STM32F0'],
@@ -392,6 +394,77 @@ def _parse_stm32_kconfig(kconfig_path):
     return direct_can, bridge_can
 
 
+def _parse_h503_nested_options(kconfig_path):
+    """提取 H503 分级 UART/FDCAN 选择，供前端和配置生成器使用。"""
+    groups = {
+        'serial_peripheral': [],
+        'serial_rx': [],
+        'serial_tx': [],
+        'can_rx': [],
+        'can_tx': [],
+    }
+    if not os.path.exists(kconfig_path):
+        return groups
+
+    with open(kconfig_path, 'r', encoding='utf-8', errors='replace') as f:
+        lines = f.readlines()
+
+    prefix_groups = (
+        ('STM32_H503_SERIAL_RX_', 'serial_rx'),
+        ('STM32_H503_SERIAL_TX_', 'serial_tx'),
+        ('STM32_H503_SERIAL_USART', 'serial_peripheral'),
+        ('STM32_H503_SERIAL_LPUART', 'serial_peripheral'),
+        ('STM32_H503_CAN_RX_', 'can_rx'),
+        ('STM32_H503_CAN_TX_', 'can_tx'),
+    )
+    for index, raw_line in enumerate(lines):
+        match = re.match(r'^\s*config\s+(STM32_H503_\w+)', raw_line)
+        if not match:
+            continue
+        symbol = match.group(1)
+        group_name = next(
+            (group for prefix, group in prefix_groups if symbol.startswith(prefix)),
+            None,
+        )
+        if not group_name:
+            continue
+
+        display = ''
+        conditions = []
+        cursor = index + 1
+        while cursor < len(lines):
+            stripped = lines[cursor].strip()
+            if (re.match(r'^(config|choice|if)\b', stripped)
+                    or stripped in ('endchoice', 'endif')):
+                break
+            bool_match = re.match(r'bool\s+"([^"]+)"(?:\s+if\s+(.+))?', stripped)
+            if bool_match:
+                display = bool_match.group(1)
+                if bool_match.group(2):
+                    conditions.append(bool_match.group(2).strip())
+            depends_match = re.match(r'depends\s+on\s+(.+)', stripped)
+            if depends_match:
+                conditions.append(depends_match.group(1).strip())
+            cursor += 1
+
+        if not display:
+            continue
+        parent = next(
+            (condition for condition in conditions
+             if condition.startswith('STM32_H503_SERIAL_')),
+            '',
+        )
+        groups[group_name].append({
+            'config_symbol': symbol,
+            'display': display,
+            'parent': parent,
+            'available_for_usbcanbridge': '!USBCANBUS' not in conditions,
+            'compatible_processors': ['STM32H503'],
+        })
+
+    return groups
+
+
 def _parse_rp2040_kconfig(kconfig_path):
     """解析 RP2040 Kconfig 文件，提取 CAN 相关配置"""
     if not os.path.exists(kconfig_path):
@@ -505,6 +578,7 @@ def parse_can_options(klipper_path='~/klipper'):
                 del option['visibility']
             platform_data['direct_can'] = direct_can
             platform_data['bridge_can'] = bridge_can
+            platform_data['h503_nested_options'] = _parse_h503_nested_options(kconfig_path)
             processor_capabilities = {p: c for p, c in PROCESSOR_CAPABILITIES.items() if p.startswith('STM32')}
             platform_data['processor_capabilities'] = processor_capabilities
 

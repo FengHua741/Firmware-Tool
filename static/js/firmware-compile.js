@@ -10,6 +10,7 @@ let _commGroupedOptions = {}; // 按类型分组的通信选项
 let _commAllOptions = [];     // 所有通信选项（带compatible_processors）
 let _bridgeCanOptions = [];   // STM32 桥接CAN引脚选项
 let _rp2040CanGpio = null;    // RP2040 CAN GPIO 配置
+let _h503NestedOptions = {};  // STM32H503 UART/FDCAN 分级选项
 let _lastDetectedCanDevicesByUuid = {}; // 烧录设备列表中识别到的 CAN 节点详情
 let _compileMcuPlatformRequestId = 0; // 忽略快速切换平台时返回的过期请求
 let _deviceScanRequestId = 0; // 忽略烧录模式/CAN接口切换后的过期扫描
@@ -354,6 +355,7 @@ const MCU_PLATFORM_MAP = {
     'STM32G070': 'stm32', 'STM32G071': 'stm32', 'STM32G0B0': 'stm32', 'STM32G0B1': 'stm32',
     'STM32G431': 'stm32', 'STM32G474': 'stm32',
     'STM32H723': 'stm32', 'STM32H743': 'stm32', 'STM32H750': 'stm32',
+    'STM32H503': 'stm32',
     'STM32L412': 'stm32',
     'N32G452': 'stm32', 'N32G455': 'stm32',
     // RP2040 系列
@@ -405,6 +407,7 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
         let commOptions = [];
         _bridgeCanOptions = [];
         _rp2040CanGpio = null;
+        _h503NestedOptions = {};
 
         if (platformData && platformData.communication_options) {
             commOptions = platformData.communication_options;
@@ -418,6 +421,7 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
                     _bridgeCanOptions = platformData.bridge_can;
                 }
             }
+            _h503NestedOptions = platformData.h503_nested_options || {};
             // RP2040 CAN GPIO配置
             if (platformKey === 'rp2040' && (platformData.has_canbus || platformData.has_usbcanbus)) {
                 _rp2040CanGpio = {
@@ -480,6 +484,8 @@ function onCompileConnectionChange() {
     if (pinContainer) pinContainer.remove();
     let bitrateContainer = document.getElementById('compileCanBitrateSub');
     if (bitrateContainer) bitrateContainer.remove();
+    let h503Container = document.getElementById('compileH503NestedSub');
+    if (h503Container) h503Container.remove();
 
     if (!commType || !_commGroupedOptions[commType]) return;
 
@@ -532,6 +538,7 @@ function onCompileConnectionChange() {
     if (commType === 'can' || commType === 'usbcanbridge') {
         _showCanBitrateSelector(connGroup);
     }
+    _renderH503NestedOptions();
     const selectedDev = _lastDetectedCanDevicesByUuid[String(document.getElementById('flashDeviceId')?.value || '').toLowerCase()];
     _renderFlashDeviceCompare(selectedDev || null);
 }
@@ -550,7 +557,7 @@ function _showBridgeCanPinSelector(connGroup) {
     pinContainer.className = 'form-group';
     pinContainer.style.marginTop = '10px';
 
-    pinContainer.innerHTML = `<label>CAN总线引脚</label><select id="compileBridgeCanPin" class="form-control"></select>`;
+    pinContainer.innerHTML = `<label>CAN总线引脚</label><select id="compileBridgeCanPin" class="form-control" onchange="_renderH503NestedOptions()"></select>`;
 
     _insertAfterCompileConnectionOptions(connGroup, pinContainer);
 
@@ -1165,7 +1172,106 @@ function _clearSelectedCompileBoard() {
 }
 
 function onCompileConnectionDetailChange() {
-    // 编译时读取 detailSelect.value（见 compileFirmware 方法）
+    _renderH503NestedOptions();
+}
+
+function _h503Options(group) {
+    return Array.isArray(_h503NestedOptions?.[group]) ? _h503NestedOptions[group] : [];
+}
+
+function _h503SelectHtml(id, label, options, onchange='') {
+    const attrs = onchange ? ` onchange="${escapeHtml(onchange)}"` : '';
+    const optionHtml = options.map(opt =>
+        `<option value="${escapeHtml(opt.config_symbol)}">${escapeHtml(opt.display)}</option>`
+    ).join('');
+    return `<div style="flex:1;min-width:150px;"><small>${escapeHtml(label)}</small>` +
+        `<select id="${escapeHtml(id)}" class="form-control"${attrs}>${optionHtml}</select></div>`;
+}
+
+function _populateH503SerialPins() {
+    const peripheral = document.getElementById('compileH503SerialPeripheral')?.value || '';
+    for (const [id, group] of [
+        ['compileH503SerialRx', 'serial_rx'],
+        ['compileH503SerialTx', 'serial_tx'],
+    ]) {
+        const select = document.getElementById(id);
+        if (!select) continue;
+        const previous = select.value;
+        const options = _h503Options(group).filter(opt => !opt.parent || opt.parent === peripheral);
+        select.innerHTML = options.map(opt =>
+            `<option value="${escapeHtml(opt.config_symbol)}">${escapeHtml(opt.display)}</option>`
+        ).join('');
+        if (previous && [...select.options].some(opt => opt.value === previous)) {
+            select.value = previous;
+        }
+    }
+}
+
+function _renderH503NestedOptions() {
+    document.getElementById('compileH503NestedSub')?.remove();
+    const mcuId = String(currentCompileMcu?.mcu?.id || '').toUpperCase();
+    if (mcuId !== 'STM32H503') return;
+
+    const commType = document.getElementById('compileConnection')?.value || '';
+    const commSymbol = document.getElementById('compileConnectionDetail')?.value || '';
+    const bridgeSymbol = document.getElementById('compileBridgeCanPin')?.value || '';
+    const isSerial = commSymbol === 'STM32_SERIAL_H503';
+    const isFlexibleCan = commSymbol === 'STM32_MMENU_CANBUS_H503'
+        || (commType === 'usbcanbridge' && bridgeSymbol === 'STM32_CMENU_CANBUS_H503');
+    if (!isSerial && !isFlexibleCan) return;
+
+    const container = document.createElement('div');
+    container.id = 'compileH503NestedSub';
+    container.className = 'form-group';
+    container.style.marginTop = '10px';
+    if (isSerial) {
+        const peripherals = _h503Options('serial_peripheral');
+        container.innerHTML = '<label>H503 UART 配置</label><div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+            _h503SelectHtml('compileH503SerialPeripheral', '外设', peripherals, '_populateH503SerialPins()') +
+            _h503SelectHtml('compileH503SerialRx', 'RX 引脚', []) +
+            _h503SelectHtml('compileH503SerialTx', 'TX 引脚', []) + '</div>';
+    } else {
+        const forBridge = commType === 'usbcanbridge';
+        const filterOption = opt => !forBridge || opt.available_for_usbcanbridge !== false;
+        const rxOptions = _h503Options('can_rx').filter(filterOption);
+        const txOptions = _h503Options('can_tx').filter(filterOption);
+        container.innerHTML = '<label>H503 FDCAN1 配置</label><div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+            _h503SelectHtml('compileH503CanRx', 'RX 引脚', rxOptions) +
+            _h503SelectHtml('compileH503CanTx', 'TX 引脚', txOptions) + '</div>';
+    }
+    const anchor = document.getElementById('compileCanPinSub')
+        || document.getElementById('compileConnectionSub');
+    if (!anchor?.parentNode) return;
+    anchor.parentNode.insertBefore(container, anchor.nextSibling);
+    if (isSerial) _populateH503SerialPins();
+}
+
+function _getH503ExtraSymbols() {
+    const ids = [
+        'compileH503SerialPeripheral', 'compileH503SerialRx', 'compileH503SerialTx',
+        'compileH503CanRx', 'compileH503CanTx',
+    ];
+    return ids.map(id => document.getElementById(id)?.value || '').filter(Boolean);
+}
+
+function _restoreH503ExtraSymbols(symbols) {
+    if (!Array.isArray(symbols) || symbols.length === 0) return;
+    const values = new Set(symbols.map(value => String(value || '').replace(/^CONFIG_/, '')));
+    const peripheral = _h503Options('serial_peripheral').find(opt => values.has(opt.config_symbol));
+    const peripheralSelect = document.getElementById('compileH503SerialPeripheral');
+    if (peripheral && peripheralSelect) {
+        peripheralSelect.value = peripheral.config_symbol;
+        _populateH503SerialPins();
+    }
+    for (const id of [
+        'compileH503SerialRx', 'compileH503SerialTx',
+        'compileH503CanRx', 'compileH503CanTx',
+    ]) {
+        const select = document.getElementById(id);
+        if (!select) continue;
+        const match = [...select.options].find(opt => values.has(opt.value));
+        if (match) select.value = match.value;
+    }
 }
 
 // 预设厂家选择变化
@@ -1561,6 +1667,8 @@ async function loadCurrentCompileConfig() {
         if (current.bridge_can_config) {
             _selectCompileSymbol(document.getElementById('compileBridgeCanPin'), current.bridge_can_config);
         }
+        _renderH503NestedOptions();
+        _restoreH503ExtraSymbols(current.comm_extra_symbols);
         if (current.canbus_frequency) {
             _setSelectedCanBitrate(current.canbus_frequency);
         }
@@ -1648,6 +1756,19 @@ async function compileFirmware() {
             return;
         }
         if (bridgePinSelect?.value) compileParams.bridge_can_config = bridgePinSelect.value;
+    }
+
+    const h503ExtraSymbols = _getH503ExtraSymbols();
+    const needsH503Serial = compileParams.comm_config_symbol === 'STM32_SERIAL_H503';
+    const needsH503Can = compileParams.comm_config_symbol === 'STM32_MMENU_CANBUS_H503'
+        || compileParams.bridge_can_config === 'STM32_CMENU_CANBUS_H503';
+    const expectedH503Symbols = needsH503Serial ? 3 : needsH503Can ? 2 : 0;
+    if (expectedH503Symbols && h503ExtraSymbols.length !== expectedH503Symbols) {
+        showError(needsH503Serial ? '请选择 H503 串口外设、RX 与 TX 引脚' : '请选择 H503 FDCAN1 RX 与 TX 引脚');
+        return;
+    }
+    if (h503ExtraSymbols.length) {
+        compileParams.comm_extra_symbols = h503ExtraSymbols;
     }
 
     if (commType === 'can' || commType === 'usbcanbridge') {
@@ -3013,6 +3134,8 @@ async function importCompileConfig(event) {
         if (current.bridge_can_config) {
             _selectCompileSymbol(document.getElementById('compileBridgeCanPin'), current.bridge_can_config);
         }
+        _renderH503NestedOptions();
+        _restoreH503ExtraSymbols(current.comm_extra_symbols);
         if (current.canbus_frequency) {
             _setSelectedCanBitrate(current.canbus_frequency);
         }

@@ -74,6 +74,65 @@ def _umount_rp2040_boot():
     time.sleep(0.5)
 
 
+def _expand_tool_path(path, home_dir):
+    """按目标系统的 home 目录展开工具路径。"""
+    raw = str(path or '').strip()
+    if raw == '~':
+        return home_dir
+    if raw.startswith('~/'):
+        return os.path.join(home_dir, raw[2:])
+    return raw
+
+
+def _katapult_flashtool_candidates(home_dir, klipper_path=''):
+    """返回 Katapult 烧录工具的候选路径，兼容 FAST 内置布局。"""
+    katapult_path = _expand_tool_path(
+        config.get('katapult_path', '~/katapult'), home_dir
+    )
+    resolved_klipper_path = _expand_tool_path(
+        klipper_path or config.get('klipper_path', '~/klipper'), home_dir
+    )
+    candidates = [
+        os.path.join(katapult_path, 'scripts', 'flashtool.py'),
+        os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py'),
+        os.path.join(resolved_klipper_path, 'lib', 'katapult', 'flashtool.py'),
+        os.path.join(home_dir, 'klipper', 'lib', 'katapult', 'flashtool.py'),
+        '/data/katapult/scripts/flashtool.py',
+        '/data/klipper/lib/katapult/flashtool.py',
+    ]
+    return list(dict.fromkeys(path for path in candidates if path))
+
+
+def _find_katapult_flashtool(home_dir, klipper_path=''):
+    """查找可用的 flashtool.py，并返回已检查的路径。"""
+    candidates = _katapult_flashtool_candidates(home_dir, klipper_path)
+    for candidate in candidates:
+        if path_exists(candidate):
+            return candidate, candidates
+    return '', candidates
+
+
+def _find_canboot_flash_tool(home_dir, klipper_path=''):
+    """查找旧版 Klipper 内置的 flash_can.py。"""
+    resolved_klipper_path = _expand_tool_path(
+        klipper_path or config.get('klipper_path', '~/klipper'), home_dir
+    )
+    candidates = list(dict.fromkeys([
+        os.path.join(resolved_klipper_path, 'lib', 'canboot', 'flash_can.py'),
+        os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py'),
+        '/data/klipper/lib/canboot/flash_can.py',
+    ]))
+    for candidate in candidates:
+        if path_exists(candidate):
+            return candidate, candidates
+    return '', candidates
+
+
+def _missing_flash_tool_message(candidates):
+    checked_paths = '\n'.join(f'  {path}' for path in candidates)
+    return f'未找到 Katapult 烧录工具。请确认 Katapult 或 Klipper 已安装。\n查找路径:\n{checked_paths}'
+
+
 def _normalize_config_symbol(symbol):
     """返回不带 CONFIG_ 前缀的 Kconfig symbol。"""
     symbol = str(symbol or '').strip()
@@ -465,6 +524,16 @@ def _resolve_current_config_params(kconfig_klipper_path, config_values):
         params['bridge_can_config'] = bridge_option.get('config', '')
         params['bridge_can_display'] = bridge_option.get('display', '')
 
+    h503_nested = platform_data.get('h503_nested_options') or {}
+    h503_extra_symbols = []
+    for entries in h503_nested.values():
+        for entry in entries:
+            symbol = entry.get('config_symbol', '')
+            if symbol and _config_truthy(config_values, symbol):
+                h503_extra_symbols.append(symbol)
+    if h503_extra_symbols:
+        params['comm_extra_symbols'] = h503_extra_symbols
+
     if 'RPXXXX_CANBUS_GPIO_RX' in config_values:
         params['rp2040_can_rx_gpio'] = config_values.get('RPXXXX_CANBUS_GPIO_RX')
     if 'RPXXXX_CANBUS_GPIO_TX' in config_values:
@@ -644,6 +713,7 @@ def _create_manifest(klipper_path, firmware_path, firmware_size, mcu_info, reque
             'comm_config_symbol': compile_values.get('comm_config_symbol', ''),
             'canbus_frequency': compile_values.get('canbus_frequency', ''),
             'bridge_can_config': compile_values.get('bridge_can_config', ''),
+            'comm_extra_symbols': compile_values.get('comm_extra_symbols', []),
         },
         'firmware': {
             'path': firmware_path,
@@ -985,9 +1055,82 @@ def _resolve_bridge_can_option(platform_data, processor, bridge_can_config):
     return bridge_options[0]
 
 
+def _resolve_h503_extra_symbols(
+        platform_data, processor, comm_symbol, bridge_can_symbol, raw_symbols):
+    """校验并返回 H503 分级 UART/FDCAN 配置符号。"""
+    if isinstance(raw_symbols, str):
+        try:
+            raw_symbols = json.loads(raw_symbols)
+        except json.JSONDecodeError as exc:
+            raise ValueError('H503 分级通信参数格式错误') from exc
+    if raw_symbols is None:
+        raw_symbols = []
+    if not isinstance(raw_symbols, list):
+        raise ValueError('H503 分级通信参数必须是数组')
+
+    symbols = [_normalize_config_symbol(symbol) for symbol in raw_symbols]
+    if any(not symbol for symbol in symbols) or len(set(symbols)) != len(symbols):
+        raise ValueError('H503 分级通信参数包含无效或重复符号')
+
+    serial_mode = comm_symbol == 'STM32_SERIAL_H503'
+    can_mode = (comm_symbol == 'STM32_MMENU_CANBUS_H503'
+                or bridge_can_symbol == 'STM32_CMENU_CANBUS_H503')
+    if not serial_mode and not can_mode:
+        if symbols:
+            raise ValueError('当前通信方式不接受 H503 分级通信参数')
+        return [], []
+    if str(processor or '').upper() != 'STM32H503':
+        raise ValueError('H503 分级通信参数只能用于 STM32H503')
+
+    nested = platform_data.get('h503_nested_options') or {}
+    entries_by_symbol = {}
+    for group_name, entries in nested.items():
+        for entry in entries:
+            normalized = _normalize_config_symbol(entry.get('config_symbol'))
+            if normalized:
+                entries_by_symbol[normalized] = (group_name, entry)
+    selected = []
+    for symbol in symbols:
+        match = entries_by_symbol.get(symbol)
+        if not match:
+            raise ValueError(f'当前 Klipper Kconfig 不支持 H503 通信子选项: {symbol}')
+        selected.append((symbol, match[0], match[1]))
+
+    required_groups = (
+        ('serial_peripheral', 'serial_rx', 'serial_tx') if serial_mode
+        else ('can_rx', 'can_tx')
+    )
+    selected_by_group = {}
+    for symbol, group_name, entry in selected:
+        if group_name not in required_groups:
+            raise ValueError(f'H503 通信子选项与当前通信方式不匹配: {symbol}')
+        selected_by_group.setdefault(group_name, []).append((symbol, entry))
+    for group_name in required_groups:
+        if len(selected_by_group.get(group_name, [])) != 1:
+            raise ValueError(f'H503 通信配置必须且只能选择一个 {group_name}')
+
+    if serial_mode:
+        peripheral = selected_by_group['serial_peripheral'][0][0]
+        for group_name in ('serial_rx', 'serial_tx'):
+            entry = selected_by_group[group_name][0][1]
+            parent = _normalize_config_symbol(entry.get('parent'))
+            if parent and parent != peripheral:
+                raise ValueError('H503 串口 RX/TX 引脚与所选 USART/LPUART 不匹配')
+    elif bridge_can_symbol == 'STM32_CMENU_CANBUS_H503':
+        for group_name in ('can_rx', 'can_tx'):
+            entry = selected_by_group[group_name][0][1]
+            if entry.get('available_for_usbcanbridge') is False:
+                raise ValueError('USB-CAN 桥接不能把 PA11/PA12 同时用于 FDCAN')
+
+    ordered_symbols = [selected_by_group[group][0][0] for group in required_groups]
+    logs = [f'H503 通信子选项: CONFIG_{symbol}=y' for symbol in ordered_symbols]
+    return ordered_symbols, logs
+
+
 def _build_klipper_config_lines(
         kconfig_klipper_path, mcu_arch, processor, crystal, bootloader_offset,
         communication, comm_type, comm_config_symbol, bridge_can_config,
+        comm_extra_symbols,
         rp2040_can_rx_gpio, rp2040_can_tx_gpio, canbus_frequency):
     """从当前 Klipper Kconfig 解析结果生成 .config 行。"""
     parser = KlipperKconfigParser(kconfig_klipper_path)
@@ -1060,6 +1203,14 @@ def _build_klipper_config_lines(
         if bridge_option:
             config_lines.append(_config_line(bridge_option.get('config')))
             logs.append(f"USB-CAN桥接CAN引脚: {bridge_option.get('display')}")
+
+    bridge_symbol = _normalize_config_symbol(bridge_can_config)
+    extra_symbols, extra_logs = _resolve_h503_extra_symbols(
+        platform_data, processor_upper, comm_symbol, bridge_symbol,
+        comm_extra_symbols,
+    )
+    config_lines.extend(_config_line(symbol) for symbol in extra_symbols)
+    logs.extend(extra_logs)
 
     if platform_key == 'rp2040' and resolved_comm_type in ('can', 'usbcanbridge'):
         rp2040_can_rx_gpio = _normalize_rp2040_gpio(rp2040_can_rx_gpio, 'RP2040 CAN RX GPIO')
@@ -1355,6 +1506,7 @@ def compile_firmware():
             comm_type = ''
             comm_config_symbol = ''
             bridge_can_config = ''
+            comm_extra_symbols = []
         else:
             mcu_arch = data.get('platform', 'STM32')
             processor = data.get('mcu', 'STM32F072').upper()
@@ -1363,6 +1515,7 @@ def compile_firmware():
             comm_type = data.get('comm_type', '')
             comm_config_symbol = data.get('comm_config_symbol', '')
             bridge_can_config = data.get('bridge_can_config', '')
+            comm_extra_symbols = data.get('comm_extra_symbols', [])
             startup_pin = data.get('startup_pin', '')
             crystal = data.get('crystal', '8000000')
             rp2040_can_rx_gpio = data.get('rp2040_can_rx_gpio', '4')
@@ -1384,6 +1537,7 @@ def compile_firmware():
             config_lines, config_logs, mcu_info = _build_klipper_config_lines(
                 kconfig_klipper_path, mcu_arch, processor, crystal, bootloader_offset,
                 communication, comm_type, comm_config_symbol, bridge_can_config,
+                comm_extra_symbols,
                 rp2040_can_rx_gpio, rp2040_can_tx_gpio, canbus_frequency
             )
         except ValueError as e:
@@ -1526,6 +1680,7 @@ def compile_firmware():
                 'comm_config_symbol': comm_config_symbol,
                 'canbus_frequency': _normalize_canbus_frequency(canbus_frequency),
                 'bridge_can_config': bridge_can_config,
+                'comm_extra_symbols': comm_extra_symbols,
             }
             manifest = _create_manifest(
                 klipper_path, firmware_path, firmware_size, mcu_info,
@@ -1947,7 +2102,12 @@ def flash_firmware():
         if flash_mode in ('KAT', 'CAN'):
             klipper_owner, home_dir = get_klipper_owner()
             python_bin = get_klipper_python_bin(home_dir)
-            flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
+            flashtool_script, flashtool_candidates = _find_katapult_flashtool(
+                home_dir, klipper_path
+            )
+            flash_can_script, flash_can_candidates = _find_canboot_flash_tool(
+                home_dir, klipper_path
+            )
 
             _is_can_uuid = bool(re.match(r'^[a-fA-F0-9]{8,32}$', re.sub(r'^can\d+:', '', device)))
             if re.match(r'^can\d+:', device) or _is_can_uuid:
@@ -1956,20 +2116,31 @@ def flash_firmware():
                 if is_fast_ssh_mode():
                     logger.info('FAST-SSH 模式：使用 CAN 直接烧录')
                     yield f'data: [LOG] 正在通过 CAN ({can_iface}) 烧录设备 {can_uuid}...\n\n'
-                    fast_flashtool = os.path.join(home_dir, 'klipper', 'lib', 'katapult', 'flashtool.py')
-                    fast_flash_can = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
-                    if path_exists(fast_flashtool):
-                        cmd = f'{shlex.quote(python_bin)} {shlex.quote(fast_flashtool)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                    if flashtool_script:
+                        cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                         logger.info(f'FAST-SSH 新版烧录命令 (katapult/flashtool.py, {can_iface}): {cmd}')
-                    elif path_exists(fast_flash_can):
-                        cmd = f'{shlex.quote(python_bin)} {shlex.quote(fast_flash_can)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                    elif flash_can_script:
+                        cmd = f'{shlex.quote(python_bin)} {shlex.quote(flash_can_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                         logger.info(f'FAST-SSH 旧版烧录命令 (canboot/flash_can.py, {can_iface}): {cmd}')
                     else:
-                        _err_msg = f"未找到烧录工具。请确认 Klipper 已安装。\n查找路径:\n  {fast_flashtool}\n  {fast_flash_can}"
+                        _err_msg = _missing_flash_tool_message(
+                            flashtool_candidates + flash_can_candidates
+                        )
                         yield f'data: {json.dumps({"error": _err_msg})}\n\n'
                         return
                     yield f'data: [LOG] 执行烧录命令: {os.path.basename(cmd.split()[1])}\n\n'
                     result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                elif not flashtool_script and flash_can_script:
+                    yield f'data: [LOG] 未找到 flashtool.py，使用 Klipper 内置 flash_can.py 通过 CAN ({can_iface}) 烧录...\n\n'
+                    cmd = f'{shlex.quote(python_bin)} {shlex.quote(flash_can_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
+                    logger.info(f'CAN 烧录命令 ({can_iface}): {cmd}')
+                    result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                elif not flashtool_script:
+                    _err_msg = _missing_flash_tool_message(
+                        flashtool_candidates + flash_can_candidates
+                    )
+                    yield f'data: {json.dumps({"error": _err_msg})}\n\n'
+                    return
                 else:
                     before_result = run_cmd(
                         "ls /dev/serial/by-id/* 2>/dev/null",
@@ -2007,8 +2178,7 @@ def flash_firmware():
                         result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
                     else:
                         logger.warning('未找到 USB 串口设备，尝试直接 CAN 烧录...')
-                        flash_can_script = os.path.join(home_dir, 'klipper', 'lib', 'canboot', 'flash_can.py')
-                        if path_exists(flash_can_script):
+                        if flash_can_script:
                             cmd = f'{shlex.quote(python_bin)} {shlex.quote(flash_can_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
                             logger.info(f'CAN 烧录命令 ({can_iface}): {cmd}')
                             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
@@ -2018,6 +2188,9 @@ def flash_firmware():
                             logger.info(f'flashtool CAN 烧录命令 ({can_iface}): {cmd}')
                             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=120)
             else:
+                if not flashtool_script:
+                    yield f'data: {json.dumps({"error": _missing_flash_tool_message(flashtool_candidates)})}\n\n'
+                    return
                 usb_device = katapult_serial if katapult_serial else device
                 logger.info(f'USB 烧录命令：device={usb_device}')
                 cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -d {shlex.quote(usb_device)} -f {shlex.quote(firmware_path)}'
@@ -2481,7 +2654,14 @@ def flash_bl_firmware():
         elif flash_mode == 'KAT':
             klipper_owner, home_dir = get_klipper_owner()
             python_bin = get_klipper_python_bin(home_dir)
-            flashtool_script = os.path.join(home_dir, 'katapult', 'scripts', 'flashtool.py')
+            klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
+            flashtool_script, flashtool_candidates = _find_katapult_flashtool(
+                home_dir, klipper_path
+            )
+            if not flashtool_script:
+                return jsonify({
+                    'error': _missing_flash_tool_message(flashtool_candidates)
+                }), 500
             usb_device = katapult_serial if katapult_serial else device
             cmd = (
                 f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -d {shlex.quote(usb_device)} -f {shlex.quote(bl_firmware_path)}'
@@ -2571,6 +2751,7 @@ def export_compile_config():
                 'comm_config_symbol': params.get('comm_config_symbol', ''),
                 'canbus_frequency': params.get('canbus_frequency', '1000000'),
                 'bridge_can_config': params.get('bridge_can_config', ''),
+                'comm_extra_symbols': params.get('comm_extra_symbols', []),
                 'startup_pin': params.get('startup_pin', ''),
                 'rp2040_can_rx_gpio': params.get('rp2040_can_rx_gpio', ''),
                 'rp2040_can_tx_gpio': params.get('rp2040_can_tx_gpio', ''),
@@ -2621,6 +2802,7 @@ def import_compile_config():
             'comm_config_symbol': compile_cfg.get('comm_config_symbol', ''),
             'canbus_frequency': compile_cfg.get('canbus_frequency', '1000000'),
             'bridge_can_config': compile_cfg.get('bridge_can_config', ''),
+            'comm_extra_symbols': compile_cfg.get('comm_extra_symbols', []),
             'startup_pin': compile_cfg.get('startup_pin', ''),
             'rp2040_can_rx_gpio': compile_cfg.get('rp2040_can_rx_gpio', ''),
             'rp2040_can_tx_gpio': compile_cfg.get('rp2040_can_tx_gpio', ''),
