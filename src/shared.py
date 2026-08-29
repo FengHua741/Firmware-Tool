@@ -333,6 +333,37 @@ def public_config(raw_config=None):
 
 # ==================== 工具函数 ====================
 
+def _get_fallback_user_home():
+    """在没有检测到 Klipper 目录时返回动态的用户/家目录。
+
+    不依赖任何特定用户名，优先选择现有的非 root 用户，再回退到当前进程用户。
+    """
+    try:
+        users = sorted(
+            (entry for entry in pwd.getpwall()
+             if entry.pw_uid >= 1000
+             and entry.pw_name not in ('nobody', 'nogroup')
+             and entry.pw_dir),
+            key=lambda entry: entry.pw_uid,
+        )
+        for entry in users:
+            if os.path.isdir(entry.pw_dir):
+                return entry.pw_name, entry.pw_dir
+    except (OSError, KeyError):
+        pass
+
+    try:
+        entry = pwd.getpwuid(os.getuid())
+        if entry.pw_dir:
+            return entry.pw_name, entry.pw_dir
+    except (KeyError, OSError):
+        pass
+
+    home_dir = os.path.expanduser('~') or '/root'
+    user_name = os.environ.get('USER') or os.path.basename(home_dir) or 'root'
+    return user_name, home_dir
+
+
 def get_klipper_owner(klipper_path=None):
     """获取 Klipper 安装用户的用户名和家目录"""
     if not klipper_path:
@@ -390,7 +421,7 @@ def get_klipper_owner(klipper_path=None):
             candidate = os.path.join(entry.pw_dir, 'klipper')
             if path_exists(candidate):
                 return entry.pw_name, entry.pw_dir
-    return 'fenghua', '/home/fenghua'
+    return _get_fallback_user_home()
 
 
 def get_moonraker_base_url():
@@ -428,7 +459,8 @@ def expand_klipper_path(path, force_local=False):
                 candidate = os.path.join(entry.pw_dir, 'klipper')
                 if os.path.isdir(candidate):
                     return entry.pw_dir + path[1:]
-        return '/home/fenghua' + path[1:]
+        _, fallback_home = _get_fallback_user_home()
+        return fallback_home + path[1:]
     # SSH 模式: 使用 SSH 用户的远程 home 目录
     if is_ssh_mode():
         if is_fast_remote():

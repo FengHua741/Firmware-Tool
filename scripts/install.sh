@@ -62,8 +62,8 @@ else
             fi
         done
         if [ "$CURRENT_USER" = "root" ]; then
-            echo -e "${YELLOW}警告: 无法推断普通用户，默认使用 fenghua${NC}"
-            CURRENT_USER="fenghua"
+            CURRENT_USER=$(id -un 2>/dev/null || printf 'root')
+            echo -e "${YELLOW}警告: 无法推断普通用户，将使用当前用户 $CURRENT_USER${NC}"
         fi
     fi
 fi

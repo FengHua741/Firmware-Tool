@@ -1815,6 +1815,25 @@ def get_versions():
         return jsonify({'klipper_version': '获取失败', 'source': 'error'})
 
 
+def _frontend_web_roots(frontend_name):
+    """根据当前 Klipper 用户动态构建 Mainsail/Fluidd 安装路径。"""
+    candidates = [
+        os.path.join('/home/pi', frontend_name),
+        os.path.join('/usr/share', frontend_name),
+    ]
+    try:
+        _, home_dir = get_klipper_owner()
+        if home_dir:
+            candidates.insert(1, os.path.join(home_dir, frontend_name))
+    except Exception:
+        pass
+    result = []
+    for path in candidates:
+        if path not in result:
+            result.append(path)
+    return result
+
+
 @system_bp.route('/api/system/services', methods=['GET'])
 def get_available_services():
     """获取系统中实际安装的服务及其状态（优先通过 Moonraker API 动态发现）"""
@@ -1834,11 +1853,11 @@ def get_available_services():
     web_frontends = {
         'mainsail': {
             'nginx_configs': ['/etc/nginx/sites-enabled/mainsail', '/etc/nginx/conf.d/mainsail.conf'],
-            'web_roots': ['/home/pi/mainsail', '/home/fenghua/mainsail', '/usr/share/mainsail'],
+            'web_roots': _frontend_web_roots('mainsail'),
         },
         'fluidd': {
             'nginx_configs': ['/etc/nginx/sites-enabled/fluidd', '/etc/nginx/conf.d/fluidd.conf'],
-            'web_roots': ['/home/pi/fluidd', '/home/fenghua/fluidd', '/usr/share/fluidd'],
+            'web_roots': _frontend_web_roots('fluidd'),
         },
     }
 
