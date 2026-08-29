@@ -213,11 +213,18 @@ class KlipperKconfigParser:
         """解析 MCU 型号列表"""
         mcus = {}
         symbol_rules = self._parse_symbol_rules(content)
+        # MCU 只能来自 Kconfig 的 “Processor model” choice。部分平台还会在
+        # choice 外声明带 MACH_ 前缀的低级变体开关（例如 STM32F103x6 的
+        # 10KiB RAM 选项）；这些是附加配置，不是可独立编译的 MCU 型号。
+        processor_symbols = {
+            option['config_symbol']
+            for option in self._parse_choice_options(content, 'Processor model')
+        }
 
         for config_name, block in self._iter_config_blocks(content):
             block_text = '\n'.join(block)
             bool_match = re.search(r'^\s*bool\s+"([^"]+)"', block_text, re.MULTILINE)
-            if not config_name.startswith('MACH_') or not bool_match:
+            if config_name not in processor_symbols or not config_name.startswith('MACH_') or not bool_match:
                 continue
 
             display_name = bool_match.group(1)

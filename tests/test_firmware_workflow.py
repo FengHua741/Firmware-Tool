@@ -323,6 +323,9 @@ choice
         bool "STM32X999"
         select MACH_STM32H5
 endchoice
+config MACH_STM32X999_LOWRAM
+    depends on LOW_LEVEL_OPTIONS && MACH_STM32X999
+    bool "Only 10KiB of RAM (test modifier, not an MCU)"
 config MACH_STM32H5
     bool
 config HAVE_STM32_USBFS
@@ -400,6 +403,17 @@ endif
             for option in parsed['communication_options']
         ))
         self.assertIn('HAVE_STM32_USBCANBUS', parsed['processor_capabilities']['STM32X999'])
+
+    def test_only_processor_choice_entries_are_exposed_as_mcus(self):
+        database = can_parser.KlipperKconfigParser(
+            self.tempdir.name
+        ).parse_all_platforms()['STM32']['mcus']
+        self.assertIn('stm32x999', database)
+        self.assertNotIn('stm32x999_lowram', database)
+        self.assertNotIn(
+            'Only 10KiB of RAM (test modifier, not an MCU)',
+            {mcu['name'] for mcu in database.values()},
+        )
 
     def test_generic_nested_communication_choices_are_parsed_and_validated(self):
         parsed = can_parser.parse_can_options(self.tempdir.name)['stm32']

@@ -68,6 +68,100 @@ else
 fi
 
 SERVICE_NAME="firmware-tool"
+MOONRAKER_ASVC_UPDATED=false
+MOONRAKER_ASVC_FILES=()
+
+# 收集当前系统中 Moonraker 实例的允许服务清单。优先读取运行参数中的
+# data path，同时兼容常见 Linux、KIAUH 多实例和 FlyOS-Fast 目录布局。
+add_moonraker_asvc_file() {
+    local candidate="$1"
+    local existing
+
+    [ -f "$candidate" ] || return 0
+    for existing in "${MOONRAKER_ASVC_FILES[@]}"; do
+        [ "$existing" = "$candidate" ] && return 0
+    done
+    MOONRAKER_ASVC_FILES+=("$candidate")
+}
+
+discover_moonraker_asvc_files() {
+    local data_path
+    local asvc_file
+    local search_roots=()
+
+    MOONRAKER_ASVC_FILES=()
+    while IFS= read -r data_path; do
+        [ -n "$data_path" ] && add_moonraker_asvc_file "$data_path/moonraker.asvc"
+    done < <(
+        ps -eo args= 2>/dev/null | awk '
+            /moonraker\.py/ {
+                for (i = 1; i <= NF; i++) {
+                    if (($i == "-d" || $i == "--data-path") && i < NF) {
+                        print $(i + 1)
+                        break
+                    }
+                    if ($i ~ /^--data-path=/) {
+                        sub(/^--data-path=/, "", $i)
+                        print $i
+                        break
+                    }
+                }
+            }
+        '
+    )
+
+    for data_path in /home /root /data; do
+        [ -d "$data_path" ] && search_roots+=("$data_path")
+    done
+    if [ "${#search_roots[@]}" -gt 0 ]; then
+        while IFS= read -r asvc_file; do
+            add_moonraker_asvc_file "$asvc_file"
+        done < <(find "${search_roots[@]}" -maxdepth 4 -type f -name moonraker.asvc 2>/dev/null)
+    fi
+    add_moonraker_asvc_file "/usr/share/printer_data/moonraker.asvc"
+}
+
+register_moonraker_service() {
+    local asvc_file
+
+    discover_moonraker_asvc_files
+    if [ "${#MOONRAKER_ASVC_FILES[@]}" -eq 0 ]; then
+        echo -e "${YELLOW}未检测到 Moonraker 服务清单，跳过 Fluidd/Mainsail 服务集成${NC}"
+        return 0
+    fi
+
+    for asvc_file in "${MOONRAKER_ASVC_FILES[@]}"; do
+        if grep -Fqx "$SERVICE_NAME" "$asvc_file"; then
+            echo "Moonraker 已允许管理 $SERVICE_NAME: $asvc_file"
+            continue
+        fi
+        if [ -s "$asvc_file" ] && [ -n "$(tail -c 1 "$asvc_file" 2>/dev/null)" ]; then
+            printf '\n' >> "$asvc_file"
+        fi
+        printf '%s\n' "$SERVICE_NAME" >> "$asvc_file"
+        MOONRAKER_ASVC_UPDATED=true
+        echo -e "${GREEN}已加入 Fluidd/Mainsail 服务列表: $asvc_file${NC}"
+    done
+}
+
+reload_moonraker_service_list() {
+    local moonraker_unit
+    local restarted=false
+
+    [ "$MOONRAKER_ASVC_UPDATED" = true ] || return 0
+    while IFS= read -r moonraker_unit; do
+        [ -n "$moonraker_unit" ] || continue
+        systemctl restart "$moonraker_unit"
+        restarted=true
+        echo -e "${GREEN}已重启 $moonraker_unit，Fluidd/Mainsail 服务列表已刷新${NC}"
+    done < <(
+        systemctl list-units --all --type=service --plain --no-legend 2>/dev/null |
+            awk '$1 ~ /^moonraker([_-]?[0-9]+)?\.service$/ && $3 == "active" {print $1}'
+    )
+    if [ "$restarted" = false ]; then
+        echo -e "${YELLOW}Moonraker 当前未运行，下次启动后将显示 $SERVICE_NAME${NC}"
+    fi
+}
 
 echo -e "${GREEN}安装用户: $CURRENT_USER${NC}"
 echo -e "${GREEN}安装目录: $PROJECT_DIR${NC}"
@@ -240,6 +334,9 @@ EOF
 
 # 重新加载systemd
 systemctl daemon-reload
+# 让 systemd 载入新单元，确保 Moonraker 重启后也能发现尚未启动的服务。
+systemctl show "$SERVICE_NAME.service" -p LoadState --value >/dev/null 2>&1 || true
+register_moonraker_service
 
 echo ""
 echo -e "${GREEN}=== 安装完成 ===${NC}"
@@ -281,3 +378,5 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     systemctl enable $SERVICE_NAME
     echo -e "${GREEN}服务已启动并启用开机自启${NC}"
 fi
+
+reload_moonraker_service_list

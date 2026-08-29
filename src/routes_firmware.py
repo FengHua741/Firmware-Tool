@@ -2168,7 +2168,7 @@ def flash_firmware():
                 from routes_backup import auto_backup_printer_cfg
                 backup_id = auto_backup_printer_cfg()
                 if backup_id:
-                    yield f'data: {json.dumps({"log": f"[AUTO-BACKUP] 已自动备份 printer.cfg ({backup_id})"})}\n\n'
+                    yield f'data: {json.dumps({"log": f"[AUTO-BACKUP] 已自动备份整个 config 目录 ({backup_id})"})}\n\n'
             except Exception as e:
                 yield f'data: {json.dumps({"log": f"[AUTO-BACKUP] 自动备份失败: {e}"})}\n\n'
         # CAN Bridge 烧录方式映射：实际使用 DFU 或 KAT 方式烧录

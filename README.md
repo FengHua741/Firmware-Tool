@@ -27,6 +27,7 @@ Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板
 - 网络接口状态与 IP 地址
 - 系统版本信息（Klipper / Moonraker / Firmware-Tool）
 - 服务在线状态检测与一键重启
+- Klipper `config` 整目录 ZIP 备份、下载与恢复，并兼容旧版 `printer.cfg` 单文件备份
 
 ### 设备搜索
 - USB 串口设备（by-id / by-path，智能识别 Klipper/Katapult 设备）
@@ -202,6 +203,7 @@ sudo ./install.sh
 - 安装 Python 依赖（flask, flask-cors, psutil, paramiko, cryptography, requests）
 - 首次安装时创建 `data/config.json`，已有配置文件时不会覆盖
 - 创建 systemd 服务
+- 检测到 Moonraker 时，将 `firmware-tool` 加入 Fluidd/Mainsail 服务列表，显示运行状态并允许启动、停止和重启
 - 在用户确认后启动服务并配置开机自启
 - 设置默认端口（9999）
 
@@ -299,6 +301,8 @@ sudo journalctl -u firmware-tool -f
 
 systemd 服务文件由安装脚本写入 `/etc/systemd/system/firmware-tool.service`，默认以 root 运行，并设置 `WorkingDirectory` 为项目目录、`PYTHONPATH` 为项目的 `src` 目录。
 
+如果设备安装了 Moonraker，安装脚本还会把 `firmware-tool` 写入该实例数据目录的 `moonraker.asvc`，随后刷新 Moonraker。Fluidd 与 Mainsail 共用这份服务状态，因此两套界面均可查看 Firmware-Tool 的运行状态，并执行启动、停止和重启。卸载脚本会同步移除该登记；Moonraker 未安装或未运行时不影响 Firmware-Tool 的安装与卸载。
+
 ## 访问 Web 界面
 
 `http://<设备 IP>:9999`
@@ -308,6 +312,7 @@ systemd 服务文件由安装脚本写入 `/etc/systemd/system/firmware-tool.ser
 ## 运行时文件
 
 - `data/config.json`：运行时配置文件，首次安装时由安装脚本创建；手动安装时可从 `data/config.example.json` 复制。
+- `data/backups/`：配置备份目录；新备份为保留 `config/` 目录结构的 ZIP，恢复时覆盖归档中的同名文件但不删除额外文件。
 - `data/boards_index.json`：由板卡预设与 `data/boards/` 映射资源生成的索引，仅供板卡工具和引脚映射接口使用，不是固件编译预设源。
 - `data/mcu_database.json`：手动运行 Kconfig 解析器时可生成的离线快照；Web 运行时直接解析当前 Klipper Kconfig，不读取此文件作为配置源。
 - `src/can_options_cache.json`：CAN 通信选项缓存。
@@ -393,7 +398,7 @@ Firmware-Tool/
 
 ## 主要 API
 
-接口按当前蓝图分组如下。SSE 接口会持续返回流式文本或事件，前端用于展示执行进度。启用 `api_token` 时，API 请求需携带 `X-API-Token` 请求头或 `token` 查询参数；未使用 token 时，同源页面请求需通过 CSRF Cookie 与 `X-CSRF-Token` 请求头校验。
+接口按当前蓝图分组如下。SSE 接口会持续返回流式文本或事件，前端用于展示执行进度。启用 `api_token` 时，API 请求需携带 `X-API-Token` 请求头；未使用 token 时，同源页面请求需通过 CSRF Cookie 与 `X-CSRF-Token` 请求头校验。
 
 ### 系统与设备
 
@@ -484,6 +489,18 @@ Firmware-Tool/
 | `/api/config/create-manufacturer` | POST | 创建厂家目录 |
 | `/api/config/all` | GET | 获取全部板卡配置 |
 | `/api/config/save` | POST | 保存板卡配置 |
+
+### Klipper 配置备份
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/backup/config` | POST | 将整个 Klipper `config` 目录创建为 ZIP 备份 |
+| `/api/backup/list` | GET | 列出 ZIP 和兼容的旧版单文件备份 |
+| `/api/backup/<backup_id>/download` | GET | 下载指定备份 |
+| `/api/backup/rollback` | POST | 恢复 ZIP 内的配置文件，不删除当前目录的额外文件 |
+| `/api/backup/<backup_id>` | DELETE | 删除指定备份及元数据 |
+| `/api/backup/diff` | POST | 对比新旧备份中的 `printer.cfg` |
+| `/api/backup/settings` | GET/POST | 读取或保存自动备份设置 |
 
 ### 系统设置与 SSH
 

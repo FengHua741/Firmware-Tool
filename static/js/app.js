@@ -1678,7 +1678,9 @@ async function createConfigBackup() {
         if (!response.ok || !data.success) {
             throw new Error(data.error || '备份失败');
         }
-        showSuccess(`备份成功 (${data.backup_id})`);
+        const fileCount = Number(data.file_count || 0);
+        const countText = fileCount > 0 ? `，${fileCount} 个文件` : '';
+        showSuccess(`config 目录 ZIP 备份成功 (${data.backup_id}${countText})`);
         loadBackupList();
     } catch (error) {
         showError('备份失败: ' + error.message);
@@ -1702,12 +1704,19 @@ async function loadBackupList() {
             const ts = b.timestamp || b.id.replace(/_/g, ' ').replace(/(\d{8})/, (_, m) => `${m.slice(0,4)}-${m.slice(4,6)}-${m.slice(6,8)}`);
             const sizeKb = ((b.size || 0) / 1024).toFixed(1);
             const sourceLabel = {moonraker: 'Moonraker', ssh: 'SSH', local: '本地', auto: '自动'}[b.source] || b.source;
+            const fileCount = Number(b.file_count || 1);
+            const isFolderArchive = b.format === 'klipper-config-folder-zip-v1'
+                || String(b.id).toLowerCase().endsWith('.zip');
+            const fileSummary = isFolderArchive
+                ? ` · ${fileCount} 个文件`
+                : ' · 旧版单文件';
             return `<div class="backup-item">
                 <div class="backup-meta">
                     <span class="backup-name">${escapeHtml(b.filename || b.id)}</span>
-                    <span class="backup-info">${escapeHtml(ts)} · ${sizeKb} KB · ${escapeHtml(sourceLabel)}</span>
+                    <span class="backup-info">${escapeHtml(ts)} · ${sizeKb} KB${fileSummary} · ${escapeHtml(sourceLabel)}</span>
                 </div>
                 <div class="backup-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="downloadBackup('${escapeHtml(b.id)}')">下载</button>
                     <button class="btn btn-sm btn-warning" onclick="rollbackBackup('${escapeHtml(b.id)}')">恢复</button>
                     <button class="btn btn-sm btn-danger" onclick="deleteBackup('${escapeHtml(b.id)}')">删除</button>
                 </div>
@@ -1718,8 +1727,30 @@ async function loadBackupList() {
     }
 }
 
+async function downloadBackup(backupId) {
+    // API 下载也需要 CSRF/API Token 请求头，因此不直接跳转链接。
+    try {
+        const response = await fetch(`/api/backup/${encodeURIComponent(backupId)}/download`);
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = backupId;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        showError('下载失败: ' + error.message);
+    }
+}
+
 async function rollbackBackup(backupId) {
-    if (!confirm('确定要恢复此备份？当前 printer.cfg 将被覆盖。')) return;
+    if (!confirm('确定要恢复此备份？ZIP 中的 config 文件将覆盖当前同名文件；当前目录中的额外文件不会被删除。')) return;
     try {
         const response = await fetch('/api/backup/rollback', {
             method: 'POST',
@@ -1729,7 +1760,7 @@ async function rollbackBackup(backupId) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (!data.success) throw new Error(data.error || '恢复失败');
-        showSuccess('配置已恢复');
+        showSuccess(data.message || '配置已恢复');
     } catch (error) {
         showError('恢复失败: ' + error.message);
     }

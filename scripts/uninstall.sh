@@ -14,6 +14,87 @@ echo -e "${GREEN}=== Firmware-Tool 卸载脚本 ===${NC}"
 echo ""
 
 SERVICE_NAME="firmware-tool"
+MOONRAKER_ASVC_UPDATED=false
+MOONRAKER_ASVC_FILES=()
+
+add_moonraker_asvc_file() {
+    local candidate="$1"
+    local existing
+
+    [ -f "$candidate" ] || return 0
+    for existing in "${MOONRAKER_ASVC_FILES[@]}"; do
+        [ "$existing" = "$candidate" ] && return 0
+    done
+    MOONRAKER_ASVC_FILES+=("$candidate")
+}
+
+discover_moonraker_asvc_files() {
+    local data_path
+    local asvc_file
+    local search_roots=()
+
+    MOONRAKER_ASVC_FILES=()
+    while IFS= read -r data_path; do
+        [ -n "$data_path" ] && add_moonraker_asvc_file "$data_path/moonraker.asvc"
+    done < <(
+        ps -eo args= 2>/dev/null | awk '
+            /moonraker\.py/ {
+                for (i = 1; i <= NF; i++) {
+                    if (($i == "-d" || $i == "--data-path") && i < NF) {
+                        print $(i + 1)
+                        break
+                    }
+                    if ($i ~ /^--data-path=/) {
+                        sub(/^--data-path=/, "", $i)
+                        print $i
+                        break
+                    }
+                }
+            }
+        '
+    )
+
+    for data_path in /home /root /data; do
+        [ -d "$data_path" ] && search_roots+=("$data_path")
+    done
+    if [ "${#search_roots[@]}" -gt 0 ]; then
+        while IFS= read -r asvc_file; do
+            add_moonraker_asvc_file "$asvc_file"
+        done < <(find "${search_roots[@]}" -maxdepth 4 -type f -name moonraker.asvc 2>/dev/null)
+    fi
+    add_moonraker_asvc_file "/usr/share/printer_data/moonraker.asvc"
+}
+
+unregister_moonraker_service() {
+    local asvc_file
+    local temp_file
+
+    discover_moonraker_asvc_files
+    for asvc_file in "${MOONRAKER_ASVC_FILES[@]}"; do
+        grep -Fqx "$SERVICE_NAME" "$asvc_file" || continue
+        temp_file=$(mktemp)
+        awk -v service="$SERVICE_NAME" '$0 != service' "$asvc_file" > "$temp_file"
+        # 覆盖原文件内容而不替换 inode，以保留 Moonraker 文件的属主和权限。
+        command cat "$temp_file" > "$asvc_file"
+        rm -f "$temp_file"
+        MOONRAKER_ASVC_UPDATED=true
+        echo -e "${GREEN}已从 Fluidd/Mainsail 服务列表移除: $asvc_file${NC}"
+    done
+}
+
+reload_moonraker_service_list() {
+    local moonraker_unit
+
+    [ "$MOONRAKER_ASVC_UPDATED" = true ] || return 0
+    while IFS= read -r moonraker_unit; do
+        [ -n "$moonraker_unit" ] || continue
+        systemctl restart "$moonraker_unit"
+        echo -e "${GREEN}已重启 $moonraker_unit，Fluidd/Mainsail 服务列表已刷新${NC}"
+    done < <(
+        systemctl list-units --all --type=service --plain --no-legend 2>/dev/null |
+            awk '$1 ~ /^moonraker([_-]?[0-9]+)?\.service$/ && $3 == "active" {print $1}'
+    )
+}
 
 # 从脚本位置推断项目目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,6 +120,8 @@ fi
 
 # 重新加载 systemd
 systemctl daemon-reload
+unregister_moonraker_service
+reload_moonraker_service_list
 
 echo ""
 read -p "是否删除项目目录 ($PROJECT_DIR)? (y/n): " -n 1 -r
