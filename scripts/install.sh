@@ -16,7 +16,8 @@ echo ""
 
 # 获取脚本所在目录（所有系统都需要）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# 安装脚本部署后默认允许局域网浏览器访问
+SOURCE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# 安装脚本部署后默认允许通过所有网卡访问
 BIND_HOST="0.0.0.0"
 
 # 检测是否为FlyOS-Fast系统
@@ -178,11 +179,11 @@ fi
 echo -e "${GREEN}使用端口: $PORT${NC}"
 echo ""
 
-# Fast系统: 如果当前目录不是PROJECT_DIR，则复制项目
-if [ "$IS_FAST" = true ] && [ "$(pwd)" != "$PROJECT_DIR" ]; then
+# Fast系统: 如果脚本来自其他目录，则复制项目到 /data
+if [ "$IS_FAST" = true ] && [ "$SOURCE_DIR" != "$PROJECT_DIR" ]; then
     echo "复制项目到 $PROJECT_DIR..."
     mkdir -p "$PROJECT_DIR"
-    cp -r "$(dirname "$SCRIPT_DIR")/"* "$PROJECT_DIR/"
+    cp -a "$SOURCE_DIR/." "$PROJECT_DIR/"
 fi
 
 # 创建配置文件
@@ -211,6 +212,30 @@ cat > "$PROJECT_DIR/data/config.json" << EOF
 EOF
 else
     echo "配置文件已存在，跳过覆盖: $PROJECT_DIR/data/config.json"
+fi
+
+# 与 Fluidd 一样默认允许通过设备网络地址访问。升级时将旧的本机回环地址迁移为所有网卡，避免更新后仍只能本机访问。
+CONFIG_PYTHON3_BIN="$(command -v python3 2>/dev/null || true)"
+if [ -n "$CONFIG_PYTHON3_BIN" ] && [ -f "$PROJECT_DIR/data/config.json" ]; then
+    "$CONFIG_PYTHON3_BIN" - "$PROJECT_DIR/data/config.json" "$BIND_HOST" <<'PY'
+import json
+import os
+import sys
+
+path, bind_host = sys.argv[1:3]
+with open(path, 'r', encoding='utf-8') as stream:
+    values = json.load(stream)
+if not isinstance(values, dict):
+    raise ValueError('config.json 必须是 JSON 对象')
+if values.get('bind_host') != bind_host:
+    values['bind_host'] = bind_host
+    temp_path = path + '.tmp'
+    with open(temp_path, 'w', encoding='utf-8') as stream:
+        json.dump(values, stream, ensure_ascii=False, indent=2)
+        stream.write('\n')
+    os.replace(temp_path, path)
+    print(f'已将服务监听地址设为 {bind_host}（所有网卡）')
+PY
 fi
 
 chown "$CURRENT_USER:$CURRENT_USER" "$PROJECT_DIR/data/config.json"
@@ -354,20 +379,26 @@ echo "  开机自启: sudo systemctl enable $SERVICE_NAME"
 echo "  查看日志：sudo journalctl -u $SERVICE_NAME -f"
 echo "  卸载程序：cd $PROJECT_DIR/scripts && sudo ./uninstall.sh"
 echo ""
-# 获取本机 IP（兼容 FAST 系统的 BusyBox hostname 不支持 -I）
-LOCAL_IP=""
-if command -v hostname &>/dev/null; then
-    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+# 获取本机网卡 IP（兼容 FAST 系统的 BusyBox 命令）
+LOCAL_IPS=""
+if command -v ip &>/dev/null; then
+    LOCAL_IPS=$(ip -4 -o addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); if ($4 != "") {printf "%s%s", (n++ ? " " : ""), $4}}' || true)
 fi
-if [ -z "$LOCAL_IP" ] && command -v ip &>/dev/null; then
-    LOCAL_IP=$(ip -4 -o addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4; exit}' || true)
+if [ -z "$LOCAL_IPS" ] && command -v hostname &>/dev/null; then
+    LOCAL_IPS=$(hostname -I 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+(\.[0-9]+){3}$/) printf "%s%s", (n++ ? " " : ""), $i}' || true)
 fi
-if [ -z "$LOCAL_IP" ] && command -v ifconfig &>/dev/null; then
-    LOCAL_IP=$(ifconfig 2>/dev/null | awk '/inet addr:/ {sub(/.*inet addr:/, ""); sub(/ .*/, ""); if ($0 != "127.0.0.1") {print; exit}}' || true)
+if [ -z "$LOCAL_IPS" ] && command -v ifconfig &>/dev/null; then
+    LOCAL_IPS=$(ifconfig 2>/dev/null | awk '/inet (addr:)?[0-9]/{for (i=1; i<=NF; i++) if ($i ~ /^(addr:)?[0-9]+\./) {sub(/^addr:/, "", $i); if ($i != "127.0.0.1") printf "%s%s", (n++ ? " " : ""), $i}}' || true)
 fi
-LOCAL_IP=${LOCAL_IP:-"<IP>"}
-echo -e "${GREEN}本机访问地址: http://127.0.0.1:$PORT${NC}"
-echo -e "${GREEN}局域网访问地址: http://$LOCAL_IP:$PORT${NC}"
+echo -e "${GREEN}网络监听地址: $BIND_HOST:$PORT（所有网卡）${NC}"
+if [ -n "$LOCAL_IPS" ]; then
+    for LOCAL_IP in $LOCAL_IPS; do
+        echo -e "${GREEN}网络访问地址: http://$LOCAL_IP:$PORT${NC}"
+    done
+else
+    echo -e "${YELLOW}未检测到网卡 IP，请使用设备实际 IP 访问: http://<IP>:$PORT${NC}"
+fi
+echo -e "${GREEN}本机回环地址: http://127.0.0.1:$PORT${NC}"
 echo ""
 
 # 询问是否启动服务

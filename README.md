@@ -189,6 +189,24 @@ SSH 模式会通过远程命令访问 Klipper、Katapult、系统设备与配置
 
 ### 方法一：使用安装脚本（推荐）
 
+新设备可直接执行以下命令，它会自动选择 Linux 或 FlyOS-Fast 安装目录、拉取并运行安装脚本：
+
+```bash
+sudo bash -c '
+set -e
+D=/opt/Firmware-Tool
+grep -qs "FlyOS-Fast" /etc/issue && D=/data/Firmware-Tool
+if [ -d "$D/.git" ]; then
+    git -C "$D" pull --ff-only
+else
+    git clone --depth 1 https://github.com/FengHua741/Firmware-Tool.git "$D"
+fi
+cd "$D"
+bash scripts/install.sh'
+```
+
+如果已经是 root 用户，可将开头的 `sudo bash -c` 改为 `bash -c`。
+
 ```bash
 git clone https://github.com/FengHua741/Firmware-Tool.git
 cd Firmware-Tool/scripts
@@ -199,7 +217,7 @@ sudo ./install.sh
 安装脚本会自动：
 - 检测系统类型（FlyOS-Fast / 普通 Linux）
 - FlyOS-Fast 环境中要求 root 用户运行，并将项目安装到 `/data/Firmware-Tool`
-- FlyOS-Fast 和普通 Linux 首次安装均默认监听 `0.0.0.0`，安装启动后可通过局域网浏览器访问
+- FlyOS-Fast 和普通 Linux 安装均默认监听 `0.0.0.0`，安装或更新时会迁移旧的本机回环地址，可像 Fluidd 一样通过设备 IP 或主机名访问
 - 安装 Python 依赖（flask, flask-cors, psutil, paramiko, cryptography, requests）
 - 首次安装时创建 `data/config.json`，已有配置文件时不会覆盖
 - 创建 systemd 服务
@@ -224,7 +242,7 @@ cp data/config.example.json data/config.json
 ```json
 {
   "port": 9999,
-  "bind_host": "127.0.0.1",
+  "bind_host": "0.0.0.0",
   "klipper_path": "~/klipper",
   "katapult_path": "~/katapult",
   "json_repo_url": "",
@@ -249,7 +267,7 @@ python3 src/app.py
 ### 可选安全配置
 
 `data/config.json` 支持以下可选安全项：
-- `bind_host`：服务监听地址，默认 `127.0.0.1`；局域网访问需改为 `0.0.0.0`
+- `bind_host`：服务监听地址，安装脚本和默认配置为 `0.0.0.0`，表示监听所有网卡
 - `allowed_origins`：CORS 允许来源列表，空列表表示禁止跨域
 - `api_token`：可选 API 访问令牌。默认留空（无需任何配置，页面通过同源 CSRF 自动校验即可正常使用）；仅当需要额外认证时填写，填写后远程（非本机）访问需在请求头携带 `X-API-Token`
 - `require_csrf`：默认开启同源页面令牌校验；关闭前请确认网络环境可信
@@ -263,7 +281,7 @@ python3 src/app.py
 | 配置项 | 说明 |
 |--------|------|
 | `port` | Web 服务端口，默认 `9999` |
-| `bind_host` | Web 服务监听地址；安装脚本首次安装默认 `0.0.0.0`，手动安装使用的样例配置默认 `127.0.0.1` |
+| `bind_host` | Web 服务监听地址；默认 `0.0.0.0`，可通过设备的各个网络地址访问 |
 | `klipper_path` | Klipper 源码目录，用于编译、读取 `.config`、调用 Klipper 脚本 |
 | `katapult_path` | Katapult 源码目录，用于 Katapult 相关烧录流程 |
 | `moonraker_host` / `moonraker_port` | Moonraker 地址，用于读取配置文件和版本信息 |
@@ -539,7 +557,7 @@ MCU 型号、固件版本、CAN 速率、CAN 保留引脚和启动引脚来自 K
 
 ## 常见问题
 
-- 服务无法访问：检查 `data/config.json` 中的 `bind_host` 与 `port`，并确认 systemd 服务已启动。
+- 服务无法访问：检查 `data/config.json` 中的 `bind_host` 为 `0.0.0.0` 、`port` 与 systemd 服务状态；如仍无法访问，再检查防火墙、路由器和网络隔离设置。
 - API 返回未授权：若已配置 `api_token`，确认请求头包含 `X-API-Token`；未配置时刷新页面重新获取页面令牌即可。
 - 手动运行正常但服务运行异常：检查 `sudo journalctl -u firmware-tool -f` 输出，以及 systemd 服务中的 `WorkingDirectory` 和 `PYTHONPATH`。
 - CAN 扫描无结果：先确认 CAN 接口存在并处于 UP 状态，再使用 CAN 诊断/修复接口检查 bitrate 与 txqueuelen。

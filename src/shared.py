@@ -120,7 +120,8 @@ CONFIGS_DIR = BOARD_CONFIGS_DIR
 # 默认配置
 DEFAULT_CONFIG = {
     'port': 9999,
-    'bind_host': '127.0.0.1',  # 默认仅监听本机，局域网访问需显式改为 0.0.0.0 并配置 API Token
+    # 默认监听所有网卡，方便像 Fluidd 一样通过设备 IP 或主机名访问。
+    'bind_host': '0.0.0.0',
     'klipper_path': '~/klipper',
     'katapult_path': '~/katapult',
     'json_repo_url': '',  # JSON配置仓库地址
