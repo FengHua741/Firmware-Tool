@@ -6,23 +6,40 @@
   "connections": [
     "CANBUS",
     "USB",
-    "串口"
+    "RS232"
   ],
+  "connection_profiles": {
+    "can": {
+      "bl_offset": "131072",
+      "config_symbol": "STM32_MMENU_CANBUS_PB8_PB9",
+      "canbus_frequency": "1000000",
+      "flash_mode": "CAN"
+    },
+    "usb": {
+      "bl_offset": "131072",
+      "config_symbol": "STM32_USB_PA11_PA12",
+      "flash_mode": "KAT"
+    },
+    "serial": {
+      "bl_offset": "0",
+      "config_symbol": "STM32_SERIAL_USART1",
+      "flash_mode": "DFU"
+    }
+  },
   "crystal": "25000000",
   "default_connection": "CAN bus (on PB8/PB9)",
-  "default_flash": "KAT",
+  "default_flash": "CAN",
   "firmware_update": {
     "custom_config": "",
     "device_id": "",
     "enabled": false,
-    "flash_mode": "KAT",
+    "flash_mode": "CAN",
     "katapult_mode": "USB"
   },
   "flash_modes": [
-    "DFU",
-    "KAT",
     "CAN",
-    "CAN_BRIDGE_KAT"
+    "KAT",
+    "DFU"
   ],
   "id": "mmu",
   "manufacturer": "FLY",

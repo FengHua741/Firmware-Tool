@@ -9,19 +9,35 @@
   },
   "connections": [
     "CANBUS",
-    "USB"
+    "RS232"
   ],
+  "connection_profiles": {
+    "can": {
+      "bl_offset": "16384",
+      "config_symbol": "RPXXXX_CANBUS",
+      "flash_mode": "CAN",
+      "can_gpio": {
+        "rx": 1,
+        "tx": 0
+      },
+      "canbus_frequency": "1000000"
+    },
+    "serial": {
+      "bl_offset": "256",
+      "config_symbol": "RPXXXX_SERIAL_UART0_PINS_0_1",
+      "flash_mode": "UF2"
+    }
+  },
   "default_connection": "CAN bus",
-  "default_flash": "",
+  "default_flash": "CAN",
   "firmware_update": {
     "custom_config": "",
     "device_id": "",
     "enabled": false,
-    "flash_mode": "KAT",
+    "flash_mode": "CAN",
     "katapult_mode": "USB"
   },
   "flash_modes": [
-    "KAT",
     "CAN",
     "UF2"
   ],

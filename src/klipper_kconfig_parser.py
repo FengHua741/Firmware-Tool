@@ -75,12 +75,18 @@ class KlipperKconfigParser:
 
         # 解析 MCU 型号
         result['mcus'] = self._parse_mcus(content)
+        arch_symbol = (platform_info or {}).get('arch_symbol', '')
+        if arch_symbol:
+            for mcu in result['mcus'].values():
+                capabilities = set(mcu.get('capabilities') or [])
+                capabilities.add(arch_symbol)
+                mcu['capabilities'] = sorted(capabilities)
 
         # 单 MCU 平台（如 HC32F460）：Kconfig 中没有显式的 config MACH_xxx 块，
         # 整个文件只描述一个 MCU。此时构造合成 MCU 条目，避免前端型号下拉框为空、
         # 导致“主控型号之后的选项”（晶振/BL偏移/通信）无法加载。
         if not result['mcus']:
-            arch_symbol = (platform_info or {}).get('arch_symbol', '') or ('MACH_' + platform_dir.upper())
+            arch_symbol = arch_symbol or ('MACH_' + platform_dir.upper())
             synthetic_id = platform_dir.lower()
             result['mcus'][synthetic_id] = {
                 'id': synthetic_id,
@@ -134,29 +140,82 @@ class KlipperKconfigParser:
                 i += 1
             yield symbol, block
 
-    def _select_closure(self, symbol, select_graph):
-        """计算 config symbol 通过 select 带出的符号闭包。"""
-        seen = set()
-        stack = [symbol]
-        while stack:
-            current = stack.pop()
-            for selected in select_graph.get(current, []):
-                if selected in seen:
+    def _parse_symbol_rules(self, content):
+        """解析布尔符号的 select/default/depends 规则。"""
+        rules = {}
+        for symbol, block in self._iter_config_blocks(content):
+            rule = rules.setdefault(symbol, {
+                'selects': [],
+                'defaults': [],
+                'depends': [],
+            })
+            for raw_line in block[1:]:
+                line = raw_line.strip()
+                select_match = re.match(r'^select\s+(\w+)(?:\s+if\s+(.+))?$', line)
+                if select_match:
+                    rule['selects'].append((
+                        select_match.group(1),
+                        (select_match.group(2) or '').strip(),
+                    ))
                     continue
-                seen.add(selected)
-                stack.append(selected)
-        return seen
+                default_match = re.match(r'^default\s+([ynYN])(?:\s+if\s+(.+))?$', line)
+                if default_match:
+                    rule['defaults'].append((
+                        default_match.group(1).lower(),
+                        (default_match.group(2) or '').strip(),
+                    ))
+                    continue
+                depends_match = re.match(r'^depends\s+on\s+(.+)$', line)
+                if depends_match:
+                    rule['depends'].append(depends_match.group(1).strip())
+        return rules
+
+    def _resolve_symbol_capabilities(self, start_symbols, symbol_rules):
+        """按 Kconfig 布尔规则求出指定 MCU 默认启用的符号闭包。"""
+        active = {symbol for symbol in start_symbols if symbol}
+        active.add('LOW_LEVEL_OPTIONS')
+
+        # Kconfig 的默认布尔值和 select 会互相触发。符号数量有限，固定点
+        # 迭代可覆盖 Klipper MCU 能力判断所需的常见规则。
+        max_rounds = max(8, len(symbol_rules) + 1)
+        for _ in range(max_rounds):
+            before = set(active)
+
+            for symbol in list(active):
+                rule = symbol_rules.get(symbol) or {}
+                for selected, condition in rule.get('selects', []):
+                    if not condition or self._eval_condition(condition, active):
+                        active.add(selected)
+
+            for symbol, rule in symbol_rules.items():
+                if symbol in active:
+                    continue
+                dependencies = rule.get('depends', [])
+                if dependencies and not all(
+                        self._eval_condition(condition, active)
+                        for condition in dependencies):
+                    continue
+
+                # Kconfig 使用首个条件成立的 default。先出现的 default n
+                # 必须阻止后续无条件 default y（例如 SAMC21 禁用 USB）。
+                for value, condition in rule.get('defaults', []):
+                    if condition and not self._eval_condition(condition, active):
+                        continue
+                    if value == 'y':
+                        active.add(symbol)
+                    break
+
+            if active == before:
+                break
+        return active
 
     def _parse_mcus(self, content):
         """解析 MCU 型号列表"""
         mcus = {}
-        select_graph = {}
+        symbol_rules = self._parse_symbol_rules(content)
 
         for config_name, block in self._iter_config_blocks(content):
             block_text = '\n'.join(block)
-            selects = re.findall(r'^\s*select\s+(\w+)', block_text, re.MULTILINE)
-            select_graph[config_name] = selects
-
             bool_match = re.search(r'^\s*bool\s+"([^"]+)"', block_text, re.MULTILINE)
             if not config_name.startswith('MACH_') or not bool_match:
                 continue
@@ -180,9 +239,12 @@ class KlipperKconfigParser:
             }
 
         for mcu in mcus.values():
-            capabilities = self._select_closure(mcu['config_name'], select_graph)
-            mcu['selects'] = sorted(capabilities)
-            mcu['capabilities'] = sorted(set(capabilities) | {mcu['config_name']})
+            capabilities = self._resolve_symbol_capabilities(
+                {mcu['config_name']}, symbol_rules
+            )
+            capabilities.discard('LOW_LEVEL_OPTIONS')
+            mcu['selects'] = sorted(capabilities - {mcu['config_name']})
+            mcu['capabilities'] = sorted(capabilities)
 
         return mcus
 

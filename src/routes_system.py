@@ -21,7 +21,7 @@ from collections import deque
 from shared import (
     config, logger, BASE_DIR,
     DFU_KNOWN_DEVICES, DFU_KNOWN_VIDPIDS,
-    run_cmd, run_cmd_check, path_exists, list_dir, is_ssh_mode, is_fast_ssh_mode,
+    run_cmd, run_cmd_check, path_exists, list_dir, is_ssh_mode, is_fast_remote,
     SSHManager, get_klipper_owner, get_klipper_python_bin, expand_klipper_path,
     get_moonraker_base_url,
     CSRF_COOKIE_NAME, new_csrf_token,
@@ -485,8 +485,8 @@ def get_system_resources():
                 'disk': disk_info,
                 'network': net_info,
                 'services': service_status,
-                'flyos_version': _remote_flyos_version if is_fast_ssh_mode() else None,
-                'board_name': _remote_board_name if is_fast_ssh_mode() else None
+                'flyos_version': _remote_flyos_version if is_fast_remote() else None,
+                'board_name': _remote_board_name if is_fast_remote() else None
             }
         }
         if not request.args.get('no_history'):

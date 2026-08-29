@@ -162,7 +162,6 @@
   "form.ssh_password": "SSH 密码",
   "form.sudo_password": "sudo 密码",
   "form.sudo_mode": "sudo 模式",
-  "form.fast_ssh_host": "目标设备 IP 地址",
   "form.klipper_path": "Klipper 路径",
   "form.katapult_path": "Katapult 路径",
   "form.moonraker_host": "Moonraker 地址",

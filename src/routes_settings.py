@@ -13,7 +13,7 @@ from shared import (
     CAN_NETWORK_DIR, CAN_INTERFACES_DIR, CAN_BITRATES, BITRATE_VALUES,
     run_cmd, is_ssh_mode,
     expand_klipper_path, sudo_write_file, sudo_mkdir,
-    SSHManager, get_fast_ssh_credentials, public_config, normalize_host_value,
+    SSHManager, public_config, normalize_host_value,
     safe_error,
 )
 import shared
@@ -98,7 +98,7 @@ def handle_config():
 
             if 'connection_mode' in data:
                 mode = _clean_setting_string(data['connection_mode'], '连接模式', 20)
-                if mode not in ('local', 'ssh', 'fast-ssh'):
+                if mode not in ('local', 'ssh'):
                     raise ValueError('连接模式无效')
                 _config['connection_mode'] = mode
 
@@ -115,27 +115,17 @@ def handle_config():
 
         new_mode = _config.get('connection_mode', old_mode)
 
-        if _config.get('connection_mode') == 'fast-ssh':
-            from ssh_manager import save_credential
-            _fast_user, _fast_pwd = get_fast_ssh_credentials()
-            _config['ssh_user'] = _fast_user
-            _config['sudo_mode'] = 'password'
-            if _fast_pwd:
-                save_credential('ssh_password', _fast_pwd)
-                save_credential('sudo_password', _fast_pwd)
-            else:
-                logger.warning(
-                    'FAST-SSH 模式未配置密码（可通过环境变量 FAST_SSH_PASSWORD '
-                    '或 data/config.json 的 fast_ssh_password 设置），SSH 连接将不可用'
-                )
-            if not _config.get('fast_ssh_user'):
-                _config['fast_ssh_user'] = _fast_user
-
-        if new_mode == 'local' and old_mode in ('ssh', 'fast-ssh'):
+        ssh_config_changed = any(key in data for key in (
+            'connection_mode', 'ssh_host', 'ssh_port', 'ssh_user', 'sudo_mode'
+        ))
+        if ssh_config_changed:
             try:
                 manager = SSHManager.get_instance()
                 manager.disconnect()
-                logger.info(f"连接模式从 {old_mode} 切换到 local，已断开 SSH 连接")
+                logger.info(
+                    f"SSH 配置已更新（{old_mode} -> {new_mode}），"
+                    "已断开旧连接并清除远端系统检测缓存"
+                )
             except Exception as e:
                 logger.warning(f"断开 SSH 连接时出错: {e}")
 

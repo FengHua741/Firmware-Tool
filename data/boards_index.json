@@ -246,8 +246,7 @@
         "has_servo": true,
         "pin_style": "P",
         "connections": [
-          "USB",
-          "USB转CAN"
+          "USB"
         ],
         "image": "boards/board/F407ZG/F407ZG.png",
         "mapping_dir": "board/F407ZG"
@@ -417,7 +416,8 @@
         "pin_style": "gpio",
         "connections": [
           "CANBUS",
-          "USB"
+          "USB",
+          "RS232"
         ],
         "image": "boards/board/tool_board/ERCF-V2/ERCF-V2.png",
         "mapping_dir": "board/tool_board/ERCF-V2"
@@ -439,7 +439,7 @@
         "connections": [
           "CANBUS",
           "USB",
-          "串口"
+          "RS232"
         ],
         "image": "boards/board/tool_board/MMU/MMU.png",
         "mapping_dir": "board/tool_board/MMU"
@@ -460,7 +460,7 @@
         "pin_style": "gpio",
         "connections": [
           "CANBUS",
-          "USB"
+          "RS232"
         ],
         "image": "boards/board/tool_board/SB2040PROV3/SB2040PROV3.png",
         "mapping_dir": "board/tool_board/SB2040PROV3"
@@ -481,7 +481,7 @@
         "pin_style": "gpio",
         "connections": [
           "CANBUS",
-          "USB"
+          "RS232"
         ],
         "image": "boards/board/tool_board/SB2040V3/SB2040V3.png",
         "mapping_dir": "board/tool_board/SB2040V3"
@@ -502,7 +502,7 @@
         "pin_style": "gpio",
         "connections": [
           "CANBUS",
-          "USB"
+          "RS232"
         ],
         "image": "boards/board/tool_board/SHT36V3/SHT36V3.png",
         "mapping_dir": "board/tool_board/SHT36V3"

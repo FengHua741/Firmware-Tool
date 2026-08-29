@@ -19,6 +19,7 @@ BL_TYPE_DIR_ALIASES = {
     'extensionboard': 'ExtensionBoard',
     'screen': 'Screen',
 }
+BL_IGNORED_DIRS = {'developer'}
 
 
 def _safe_segment(value):
@@ -237,8 +238,9 @@ def get_bl_firmwares(manufacturer, board_type=None):
     2. BL/ToolBoard/产品/xxx.uf2  - 工具板固件
     3. BL/ExtensionBoard/产品/xxx.bin - 扩展板固件
     4. BL/Screen/产品/xxx.bin - 屏幕固件
-    5. BL/developer/产品/xxx.bin - 开发版固件
-    6. BL/xxx.bin                   - 旧结构兼容
+    5. BL/xxx.bin                   - 旧结构兼容
+
+    developer 目录及其内容始终忽略。
     """
     manufacturer = _safe_segment(manufacturer)
     board_type = _safe_segment(board_type) if board_type else None
@@ -253,11 +255,14 @@ def get_bl_firmwares(manufacturer, board_type=None):
         return firmwares
 
     if board_type:
+        if board_type.lower() in BL_IGNORED_DIRS:
+            return firmwares
         # 指定了主板类型，只扫描该子目录
         bl_type_dir = BL_TYPE_DIR_ALIASES.get(board_type.lower(), board_type)
         type_dir = os.path.join(bl_dir, bl_type_dir)
         if os.path.exists(type_dir):
             for root, dirs, files in os.walk(type_dir):
+                dirs[:] = [name for name in dirs if name.lower() not in BL_IGNORED_DIRS]
                 for filename in files:
                     if filename.lower().endswith(('.bin', '.uf2', '.hex')):
                         fw_path = os.path.join(root, filename)
@@ -270,6 +275,7 @@ def get_bl_firmwares(manufacturer, board_type=None):
     else:
         # 未指定类型，递归扫描所有子目录
         for root, dirs, files in os.walk(bl_dir):
+            dirs[:] = [name for name in dirs if name.lower() not in BL_IGNORED_DIRS]
             for filename in files:
                 if filename.lower().endswith(('.bin', '.uf2', '.hex')):
                     fw_path = os.path.join(root, filename)

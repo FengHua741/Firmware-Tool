@@ -10,83 +10,9 @@ import os
 import json
 import logging
 
-logger = logging.getLogger(__name__)
+from klipper_kconfig_parser import KlipperKconfigParser
 
-# 处理器 -> 能力标志 映射 (从 Kconfig 定义推导)
-PROCESSOR_CAPABILITIES = {
-    # STM32F0x2 系列 (USBFS via F0x2)
-    'STM32F042': ['MACH_STM32F042', 'MACH_STM32F0x2', 'MACH_STM32F0', 'HAVE_STM32_USBFS', 'HAVE_STM32_CANBUS', 'HAVE_STM32_USBCANBUS'],
-    'STM32F072': ['MACH_STM32F072', 'MACH_STM32F0x2', 'MACH_STM32F0', 'HAVE_STM32_USBFS', 'HAVE_STM32_CANBUS', 'HAVE_STM32_USBCANBUS'],
-    # STM32F1 系列 (USBFS via F1, 假设外部时钟; 无 USBCANBUS 因 !MACH_STM32F1)
-    'STM32F103': ['MACH_STM32F103', 'MACH_STM32F1', 'HAVE_STM32_USBFS', 'HAVE_STM32_CANBUS'],
-    # STM32F2 系列 (USBOTG)
-    'STM32F207': ['MACH_STM32F207', 'MACH_STM32F2', 'HAVE_STM32_USBOTG', 'HAVE_STM32_CANBUS'],
-    # STM32F4 系列 (USBOTG)
-    'STM32F401': ['MACH_STM32F401', 'MACH_STM32F4', 'HAVE_STM32_USBOTG'],
-    'STM32F405': ['MACH_STM32F405', 'MACH_STM32F4', 'MACH_STM32F4x5', 'HAVE_STM32_USBOTG', 'HAVE_STM32_CANBUS', 'HAVE_STM32_USBCANBUS'],
-    'STM32F407': ['MACH_STM32F407', 'MACH_STM32F4', 'MACH_STM32F4x5', 'HAVE_STM32_USBOTG', 'HAVE_STM32_CANBUS', 'HAVE_STM32_USBCANBUS'],
-    'STM32F429': ['MACH_STM32F429', 'MACH_STM32F4', 'MACH_STM32F4x5', 'HAVE_STM32_USBOTG', 'HAVE_STM32_CANBUS', 'HAVE_STM32_USBCANBUS'],
-    'STM32F446': ['MACH_STM32F446', 'MACH_STM32F4', 'HAVE_STM32_USBOTG', 'HAVE_STM32_CANBUS', 'HAVE_STM32_USBCANBUS'],
-    # STM32G0 系列 (USBFS via G0Bx)
-    'STM32G0B1': ['MACH_STM32G0B1', 'MACH_STM32G0', 'MACH_STM32G0Bx', 'HAVE_STM32_USBFS', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
-    # STM32G4 系列 (USBFS via G4)
-    'STM32G431': ['MACH_STM32G431', 'MACH_STM32G4', 'HAVE_STM32_USBFS', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
-    'STM32G474': ['MACH_STM32G474', 'MACH_STM32G4', 'HAVE_STM32_USBFS', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
-    # STM32H7 系列 (USBOTG)
-    'STM32H723': ['MACH_STM32H723', 'MACH_STM32H7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
-    'STM32H743': ['MACH_STM32H743', 'MACH_STM32H7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
-    'STM32H750': ['MACH_STM32H750', 'MACH_STM32H7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
-    # STM32H5 系列 (USBFS + FDCAN)
-    'STM32H503': ['MACH_STM32H503', 'MACH_STM32H5', 'HAVE_STM32_USBFS', 'HAVE_STM32_FDCANBUS', 'HAVE_STM32_USBCANBUS'],
-    # STM32 无USB系列
-    'STM32F031': ['MACH_STM32F031', 'MACH_STM32F0'],
-    'STM32F070': ['MACH_STM32F070', 'MACH_STM32F0'],
-    'STM32G070': ['MACH_STM32G070', 'MACH_STM32G0', 'MACH_STM32G07x', 'HAVE_STM32_FDCANBUS'],
-    'STM32G0B0': ['MACH_STM32G0B0', 'MACH_STM32G0', 'MACH_STM32G0Bx', 'HAVE_STM32_USBFS', 'HAVE_STM32_FDCANBUS'],
-    'STM32F765': ['MACH_STM32F765', 'MACH_STM32F7', 'HAVE_STM32_USBOTG', 'HAVE_STM32_FDCANBUS'],
-    'STM32L412': ['MACH_STM32L412', 'MACH_STM32L4', 'HAVE_STM32_USBOTG'],
-    'N32G452': ['MACH_N32G452', 'MACH_N32G45x', 'MACH_STM32F1', 'HAVE_STM32_USBFS', 'HAVE_STM32_CANBUS'],
-    'N32G455': ['MACH_N32G455', 'MACH_N32G45x', 'MACH_STM32F1', 'HAVE_STM32_USBFS', 'HAVE_STM32_CANBUS'],
-    # RP2040 系列
-    'RP2040': ['MACH_RPXXXX', 'MACH_RP2040'],
-    'RP2350': ['MACH_RPXXXX', 'MACH_RP2350'],
-    # ATSAMD 系列
-    'SAMD21G18': ['MACH_SAMD21G18', 'MACH_SAMD21', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAMD21E18': ['MACH_SAMD21E18', 'MACH_SAMD21', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAMD21J18': ['MACH_SAMD21J18', 'MACH_SAMD21', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAMD21E15': ['MACH_SAMD21E15', 'MACH_SAMD21', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAMC21G18': ['MACH_SAMC21G18', 'MACH_SAMC21', 'HAVE_SAMD_CANBUS'],
-    'SAMD51G19': ['MACH_SAMD51G19', 'MACH_SAMD51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAMD51J19': ['MACH_SAMD51J19', 'MACH_SAMD51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAMD51N19': ['MACH_SAMD51N19', 'MACH_SAMD51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAMD51P20': ['MACH_SAMD51P20', 'MACH_SAMD51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAME51J19': ['MACH_SAME51J19', 'MACH_SAME51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAME51N19': ['MACH_SAME51N19', 'MACH_SAME51', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    'SAME54P20': ['MACH_SAME54P20', 'MACH_SAME54', 'HAVE_SAMD_USB', 'HAVE_SAMD_CANBUS'],
-    # LPC176x 系列
-    'LPC1768': ['MACH_LPC1768'],
-    'LPC1769': ['MACH_LPC1769'],
-    # HC32F460 系列
-    'HC32F460': ['MACH_HC32F460'],
-    # ATSAM 系列
-    'SAM3X8E': ['MACH_SAM3X8E', 'MACH_SAM3X', 'HAVE_SAM_CANBUS'],
-    'SAM3X8C': ['MACH_SAM3X8C', 'MACH_SAM3X', 'HAVE_SAM_CANBUS'],
-    'SAM4S8C': ['MACH_SAM4S8C', 'MACH_SAM4S'],
-    'SAM4E8E': ['MACH_SAM4E8E', 'MACH_SAM4E', 'HAVE_SAM_CANBUS'],
-    'SAME70Q20B': ['MACH_SAME70Q20B', 'MACH_SAME70', 'HAVE_SAM_CANBUS'],
-    # AVR 系列
-    'ATMEGA2560': ['MACH_atmega2560'],
-    'ATMEGA1280': ['MACH_atmega1280'],
-    'AT90USB1286': ['MACH_at90usb1286'],
-    'AT90USB646': ['MACH_at90usb646'],
-    'ATMEGA32U4': ['MACH_atmega32u4'],
-    'ATMEGA1284P': ['MACH_atmega1284p'],
-    'ATMEGA644P': ['MACH_atmega644p'],
-    'ATMEGA328P': ['MACH_atmega328p'],
-    'ATMEGA328': ['MACH_atmega328'],
-    'ATMEGA168': ['MACH_atmega168'],
-    'LGT8F328P': ['MACH_lgt8f328p'],
-}
+logger = logging.getLogger(__name__)
 
 # select 值到 comm_type 的映射
 SELECT_TO_COMM_TYPE = {
@@ -127,119 +53,42 @@ def _split_by_op(expr, op):
     return parts
 
 
-def _parse_depends(depends_str):
-    """
-    解析 depends on 条件表达式，返回简化的条件列表
-    例如: "(MACH_STM32F4 && HAVE_STM32_CANBUS) || HAVE_STM32_FDCANBUS"
-    返回: [["MACH_STM32F4", "HAVE_STM32_CANBUS"], ["HAVE_STM32_FDCANBUS"]]
-    每个内部列表是 AND 关系，外部列表是 OR 关系
-    """
-    if not depends_str:
-        return []
-
-    # 清理字符串
-    depends_str = depends_str.strip()
-
-    # 按 || 分割为 OR 子句
-    or_clauses = []
-    # 简单的括号感知分割
-    depth = 0
-    current = ''
-    for char in depends_str:
-        if char == '(':
-            depth += 1
-            current += char
-        elif char == ')':
-            depth -= 1
-            current += char
-        elif char == '|' and depth == 0:
-            if current.endswith('|'):
-                # 这是 ||
-                or_clauses.append(current[:-1].strip())
-                current = ''
+def _dynamic_processor_capabilities(klipper_path):
+    """从当前 Klipper Kconfig 生成平台 -> MCU -> 能力符号映射。"""
+    parser = KlipperKconfigParser(klipper_path)
+    database = parser.parse_all_platforms()
+    capabilities = {}
+    for platform_data in database.values():
+        platform_key = platform_data.get('platform', '')
+        if not platform_key:
+            continue
+        platform_capabilities = capabilities.setdefault(platform_key, {})
+        for mcu_id, mcu in (platform_data.get('mcus') or {}).items():
+            processor = str(mcu_id or '').upper()
+            if not processor:
                 continue
-            current += char
-        else:
-            current += char
-    if current.strip():
-        or_clauses.append(current.strip())
-
-    result = []
-    for clause in or_clauses:
-        # 去除外层括号
-        clause = clause.strip()
-        while clause.startswith('(') and clause.endswith(')'):
-            clause = clause[1:-1].strip()
-
-        # 按 && 分割为 AND 条件（括号感知）
-        and_parts_raw = _split_by_op(clause, '&&')
-        and_parts = [p.strip().strip('()').strip() for p in and_parts_raw]
-        # 过滤掉始终为 true 的选项和空项
-        and_parts = [p for p in and_parts if p and p not in ALWAYS_TRUE_OPTIONS]
-
-        # 展开含有 || 的 AND 部分
-        # 例如: A && (B || C) -> [A, B] or [A, C]
-        expanded = [[]]
-        for part in and_parts:
-            if '||' in part:
-                # 去除外层括号后按 || 分割
-                inner = part.strip()
-                while inner.startswith('(') and inner.endswith(')'):
-                    inner = inner[1:-1].strip()
-                sub_or = [s.strip() for s in inner.split('||')]
-                new_expanded = []
-                for existing in expanded:
-                    for s in sub_or:
-                        s = s.strip()
-                        if s and s not in ALWAYS_TRUE_OPTIONS:
-                            new_expanded.append(existing + [s])
-                        elif not s or s in ALWAYS_TRUE_OPTIONS:
-                            new_expanded.append(existing[:])
-                expanded = new_expanded
-            else:
-                for existing in expanded:
-                    existing.append(part)
-
-        for combo in expanded:
-            if combo:
-                result.append(combo)
-            elif and_parts_raw:
-                # 所有条件都被过滤掉了，该子句始终为 true
-                result.append([])
-
-        if not and_parts and clause:
-            result.append([])
-
-    return result
+            symbols = set(mcu.get('capabilities') or [])
+            symbols.add(mcu.get('config_symbol') or mcu.get('config_name', ''))
+            symbols.discard('')
+            platform_capabilities[processor] = symbols
+    return parser, capabilities
 
 
-def _check_processor_match(processor, depends_conditions):
-    """
-    检查处理器是否满足依赖条件
-    depends_conditions: OR 列表 of AND 列表
-    """
-    if not depends_conditions:
-        return True
-
-    caps = PROCESSOR_CAPABILITIES.get(processor, [])
-
-    for and_clause in depends_conditions:
-        # 所有 AND 条件都必须满足
-        all_met = True
-        for cond in and_clause:
-            if cond.startswith('!'):
-                # 否定条件: !MACH_STM32F0 表示不能有此标志
-                if cond[1:] in caps:
-                    all_met = False
-                    break
-            else:
-                if cond not in caps:
-                    all_met = False
-                    break
-        if all_met:
-            return True
-
-    return False
+def _annotate_compatibility(options, processor_capabilities, parser):
+    """给 Kconfig 选项标注由实时能力闭包计算出的兼容 MCU。"""
+    resolved = bool(processor_capabilities)
+    for option in options:
+        depends = option.pop('depends', '')
+        visibility = option.pop('visibility', '')
+        compatible = []
+        if resolved:
+            for processor, symbols in processor_capabilities.items():
+                if (parser._eval_condition(depends, symbols)
+                        and parser._eval_condition(visibility, symbols)):
+                    compatible.append(processor)
+        option['compatible_processors'] = sorted(compatible)
+        option['compatibility_resolved'] = resolved
+    return options
 
 
 def _parse_communication_choice(kconfig_path, arch_prefix):
@@ -394,75 +243,186 @@ def _parse_stm32_kconfig(kconfig_path):
     return direct_can, bridge_can
 
 
-def _parse_h503_nested_options(kconfig_path):
-    """提取 H503 分级 UART/FDCAN 选择，供前端和配置生成器使用。"""
-    groups = {
-        'serial_peripheral': [],
-        'serial_rx': [],
-        'serial_tx': [],
-        'can_rx': [],
-        'can_tx': [],
+def _join_conditions(*conditions):
+    parts = [str(condition).strip() for condition in conditions if str(condition).strip()]
+    return ' && '.join(f'({part})' for part in parts)
+
+
+def _condition_symbols(condition):
+    return set(re.findall(r'\b[A-Za-z_][A-Za-z0-9_]*\b', condition or '')) - {
+        'if', 'y', 'n', 'Y', 'N', 'LOW_LEVEL_OPTIONS',
     }
+
+
+def _parse_kconfig_choice_blocks(kconfig_path):
+    """解析 Kconfig choice，保留作用域条件和每个选项的条件。"""
     if not os.path.exists(kconfig_path):
-        return groups
+        return []
+    with open(kconfig_path, 'r', encoding='utf-8', errors='replace') as source:
+        lines = source.readlines()
 
-    with open(kconfig_path, 'r', encoding='utf-8', errors='replace') as f:
-        lines = f.readlines()
-
-    prefix_groups = (
-        ('STM32_H503_SERIAL_RX_', 'serial_rx'),
-        ('STM32_H503_SERIAL_TX_', 'serial_tx'),
-        ('STM32_H503_SERIAL_USART', 'serial_peripheral'),
-        ('STM32_H503_SERIAL_LPUART', 'serial_peripheral'),
-        ('STM32_H503_CAN_RX_', 'can_rx'),
-        ('STM32_H503_CAN_TX_', 'can_tx'),
-    )
-    for index, raw_line in enumerate(lines):
-        match = re.match(r'^\s*config\s+(STM32_H503_\w+)', raw_line)
-        if not match:
+    choices = []
+    outer_if_stack = []
+    index = 0
+    choice_number = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if_match = re.match(r'^if\s+(.+)$', stripped)
+        if if_match:
+            outer_if_stack.append(if_match.group(1).strip())
+            index += 1
             continue
-        symbol = match.group(1)
-        group_name = next(
-            (group for prefix, group in prefix_groups if symbol.startswith(prefix)),
-            None,
-        )
-        if not group_name:
+        if stripped == 'endif':
+            if outer_if_stack:
+                outer_if_stack.pop()
+            index += 1
+            continue
+        if not re.match(r'^choice\b', stripped):
+            index += 1
             continue
 
-        display = ''
-        conditions = []
-        cursor = index + 1
-        while cursor < len(lines):
-            stripped = lines[cursor].strip()
-            if (re.match(r'^(config|choice|if)\b', stripped)
-                    or stripped in ('endchoice', 'endif')):
+        choice_number += 1
+        choice_id = f'choice_{choice_number}'
+        choice_prompt = ''
+        choice_conditions = list(outer_if_stack)
+        local_if_stack = []
+        options = []
+        current = None
+
+        def flush_current():
+            nonlocal current
+            if current and current.get('display'):
+                current['condition'] = _join_conditions(
+                    *choice_conditions,
+                    *current.pop('scope_conditions', []),
+                    *current.pop('conditions', []),
+                )
+                options.append(current)
+            current = None
+
+        index += 1
+        while index < len(lines):
+            line = lines[index].strip()
+            if line == 'endchoice':
+                flush_current()
                 break
-            bool_match = re.match(r'bool\s+"([^"]+)"(?:\s+if\s+(.+))?', stripped)
-            if bool_match:
-                display = bool_match.group(1)
-                if bool_match.group(2):
-                    conditions.append(bool_match.group(2).strip())
-            depends_match = re.match(r'depends\s+on\s+(.+)', stripped)
+
+            nested_if = re.match(r'^if\s+(.+)$', line)
+            if nested_if:
+                flush_current()
+                local_if_stack.append(nested_if.group(1).strip())
+                index += 1
+                continue
+            if line == 'endif':
+                flush_current()
+                if local_if_stack:
+                    local_if_stack.pop()
+                index += 1
+                continue
+
+            config_match = re.match(r'^config\s+(\w+)', line)
+            if config_match:
+                flush_current()
+                current = {
+                    'config_symbol': config_match.group(1),
+                    'display': '',
+                    'select': '',
+                    'scope_conditions': list(local_if_stack),
+                    'conditions': [],
+                }
+                index += 1
+                continue
+
+            prompt_match = re.match(r'^prompt\s+"([^"]+)"(?:\s+if\s+(.+))?$', line)
+            if prompt_match and current is None:
+                choice_prompt = prompt_match.group(1)
+                if prompt_match.group(2):
+                    choice_conditions.append(prompt_match.group(2).strip())
+                index += 1
+                continue
+
+            depends_match = re.match(r'^depends\s+on\s+(.+)$', line)
             if depends_match:
-                conditions.append(depends_match.group(1).strip())
-            cursor += 1
+                target = current['conditions'] if current is not None else choice_conditions
+                target.append(depends_match.group(1).strip())
+                index += 1
+                continue
 
-        if not display:
+            if current is not None:
+                bool_match = re.match(r'^bool\s+"([^"]+)"(?:\s+if\s+(.+))?$', line)
+                if bool_match:
+                    current['display'] = bool_match.group(1)
+                    if bool_match.group(2):
+                        current['conditions'].append(bool_match.group(2).strip())
+                select_match = re.match(r'^select\s+(\w+)(?:\s+if\s+(.+))?$', line)
+                if select_match:
+                    current['select'] = select_match.group(1)
+                    if select_match.group(2):
+                        current['conditions'].append(select_match.group(2).strip())
+            index += 1
+
+        if options:
+            choices.append({
+                'id': choice_id,
+                'prompt': choice_prompt or choice_id,
+                'condition': _join_conditions(*choice_conditions),
+                'options': options,
+                '_order': choice_number,
+            })
+        index += 1
+    return choices
+
+
+def _parse_communication_subchoices(kconfig_path, communication_options, bridge_options):
+    """找出由通信主选项或其子选项控制的任意嵌套 choice。"""
+    communication_symbols = {
+        option.get('config_symbol', '') for option in communication_options
+    }
+    communication_symbols.update(
+        option.get('select', '') for option in communication_options
+    )
+    bridge_symbols = {option.get('config', '') for option in bridge_options}
+    roots = (communication_symbols | bridge_symbols) - {''}
+
+    candidates = []
+    for choice in _parse_kconfig_choice_blocks(kconfig_path):
+        option_symbols = {
+            option.get('config_symbol', '') for option in choice.get('options', [])
+        }
+        # 主通信 choice 与现有 CAN 引脚 choice 已有专门 UI，不重复输出。
+        if option_symbols & communication_symbols:
             continue
-        parent = next(
-            (condition for condition in conditions
-             if condition.startswith('STM32_H503_SERIAL_')),
-            '',
-        )
-        groups[group_name].append({
-            'config_symbol': symbol,
-            'display': display,
-            'parent': parent,
-            'available_for_usbcanbridge': '!USBCANBUS' not in conditions,
-            'compatible_processors': ['STM32H503'],
-        })
+        if option_symbols and all('CMENU_CANBUS' in symbol for symbol in option_symbols):
+            continue
+        candidates.append(choice)
 
-    return groups
+    included = []
+    reachable = set(roots)
+    pending = list(candidates)
+    while pending:
+        progressed = False
+        remaining = []
+        for choice in pending:
+            references = _condition_symbols(choice.get('condition', ''))
+            for option in choice.get('options', []):
+                references.update(_condition_symbols(option.get('condition', '')))
+            if not (references & reachable):
+                remaining.append(choice)
+                continue
+            included.append(choice)
+            reachable.update(
+                option.get('config_symbol', '')
+                for option in choice.get('options', [])
+            )
+            reachable.discard('')
+            progressed = True
+        if not progressed:
+            break
+        pending = remaining
+
+    for choice in included:
+        choice.pop('_order', None)
+    return included
 
 
 def _parse_rp2040_kconfig(kconfig_path):
@@ -518,6 +478,9 @@ def parse_can_options(klipper_path='~/klipper'):
         dict: 包含各平台通信选项的结构化数据
     """
     klipper_path = os.path.expanduser(klipper_path)
+    capability_parser, capabilities_by_platform = _dynamic_processor_capabilities(
+        klipper_path
+    )
 
     # 平台定义: (目录名, 架构前缀, 结果键名)
     PLATFORMS = [
@@ -541,46 +504,30 @@ def parse_can_options(klipper_path='~/klipper'):
         # 解析通信接口选项
         comm_options = _parse_communication_choice(kconfig_path, arch_prefix)
 
-        # 获取该平台对应的处理器列表
-        platform_processors = _get_platform_processors(result_key)
-
-        # 为每个选项计算兼容的处理器列表
-        for option in comm_options:
-            depends_conditions = _parse_depends(option.get('depends', ''))
-            visibility_conditions = _parse_depends(option.get('visibility', ''))
-            compatible = []
-            for proc in platform_processors:
-                if (_check_processor_match(proc, depends_conditions) and
-                        _check_processor_match(proc, visibility_conditions)):
-                    compatible.append(proc)
-            option['compatible_processors'] = compatible
-            del option['depends']
-            del option['visibility']
+        processor_capabilities = capabilities_by_platform.get(result_key, {})
+        _annotate_compatibility(
+            comm_options, processor_capabilities, capability_parser
+        )
 
         platform_data = {
             'communication_options': comm_options,
+            'processor_capabilities': {
+                processor: sorted(symbols)
+                for processor, symbols in processor_capabilities.items()
+            },
+            'capability_source': 'klipper-kconfig',
         }
 
         # STM32 特有: 直接 CAN 和桥接 CAN 引脚选项
         if platform_dir == 'stm32':
             direct_can, bridge_can = _parse_stm32_kconfig(kconfig_path)
-            stm32_procs = [p for p in PROCESSOR_CAPABILITIES.keys() if p.startswith('STM32')]
-            for option in direct_can + bridge_can:
-                depends_conditions = _parse_depends(option.get('depends', ''))
-                visibility_conditions = _parse_depends(option.get('visibility', ''))
-                compatible = []
-                for proc in stm32_procs:
-                    if (_check_processor_match(proc, depends_conditions) and
-                            _check_processor_match(proc, visibility_conditions)):
-                        compatible.append(proc)
-                option['compatible_processors'] = compatible
-                del option['depends']
-                del option['visibility']
+            _annotate_compatibility(
+                direct_can + bridge_can,
+                processor_capabilities,
+                capability_parser,
+            )
             platform_data['direct_can'] = direct_can
             platform_data['bridge_can'] = bridge_can
-            platform_data['h503_nested_options'] = _parse_h503_nested_options(kconfig_path)
-            processor_capabilities = {p: c for p, c in PROCESSOR_CAPABILITIES.items() if p.startswith('STM32')}
-            platform_data['processor_capabilities'] = processor_capabilities
 
         # RP2040 特有: CAN GPIO 配置
         if platform_dir == 'rp2040':
@@ -591,31 +538,28 @@ def parse_can_options(klipper_path='~/klipper'):
         # ATSAMD 特有: 桥接 CAN 引脚选项
         if platform_dir == 'atsamd':
             _, bridge_can = _parse_generic_bridge_can(kconfig_path, 'ATSAMD')
+            _annotate_compatibility(
+                bridge_can, processor_capabilities, capability_parser
+            )
             platform_data['bridge_can'] = bridge_can
 
         # ATSAM 特有: 桥接 CAN 引脚选项
         if platform_dir == 'atsam':
             _, bridge_can = _parse_generic_bridge_can(kconfig_path, 'ATSAM')
+            _annotate_compatibility(
+                bridge_can, processor_capabilities, capability_parser
+            )
             platform_data['bridge_can'] = bridge_can
+
+        platform_data['communication_subchoices'] = _parse_communication_subchoices(
+            kconfig_path,
+            comm_options,
+            platform_data.get('bridge_can', []),
+        )
 
         result[result_key] = platform_data
 
     return result
-
-
-def _get_platform_processors(result_key):
-    """根据平台键名获取对应的处理器列表"""
-    prefix_map = {
-        'stm32':    lambda p: p.startswith('STM32') or p.startswith('N32'),
-        'rp2040':   lambda p: p in ('RP2040', 'RP2350'),
-        'atsamd':   lambda p: p.startswith('SAM') and p[3] in ('D', 'C', 'E') and not p.startswith('SAM3') and not p.startswith('SAM4') and not p.startswith('SAME7'),
-        'lpc176x':  lambda p: p.startswith('LPC'),
-        'hc32f460': lambda p: p.startswith('HC32'),
-        'atsam':    lambda p: p.startswith('SAM3') or p.startswith('SAM4') or p.startswith('SAME7'),
-        'avr':      lambda p: p.startswith('AT') or p.startswith('LGT'),
-    }
-    matcher = prefix_map.get(result_key, lambda p: False)
-    return [p for p in PROCESSOR_CAPABILITIES.keys() if matcher(p)]
 
 
 def _parse_generic_bridge_can(kconfig_path, prefix):

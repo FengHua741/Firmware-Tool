@@ -3,18 +3,39 @@
   "name": "FLY-ERCF",
   "platform": "RP2040",
   "mcu": "rp2040",
+  "crystal": "12000000",
   "bl_offset": "16384",
   "connections": [
     "CANBUS",
     "USB"
   ],
+  "can_gpio": {
+    "rx": 4,
+    "tx": 5
+  },
+  "connection_profiles": {
+    "can": {
+      "bl_offset": "16384",
+      "config_symbol": "RPXXXX_CANBUS",
+      "can_gpio": {
+        "rx": 4,
+        "tx": 5
+      },
+      "canbus_frequency": "1000000",
+      "flash_mode": "CAN"
+    },
+    "usb": {
+      "bl_offset": "16384",
+      "config_symbol": "RPXXXX_USB",
+      "flash_mode": "KAT"
+    }
+  },
   "default_connection": "CAN bus",
   "flash_modes": [
-    "DFU",
-    "KAT",
-    "CAN"
+    "CAN",
+    "KAT"
   ],
-  "default_flash": "KAT",
+  "default_flash": "CAN",
   "boot_pins": "gpio17",
   "bl_flash_support": "支持",
   "bl_default_flash": "UF2",
@@ -23,7 +44,7 @@
     "enabled": false,
     "katapult_mode": "USB",
     "device_id": "",
-    "flash_mode": "KAT",
+    "flash_mode": "CAN",
     "custom_config": ""
   },
   "manufacturer": "FLY"

@@ -3,17 +3,35 @@
   "name": "FLY-SB2040 Pro V3",
   "platform": "RP2040",
   "mcu": "rp2040",
+  "crystal": "12000000",
   "bl_offset": "16384",
   "connections": [
     "CANBUS",
-    "USB"
+    "RS232"
   ],
+  "connection_profiles": {
+    "can": {
+      "bl_offset": "16384",
+      "config_symbol": "RPXXXX_CANBUS",
+      "flash_mode": "CAN",
+      "can_gpio": {
+        "rx": 1,
+        "tx": 0
+      },
+      "canbus_frequency": "1000000"
+    },
+    "serial": {
+      "bl_offset": "256",
+      "config_symbol": "RPXXXX_SERIAL_UART0_PINS_0_1",
+      "flash_mode": "UF2"
+    }
+  },
   "default_connection": "CAN bus",
   "flash_modes": [
     "CAN",
     "UF2"
   ],
-  "default_flash": "UF2",
+  "default_flash": "CAN",
   "boot_pins": "!gpio5,!gpio19,!gpio24",
   "bl_flash_support": "支持",
   "bl_default_flash": "UF2",
@@ -26,7 +44,7 @@
     "enabled": false,
     "katapult_mode": "USB",
     "device_id": "",
-    "flash_mode": "UF2",
+    "flash_mode": "CAN",
     "custom_config": ""
   },
   "manufacturer": "FLY"

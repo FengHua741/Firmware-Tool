@@ -98,6 +98,17 @@ def _validate_config_payload(data):
             raise ValueError(f'{key} 必须是字符串数组')
     if data.get('can_gpio') is not None and not isinstance(data['can_gpio'], dict):
         raise ValueError('can_gpio 必须是对象')
+    profiles = data.get('connection_profiles')
+    if profiles is not None:
+        if not isinstance(profiles, dict):
+            raise ValueError('connection_profiles 必须是对象')
+        for connection_type, profile in profiles.items():
+            if connection_type not in {'usb', 'serial', 'can', 'usbcanbridge'}:
+                raise ValueError(f'不支持的连接配置类型: {connection_type}')
+            if not isinstance(profile, dict):
+                raise ValueError(f'connection_profiles.{connection_type} 必须是对象')
+            if profile.get('can_gpio') is not None and not isinstance(profile['can_gpio'], dict):
+                raise ValueError(f'connection_profiles.{connection_type}.can_gpio 必须是对象')
     if data.get('firmware_update') is not None and not isinstance(data['firmware_update'], dict):
         raise ValueError('firmware_update 必须是对象')
 

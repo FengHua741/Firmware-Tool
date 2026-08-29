@@ -162,7 +162,6 @@
   "form.ssh_password": "SSH Password",
   "form.sudo_password": "sudo Password",
   "form.sudo_mode": "sudo Mode",
-  "form.fast_ssh_host": "Target Device IP",
   "form.klipper_path": "Klipper Path",
   "form.katapult_path": "Katapult Path",
   "form.moonraker_host": "Moonraker Host",

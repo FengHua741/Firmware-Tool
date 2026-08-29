@@ -16,6 +16,8 @@ echo ""
 
 # 获取脚本所在目录（所有系统都需要）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 安装脚本部署后默认允许局域网浏览器访问
+BIND_HOST="0.0.0.0"
 
 # 检测是否为FlyOS-Fast系统
 IS_FAST=false
@@ -82,8 +84,6 @@ fi
 echo -e "${GREEN}使用端口: $PORT${NC}"
 echo ""
 
-PYTHON_FOR_TOKEN=$(command -v python3 2>/dev/null || echo /usr/bin/python3)
-
 # Fast系统: 如果当前目录不是PROJECT_DIR，则复制项目
 if [ "$IS_FAST" = true ] && [ "$(pwd)" != "$PROJECT_DIR" ]; then
     echo "复制项目到 $PROJECT_DIR..."
@@ -98,7 +98,7 @@ if [ ! -f "$PROJECT_DIR/data/config.json" ]; then
 cat > "$PROJECT_DIR/data/config.json" << EOF
 {
   "port": $PORT,
-  "bind_host": "127.0.0.1",
+  "bind_host": "$BIND_HOST",
   "klipper_path": "~/klipper",
   "katapult_path": "~/katapult",
   "json_repo_url": "",
@@ -257,11 +257,20 @@ echo "  开机自启: sudo systemctl enable $SERVICE_NAME"
 echo "  查看日志：sudo journalctl -u $SERVICE_NAME -f"
 echo "  卸载程序：cd $PROJECT_DIR/scripts && sudo ./uninstall.sh"
 echo ""
-# 获取本机 IP（兼容 FAST 系统无 hostname -I 的情况）
-LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v 127.0.0.1 | head -1 || echo "<IP>")
+# 获取本机 IP（兼容 FAST 系统的 BusyBox hostname 不支持 -I）
+LOCAL_IP=""
+if command -v hostname &>/dev/null; then
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+fi
+if [ -z "$LOCAL_IP" ] && command -v ip &>/dev/null; then
+    LOCAL_IP=$(ip -4 -o addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4; exit}' || true)
+fi
+if [ -z "$LOCAL_IP" ] && command -v ifconfig &>/dev/null; then
+    LOCAL_IP=$(ifconfig 2>/dev/null | awk '/inet addr:/ {sub(/.*inet addr:/, ""); sub(/ .*/, ""); if ($0 != "127.0.0.1") {print; exit}}' || true)
+fi
+LOCAL_IP=${LOCAL_IP:-"<IP>"}
 echo -e "${GREEN}本机访问地址: http://127.0.0.1:$PORT${NC}"
-echo -e "${YELLOW}局域网访问（需在 data/config.json 中将 bind_host 改为 0.0.0.0 并重启服务）:${NC}"
-echo -e "${YELLOW}  http://$LOCAL_IP:$PORT${NC}"
+echo -e "${GREEN}局域网访问地址: http://$LOCAL_IP:$PORT${NC}"
 echo ""
 
 # 询问是否启动服务

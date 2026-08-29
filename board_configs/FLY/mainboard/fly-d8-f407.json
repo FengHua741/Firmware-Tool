@@ -7,6 +7,19 @@
     "USB",
     "USB转CAN"
   ],
+  "connection_profiles": {
+    "usb": {
+      "bl_offset": "32768",
+      "config_symbol": "STM32_USB_PA11_PA12",
+      "flash_mode": "KAT"
+    },
+    "usbcanbridge": {
+      "bl_offset": "32768",
+      "config_symbol": "STM32_USBCANBUS_PA11_PA12",
+      "canbus_frequency": "1000000",
+      "flash_mode": "CAN_BRIDGE_KAT"
+    }
+  },
   "crystal": "8000000",
   "default_connection": "USB (on PA11/PA12)",
   "default_flash": "KAT",
@@ -18,7 +31,6 @@
     "katapult_mode": "USB"
   },
   "flash_modes": [
-    "DFU",
     "KAT",
     "CAN_BRIDGE_KAT"
   ],

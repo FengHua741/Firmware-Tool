@@ -2,11 +2,28 @@
   "bl_default_flash": "UF2",
   "bl_flash_support": "支持",
   "bl_offset": "16384",
-  "boot_pins": "gpio5",
+  "boot_pins": null,
   "connections": [
     "USB",
     "USB转CAN"
   ],
+  "connection_profiles": {
+    "usb": {
+      "bl_offset": "16384",
+      "config_symbol": "RPXXXX_USB",
+      "flash_mode": "KAT"
+    },
+    "usbcanbridge": {
+      "bl_offset": "16384",
+      "config_symbol": "RPXXXX_USBCANBUS",
+      "can_gpio": {
+        "rx": 4,
+        "tx": 5
+      },
+      "canbus_frequency": "1000000",
+      "flash_mode": "CAN_BRIDGE_KAT"
+    }
+  },
   "default_connection": "USB",
   "default_flash": "KAT",
   "firmware_update": {
@@ -18,8 +35,7 @@
   },
   "flash_modes": [
     "KAT",
-    "CAN_BRIDGE_KAT",
-    "UF2"
+    "CAN_BRIDGE_KAT"
   ],
   "id": "fly-micro4",
   "manufacturer": "FLY",

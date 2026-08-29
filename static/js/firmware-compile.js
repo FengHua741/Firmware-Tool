@@ -6,11 +6,17 @@ let compiledFirmwarePath = null; // 编译成功的固件路径
 let compiledFirmwareManifest = null; // 编译成功的固件元数据
 let _lastBlFiles = [];
 let _lastBlAddressOptions = [];
+let _lastBlDetectedDevices = [];
+let _lastBlToolStatus = {};
+let _blDeviceScanRequestId = 0;
+let _blDetectionState = { status: 'idle', message: '点击“检测”扫描 BL 烧录设备' };
 let _commGroupedOptions = {}; // 按类型分组的通信选项
 let _commAllOptions = [];     // 所有通信选项（带compatible_processors）
 let _bridgeCanOptions = [];   // STM32 桥接CAN引脚选项
 let _rp2040CanGpio = null;    // RP2040 CAN GPIO 配置
-let _h503NestedOptions = {};  // STM32H503 UART/FDCAN 分级选项
+let _communicationSubchoices = []; // Kconfig 动态通信子选项
+let _communicationProcessorCapabilities = {}; // 当前平台 MCU 能力闭包
+let _communicationSubchoiceValues = {}; // 动态子选项当前值
 let _lastDetectedCanDevicesByUuid = {}; // 烧录设备列表中识别到的 CAN 节点详情
 let _compileMcuPlatformRequestId = 0; // 忽略快速切换平台时返回的过期请求
 let _deviceScanRequestId = 0; // 忽略烧录模式/CAN接口切换后的过期扫描
@@ -20,6 +26,7 @@ let _lastFlashPlan = null;
 let _compileRequestActive = false;
 let _flashRequestActive = false;
 let _blFlashRequestActive = false;
+let _compilePresetAdvancedExpanded = false;
 
 const CAN_BITRATE_DEFAULT = '1000000';
 const CAN_BITRATE_LABELS = {
@@ -81,6 +88,7 @@ async function initFirmwarePage() {
         await loadCompilePresetManufacturers();
         await refreshFlashCanIfaces();
         initBlUploadArea();
+        resetBlDeviceDetection();
         // 初始化时根据默认烧录模式隐藏 CAN 接口选择框，并恢复最近一次编译信息。
         onFlashModeChange(true);
         await refreshFlashPlan(false);
@@ -162,8 +170,190 @@ async function loadCompilePresetManufacturers() {
     }
 }
 
+function _isCompilePresetMode() {
+    return document.querySelector('input[name="compileMode"]:checked')?.value === 'preset';
+}
+
+function _setCompilePresetConnectionWarning(message, append = false) {
+    const warning = document.getElementById('compilePresetConnectionWarning');
+    if (!warning) return;
+    if (!_isCompilePresetMode() || !window._selectedCompileBoardConfig || !message) {
+        if (!append || !message) {
+            warning.textContent = '';
+            warning.style.display = 'none';
+        }
+        return;
+    }
+    const nextMessage = append && warning.textContent
+        ? `${warning.textContent}；${message}`
+        : message;
+    warning.textContent = nextMessage;
+    warning.style.display = 'block';
+}
+
+function _applyCompilePresetView() {
+    const presetWithBoard = _isCompilePresetMode() && Boolean(window._selectedCompileBoardConfig);
+    const showAdvanced = !presetWithBoard || _compilePresetAdvancedExpanded;
+    const toggle = document.getElementById('compilePresetAdvancedToggle');
+    const button = document.getElementById('compilePresetAdvancedBtn');
+    const customSection = document.getElementById('compileCustomSection');
+
+    if (toggle) toggle.style.display = presetWithBoard ? 'flex' : 'none';
+    if (button) {
+        button.setAttribute('aria-expanded', _compilePresetAdvancedExpanded ? 'true' : 'false');
+        button.textContent = _compilePresetAdvancedExpanded ? '⚙️ 收起高级选项' : '⚙️ 高级选项';
+    }
+    if (customSection) {
+        customSection.style.display = presetWithBoard
+            ? (_compilePresetAdvancedExpanded ? 'block' : 'none')
+            : (_isCompilePresetMode() ? 'none' : 'block');
+    }
+    document.querySelectorAll('.compile-preset-advanced-only').forEach(element => {
+        element.style.display = showAdvanced ? (element.dataset.mcuDisplay || '') : 'none';
+    });
+    if (!presetWithBoard) {
+        _setCompilePresetConnectionWarning('');
+    }
+}
+
+function toggleCompilePresetAdvanced() {
+    if (!_isCompilePresetMode() || !window._selectedCompileBoardConfig) return;
+    _compilePresetAdvancedExpanded = !_compilePresetAdvancedExpanded;
+    _applyCompilePresetView();
+}
+
+function _normalizePresetConnectionType(value) {
+    const normalized = String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!normalized) return '';
+    if (normalized.includes('USB转CAN') || normalized.includes('USBCAN') ||
+        normalized.includes('BRIDGE') || (normalized.includes('USB') && normalized.includes('CAN'))) {
+        return 'usbcanbridge';
+    }
+    if (normalized.includes('CAN')) return 'can';
+    if (normalized.includes('SERIAL') || normalized.includes('UART') || normalized.includes('RS232') || normalized.includes('串口')) return 'serial';
+    if (normalized.includes('USB')) return 'usb';
+    return '';
+}
+
+function _presetCommunicationTypeLabel(type, fallback) {
+    if (!_isCompilePresetMode() || !window._selectedCompileBoardConfig) return fallback;
+    const declared = Array.isArray(window._selectedCompileBoardConfig.connections)
+        ? window._selectedCompileBoardConfig.connections
+        : [];
+    const raw = declared.find(value => _normalizePresetConnectionType(value) === type);
+    if (!raw) return fallback;
+    if (type === 'serial' && String(raw).toUpperCase().includes('RS232')) return 'RS232 (UART)';
+    return fallback;
+}
+
+function _getCompilePresetConnectionProfile(commType) {
+    if (!_isCompilePresetMode() || !window._selectedCompileBoardConfig) return null;
+    const profiles = window._selectedCompileBoardConfig.connection_profiles;
+    if (!profiles || typeof profiles !== 'object' || Array.isArray(profiles)) return null;
+    const profile = profiles[commType];
+    return profile && typeof profile === 'object' && !Array.isArray(profile) ? profile : null;
+}
+
+function _applyCompilePresetConnectionProfile(commType) {
+    const profile = _getCompilePresetConnectionProfile(commType);
+    if (!profile) return;
+
+    const detailSelect = document.getElementById('compileConnectionDetail');
+    const requestedSymbol = _normalizeCompileSymbol(profile.config_symbol);
+    if (detailSelect && requestedSymbol) {
+        const matched = [...detailSelect.options].find(option =>
+            _normalizeCompileSymbol(option.value) === requestedSymbol
+        );
+        if (matched) {
+            detailSelect.value = matched.value;
+        } else {
+            _setCompilePresetConnectionWarning(
+                `预设通信接口 ${profile.config_symbol} 不受当前 Klipper 支持，请检查版本。`,
+                true
+            );
+        }
+    }
+
+    const blSelect = document.getElementById('compileBlOffset');
+    if (blSelect && profile.bl_offset !== undefined) {
+        const requestedOffset = String(profile.bl_offset);
+        const matched = [...blSelect.options].find(option => option.value === requestedOffset);
+        if (matched) {
+            blSelect.value = requestedOffset;
+        } else {
+            _setCompilePresetConnectionWarning(
+                `预设 BL 偏移 ${requestedOffset} 不受当前 MCU 支持，请检查 Klipper 版本。`,
+                true
+            );
+        }
+    }
+
+    const canGpio = profile.can_gpio;
+    if (canGpio && typeof canGpio === 'object') {
+        const rxInput = document.getElementById('compileRp2040CanRx');
+        const txInput = document.getElementById('compileRp2040CanTx');
+        if (rxInput && canGpio.rx !== undefined) rxInput.value = canGpio.rx;
+        if (txInput && canGpio.tx !== undefined) txInput.value = canGpio.tx;
+    }
+    if (profile.canbus_frequency !== undefined) {
+        _setSelectedCanBitrate(profile.canbus_frequency);
+    }
+
+    const flashMode = String(profile.flash_mode || '');
+    const flashModeEl = document.getElementById('flashMode');
+    if (flashModeEl && flashMode && [...flashModeEl.options].some(option => option.value === flashMode)) {
+        if (flashModeEl.value !== flashMode) {
+            flashModeEl.value = flashMode;
+            onFlashModeChange();
+        }
+    }
+}
+
+function _filterPresetCommunicationOptions(options) {
+    if (!_isCompilePresetMode() || !window._selectedCompileBoardConfig) {
+        _setCompilePresetConnectionWarning('');
+        return options;
+    }
+
+    const config = window._selectedCompileBoardConfig;
+    if (options.length === 0) {
+        _setCompilePresetConnectionWarning('当前 Klipper 未解析出此 MCU 的兼容连接方式，请检查 Kconfig 后再编译。');
+        return [];
+    }
+    const declared = Array.isArray(config.connections) ? config.connections.filter(Boolean) : [];
+    if (declared.length === 0) {
+        _setCompilePresetConnectionWarning(`预设「${config.name || config.id || '未命名板卡'}」未声明连接方式，已回退显示 MCU 支持的全部方式。`);
+        return options;
+    }
+
+    const declaredTypes = new Set(declared.map(_normalizePresetConnectionType).filter(Boolean));
+    if (declaredTypes.size === 0) {
+        _setCompilePresetConnectionWarning(`预设「${config.name || config.id || '未命名板卡'}」的连接方式无法识别，已回退显示 MCU 支持的全部方式。`);
+        return options;
+    }
+
+    const declaredOrder = new Map([...declaredTypes].map((type, index) => [type, index]));
+    const restricted = options
+        .filter(option => declaredTypes.has(option.comm_type))
+        .sort((left, right) => declaredOrder.get(left.comm_type) - declaredOrder.get(right.comm_type));
+    if (restricted.length === 0) {
+        _setCompilePresetConnectionWarning(`预设声明的连接方式与当前 MCU 能力不匹配，已回退显示 MCU 支持的全部方式。`);
+        return options;
+    }
+
+    const availableTypes = new Set(restricted.map(option => option.comm_type));
+    const unavailable = [...declaredTypes].filter(type => !availableTypes.has(type));
+    if (unavailable.length > 0) {
+        const labels = { usb: 'USB', usbcanbridge: 'USB桥接CAN', can: 'CAN', serial: 'UART' };
+        _setCompilePresetConnectionWarning(`部分声明方式不受当前 MCU 支持：${unavailable.map(type => labels[type] || type).join('、')}`);
+    } else {
+        _setCompilePresetConnectionWarning('');
+    }
+    return restricted;
+}
+
 // 编译模式切换
-function onCompileModeChange() {
+async function onCompileModeChange() {
     const modeEl = document.querySelector('input[name="compileMode"]:checked');
     const mode = modeEl ? modeEl.value : 'preset';
     const presetSection = document.getElementById('compilePresetSection');
@@ -182,12 +372,27 @@ function onCompileModeChange() {
         _clearSelectedCompileBoard();
         presetSection.style.display = 'none';
         customSection.style.display = 'block';
-        loadCompileMcuPlatforms();
+        _compilePresetAdvancedExpanded = false;
+        _applyCompilePresetView();
+        currentCompileMcu = null;
+        document.getElementById('compileMcuDetails').style.display = 'none';
+        await loadCompileMcuPlatforms();
+
+        // 默认平台加载完成后，浏览器会自动选中首个 MCU。此时必须执行与
+        // 手动选择型号相同的联动，才能展开并填充 MCU 详细参数。
+        const currentMode = document.querySelector('input[name="compileMode"]:checked')?.value;
+        const modelSelect = document.getElementById('compileMcuModel');
+        if (currentMode === 'custom' && modelSelect?.value) {
+            await onCompileMcuModelChange();
+        }
+        return;
     }
 
     // 重置
     currentCompileMcu = null;
     document.getElementById('compileMcuDetails').style.display = 'none';
+    _compilePresetAdvancedExpanded = false;
+    _applyCompilePresetView();
 }
 
 // 加载 MCU 平台列表
@@ -198,8 +403,9 @@ function loadCompileMcuPlatforms(autoDefault = true) {
     // 默认选中 STM32
     if (autoDefault && compileMcuDatabase['STM32']) {
         select.value = 'STM32';
-        onCompileMcuPlatformChange();
+        return onCompileMcuPlatformChange();
     }
+    return Promise.resolve();
 }
 
 // MCU 平台选择变化
@@ -296,11 +502,9 @@ async function displayCompileMcuDetails(data) {
         crystalOptionHtml += `<option value="${escapeHtml(freq)}">${escapeHtml(label)}</option>`;
     });
     crystalSelect.innerHTML = crystalOptionHtml;
-    if (mcu.id === 'rp2040' || mcu.id === 'rp2350' || (mcu.crystals || []).length <= 1) {
-        crystalGroup.style.display = 'none';
-    } else {
-        crystalGroup.style.display = 'block';
-    }
+    const showCrystal = mcu.id !== 'rp2040' && mcu.id !== 'rp2350' && (mcu.crystals || []).length > 1;
+    crystalGroup.dataset.mcuDisplay = showCrystal ? 'block' : 'none';
+    crystalGroup.style.display = showCrystal ? 'block' : 'none';
 
     // BL 偏移选项
     const blSelect = document.getElementById('compileBlOffset');
@@ -344,6 +548,7 @@ async function displayCompileMcuDetails(data) {
     }
 
     document.getElementById('compileMcuDetails').style.display = 'block';
+    _applyCompilePresetView();
 }
 
 // MCU ID -> 平台键名映射 (用于从 communication-options API 获取对应平台数据)
@@ -383,6 +588,7 @@ const MCU_PLATFORM_MAP = {
 async function loadCommunicationOptions(mcu, platformKeyFromApi) {
     const connSelect = document.getElementById('compileConnection');
     connSelect.innerHTML = '<option value="">加载中...</option>';
+    connSelect.disabled = true;
 
     // 隐藏子选项区域
     const canBridgeOptions = document.getElementById('compileCanBridgeOptions');
@@ -407,21 +613,22 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
         let commOptions = [];
         _bridgeCanOptions = [];
         _rp2040CanGpio = null;
-        _h503NestedOptions = {};
+        _communicationSubchoices = [];
+        _communicationProcessorCapabilities = {};
+        _communicationSubchoiceValues = {};
 
         if (platformData && platformData.communication_options) {
             commOptions = platformData.communication_options;
             // 存储桥接CAN引脚选项，按MCU过滤
             if (platformData.bridge_can) {
                 _bridgeCanOptions = platformData.bridge_can.filter(opt => {
-                    if (!opt.compatible_processors || opt.compatible_processors.length === 0) return true;
-                    return opt.compatible_processors.includes(mcuId);
+                    const compatible = opt.compatible_processors || [];
+                    if (opt.compatibility_resolved === true) return compatible.includes(mcuId);
+                    return compatible.length > 0 && compatible.includes(mcuId);
                 });
-                if (_bridgeCanOptions.length === 0) {
-                    _bridgeCanOptions = platformData.bridge_can;
-                }
             }
-            _h503NestedOptions = platformData.h503_nested_options || {};
+            _communicationSubchoices = platformData.communication_subchoices || [];
+            _communicationProcessorCapabilities = platformData.processor_capabilities || {};
             // RP2040 CAN GPIO配置
             if (platformKey === 'rp2040' && (platformData.has_canbus || platformData.has_usbcanbus)) {
                 _rp2040CanGpio = {
@@ -434,13 +641,12 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
 
         // 过滤兼容当前MCU的选项
         let filtered = commOptions.filter(opt => {
-            if (!opt.compatible_processors || opt.compatible_processors.length === 0) return true;
-            return opt.compatible_processors.includes(mcuId);
+            const compatible = opt.compatible_processors || [];
+            if (opt.compatibility_resolved === true) return compatible.includes(mcuId);
+            return compatible.length > 0 && compatible.includes(mcuId);
         });
-        if (filtered.length === 0 && commOptions.length > 0) {
-            filtered = commOptions;
-        }
 
+        filtered = _filterPresetCommunicationOptions(filtered);
         _commAllOptions = filtered;
         _commGroupedOptions = {};
         filtered.forEach(opt => {
@@ -451,9 +657,15 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
 
         // 第一级：通信类型
         const typeLabels = { 'usb': 'USB', 'serial': 'Serial/UART', 'can': 'CAN', 'usbcanbridge': 'USB转CAN桥接' };
-        connSelect.innerHTML = '<option value="">-- 选择通信类型 --</option>';
-        const typeOpts = Object.keys(_commGroupedOptions).map(type => `<option value="${escapeHtml(type)}">${escapeHtml(typeLabels[type] || type)}</option>`).join('');
+        connSelect.innerHTML = filtered.length
+            ? '<option value="">-- 选择通信类型 --</option>'
+            : '<option value="">-- 当前 MCU 没有已确认的连接方式 --</option>';
+        const typeOpts = Object.keys(_commGroupedOptions).map(type => {
+            const label = _presetCommunicationTypeLabel(type, typeLabels[type] || type);
+            return `<option value="${escapeHtml(type)}">${escapeHtml(label)}</option>`;
+        }).join('');
         connSelect.innerHTML += typeOpts;
+        connSelect.disabled = filtered.length === 0;
         // 默认选中 USB（如果可用，但从预设加载时跳过，由 _autoSelectPresetConnection 处理）
         if (_commGroupedOptions['usb'] && !window._fromPreset) {
             connSelect.value = 'usb';
@@ -466,9 +678,11 @@ async function loadCommunicationOptions(mcu, platformKeyFromApi) {
 }
 
 function _fallbackConnectionOptions(connSelect) {
-    connSelect.innerHTML = '<option value="">-- 选择通信类型 --</option><option value="usb">USB</option><option value="serial">Serial/UART</option><option value="can">CAN</option><option value="usbcanbridge">USB转CAN桥接</option>';
+    connSelect.innerHTML = '<option value="">-- 连接能力加载失败，请检查 Klipper Kconfig --</option>';
+    connSelect.disabled = true;
     _commGroupedOptions = {};
     _commAllOptions = [];
+    _setCompilePresetConnectionWarning('连接能力加载失败，未回退到未经确认的平台选项。');
 }
 
 // 连接方式变化处理（两级选择第二级 + CAN引脚）
@@ -484,8 +698,7 @@ function onCompileConnectionChange() {
     if (pinContainer) pinContainer.remove();
     let bitrateContainer = document.getElementById('compileCanBitrateSub');
     if (bitrateContainer) bitrateContainer.remove();
-    let h503Container = document.getElementById('compileH503NestedSub');
-    if (h503Container) h503Container.remove();
+    document.getElementById('compileCommunicationSubchoices')?.remove();
 
     if (!commType || !_commGroupedOptions[commType]) return;
 
@@ -538,7 +751,8 @@ function onCompileConnectionChange() {
     if (commType === 'can' || commType === 'usbcanbridge') {
         _showCanBitrateSelector(connGroup);
     }
-    _renderH503NestedOptions();
+    _applyCompilePresetConnectionProfile(commType);
+    _renderCommunicationSubchoices();
     const selectedDev = _lastDetectedCanDevicesByUuid[String(document.getElementById('flashDeviceId')?.value || '').toLowerCase()];
     _renderFlashDeviceCompare(selectedDev || null);
 }
@@ -557,7 +771,7 @@ function _showBridgeCanPinSelector(connGroup) {
     pinContainer.className = 'form-group';
     pinContainer.style.marginTop = '10px';
 
-    pinContainer.innerHTML = `<label>CAN总线引脚</label><select id="compileBridgeCanPin" class="form-control" onchange="_renderH503NestedOptions()"></select>`;
+    pinContainer.innerHTML = `<label>CAN总线引脚</label><select id="compileBridgeCanPin" class="form-control" onchange="onCompileBridgeCanPinChange()"></select>`;
 
     _insertAfterCompileConnectionOptions(connGroup, pinContainer);
 
@@ -1164,114 +1378,160 @@ async function onFlashDeviceIdChange() {
 
 function _clearSelectedCompileBoard() {
     window._selectedCompileBoardConfig = null;
+    _compilePresetAdvancedExpanded = false;
     _lastBlFiles = [];
     const blFileSelect = document.getElementById('blFileSelect');
     if (blFileSelect) {
         blFileSelect.innerHTML = '<option value="">-- 选择 BL 文件 --</option>';
     }
+    resetBlDeviceDetection();
+    _applyCompilePresetView();
 }
 
 function onCompileConnectionDetailChange() {
-    _renderH503NestedOptions();
+    _communicationSubchoiceValues = {};
+    _renderCommunicationSubchoices();
 }
 
-function _h503Options(group) {
-    return Array.isArray(_h503NestedOptions?.[group]) ? _h503NestedOptions[group] : [];
+function onCompileBridgeCanPinChange() {
+    _communicationSubchoiceValues = {};
+    _renderCommunicationSubchoices();
 }
 
-function _h503SelectHtml(id, label, options, onchange='') {
-    const attrs = onchange ? ` onchange="${escapeHtml(onchange)}"` : '';
-    const optionHtml = options.map(opt =>
-        `<option value="${escapeHtml(opt.config_symbol)}">${escapeHtml(opt.display)}</option>`
-    ).join('');
-    return `<div style="flex:1;min-width:150px;"><small>${escapeHtml(label)}</small>` +
-        `<select id="${escapeHtml(id)}" class="form-control"${attrs}>${optionHtml}</select></div>`;
-}
-
-function _populateH503SerialPins() {
-    const peripheral = document.getElementById('compileH503SerialPeripheral')?.value || '';
-    for (const [id, group] of [
-        ['compileH503SerialRx', 'serial_rx'],
-        ['compileH503SerialTx', 'serial_tx'],
-    ]) {
-        const select = document.getElementById(id);
-        if (!select) continue;
-        const previous = select.value;
-        const options = _h503Options(group).filter(opt => !opt.parent || opt.parent === peripheral);
-        select.innerHTML = options.map(opt =>
-            `<option value="${escapeHtml(opt.config_symbol)}">${escapeHtml(opt.display)}</option>`
-        ).join('');
-        if (previous && [...select.options].some(opt => opt.value === previous)) {
-            select.value = previous;
-        }
+function _evalCompileKconfigCondition(condition, activeSymbols) {
+    const expression = String(condition || '').trim();
+    if (!expression) return true;
+    const tokens = expression.match(/&&|\|\||!|\(|\)|[A-Za-z_][A-Za-z0-9_]*/g) || [];
+    if (tokens.join('').toUpperCase() !== expression.replace(/\s+/g, '').toUpperCase()) {
+        return false;
     }
+    let position = 0;
+    const parsePrimary = () => {
+        const token = tokens[position++];
+        if (token === '(') {
+            const value = parseOr();
+            if (tokens[position] !== ')') return false;
+            position += 1;
+            return value;
+        }
+        if (!token) return false;
+        if (token.toLowerCase() === 'y' || token === 'LOW_LEVEL_OPTIONS') return true;
+        if (token.toLowerCase() === 'n') return false;
+        return activeSymbols.has(token);
+    };
+    const parseUnary = () => {
+        if (tokens[position] === '!') {
+            position += 1;
+            return !parseUnary();
+        }
+        return parsePrimary();
+    };
+    const parseAnd = () => {
+        let value = parseUnary();
+        while (tokens[position] === '&&') {
+            position += 1;
+            const right = parseUnary();
+            value = value && right;
+        }
+        return value;
+    };
+    const parseOr = () => {
+        let value = parseAnd();
+        while (tokens[position] === '||') {
+            position += 1;
+            const right = parseAnd();
+            value = value || right;
+        }
+        return value;
+    };
+    const result = parseOr();
+    return position === tokens.length && result;
 }
 
-function _renderH503NestedOptions() {
-    document.getElementById('compileH503NestedSub')?.remove();
+function _compileCommunicationActiveSymbols() {
     const mcuId = String(currentCompileMcu?.mcu?.id || '').toUpperCase();
-    if (mcuId !== 'STM32H503') return;
+    const active = new Set(_communicationProcessorCapabilities[mcuId] || []);
+    active.add('LOW_LEVEL_OPTIONS');
 
-    const commType = document.getElementById('compileConnection')?.value || '';
     const commSymbol = document.getElementById('compileConnectionDetail')?.value || '';
+    if (commSymbol) {
+        active.add(_normalizeCompileSymbol(commSymbol));
+        const option = _commAllOptions.find(row =>
+            _normalizeCompileSymbol(row.config_symbol) === _normalizeCompileSymbol(commSymbol)
+        );
+        if (option?.select) active.add(_normalizeCompileSymbol(option.select));
+    }
     const bridgeSymbol = document.getElementById('compileBridgeCanPin')?.value || '';
-    const isSerial = commSymbol === 'STM32_SERIAL_H503';
-    const isFlexibleCan = commSymbol === 'STM32_MMENU_CANBUS_H503'
-        || (commType === 'usbcanbridge' && bridgeSymbol === 'STM32_CMENU_CANBUS_H503');
-    if (!isSerial && !isFlexibleCan) return;
+    if (bridgeSymbol) active.add(_normalizeCompileSymbol(bridgeSymbol));
+    return active;
+}
 
+function _renderCommunicationSubchoices() {
+    document.getElementById('compileCommunicationSubchoices')?.remove();
+    if (!_communicationSubchoices.length) return false;
+
+    const connGroup = document.getElementById('compileConnection')?.closest('.form-group');
+    if (!connGroup) return false;
+    const active = _compileCommunicationActiveSymbols();
+    const rendered = [];
+
+    for (const choice of _communicationSubchoices) {
+        const options = (choice.options || []).filter(option =>
+            _evalCompileKconfigCondition(option.condition, active)
+        );
+        if (!options.length || !_evalCompileKconfigCondition(choice.condition, active)) continue;
+
+        const previous = _communicationSubchoiceValues[choice.id];
+        const selected = options.some(option => option.config_symbol === previous)
+            ? previous
+            : options[0].config_symbol;
+        _communicationSubchoiceValues[choice.id] = selected;
+        active.add(_normalizeCompileSymbol(selected));
+        const selectedOption = options.find(option => option.config_symbol === selected);
+        if (selectedOption?.select) active.add(_normalizeCompileSymbol(selectedOption.select));
+        rendered.push({ choice, options, selected });
+    }
+
+    if (!rendered.length) return false;
     const container = document.createElement('div');
-    container.id = 'compileH503NestedSub';
+    container.id = 'compileCommunicationSubchoices';
     container.className = 'form-group';
     container.style.marginTop = '10px';
-    if (isSerial) {
-        const peripherals = _h503Options('serial_peripheral');
-        container.innerHTML = '<label>H503 UART 配置</label><div style="display:flex;gap:10px;flex-wrap:wrap;">' +
-            _h503SelectHtml('compileH503SerialPeripheral', '外设', peripherals, '_populateH503SerialPins()') +
-            _h503SelectHtml('compileH503SerialRx', 'RX 引脚', []) +
-            _h503SelectHtml('compileH503SerialTx', 'TX 引脚', []) + '</div>';
-    } else {
-        const forBridge = commType === 'usbcanbridge';
-        const filterOption = opt => !forBridge || opt.available_for_usbcanbridge !== false;
-        const rxOptions = _h503Options('can_rx').filter(filterOption);
-        const txOptions = _h503Options('can_tx').filter(filterOption);
-        container.innerHTML = '<label>H503 FDCAN1 配置</label><div style="display:flex;gap:10px;flex-wrap:wrap;">' +
-            _h503SelectHtml('compileH503CanRx', 'RX 引脚', rxOptions) +
-            _h503SelectHtml('compileH503CanTx', 'TX 引脚', txOptions) + '</div>';
-    }
-    const anchor = document.getElementById('compileCanPinSub')
-        || document.getElementById('compileConnectionSub');
-    if (!anchor?.parentNode) return;
+    container.innerHTML = rendered.map(({ choice, options, selected }) => {
+        const optionHtml = options.map(option =>
+            `<option value="${escapeHtml(option.config_symbol)}"${option.config_symbol === selected ? ' selected' : ''}>${escapeHtml(option.display)}</option>`
+        ).join('');
+        return `<div style="margin-top:8px;"><label>${escapeHtml(choice.prompt || '通信子选项')}</label>` +
+            `<select class="form-control compileCommunicationSubchoice" data-choice-id="${escapeHtml(choice.id)}" onchange="onCompileCommunicationSubchoiceChange(this)">${optionHtml}</select></div>`;
+    }).join('');
+    const anchor = document.getElementById('compileCanPinSub') ||
+        document.getElementById('compileConnectionSub') || connGroup;
     anchor.parentNode.insertBefore(container, anchor.nextSibling);
-    if (isSerial) _populateH503SerialPins();
+    return true;
 }
 
-function _getH503ExtraSymbols() {
-    const ids = [
-        'compileH503SerialPeripheral', 'compileH503SerialRx', 'compileH503SerialTx',
-        'compileH503CanRx', 'compileH503CanTx',
-    ];
-    return ids.map(id => document.getElementById(id)?.value || '').filter(Boolean);
+function onCompileCommunicationSubchoiceChange(select) {
+    const choiceId = select?.dataset?.choiceId;
+    if (choiceId) _communicationSubchoiceValues[choiceId] = select.value;
+    _renderCommunicationSubchoices();
 }
 
-function _restoreH503ExtraSymbols(symbols) {
-    if (!Array.isArray(symbols) || symbols.length === 0) return;
-    const values = new Set(symbols.map(value => String(value || '').replace(/^CONFIG_/, '')));
-    const peripheral = _h503Options('serial_peripheral').find(opt => values.has(opt.config_symbol));
-    const peripheralSelect = document.getElementById('compileH503SerialPeripheral');
-    if (peripheral && peripheralSelect) {
-        peripheralSelect.value = peripheral.config_symbol;
-        _populateH503SerialPins();
+function _getCommunicationExtraSymbols() {
+    return [...document.querySelectorAll('.compileCommunicationSubchoice')]
+        .map(select => select.value)
+        .filter(Boolean);
+}
+
+function _restoreCommunicationExtraSymbols(symbols) {
+    const normalized = new Set((Array.isArray(symbols) ? symbols : []).map(_normalizeCompileSymbol));
+    _communicationSubchoiceValues = {};
+    for (const choice of _communicationSubchoices) {
+        const selected = (choice.options || []).find(option =>
+            normalized.has(_normalizeCompileSymbol(option.config_symbol))
+        );
+        if (selected) _communicationSubchoiceValues[choice.id] = selected.config_symbol;
     }
-    for (const id of [
-        'compileH503SerialRx', 'compileH503SerialTx',
-        'compileH503CanRx', 'compileH503CanTx',
-    ]) {
-        const select = document.getElementById(id);
-        if (!select) continue;
-        const match = [...select.options].find(opt => values.has(opt.value));
-        if (match) select.value = match.value;
-    }
+    _renderCommunicationSubchoices();
 }
 
 // 预设厂家选择变化
@@ -1364,6 +1624,9 @@ async function onCompilePresetModelChange() {
 
     const config = JSON.parse(option.dataset.config);
     window._selectedCompileBoardConfig = config;
+    _compilePresetAdvancedExpanded = false;
+    document.getElementById('compileMcuDetails').style.display = 'none';
+    _setCompilePresetConnectionWarning('');
     const presetName = config.name || option.textContent;
 
     // 设置烧录模式：默认选中 default_flash，但保留所有选项可编辑
@@ -1393,10 +1656,10 @@ async function onCompilePresetModelChange() {
         }
     }
 
-    // 保留预设模式与板卡身份，同时展示解析后的完整参数供用户微调。
+    // 保留预设模式与板卡身份；默认仅展示声明的连接方式，高级参数按需展开。
     document.querySelector('input[name="compileMode"][value="preset"]').checked = true;
     document.getElementById('compilePresetSection').style.display = 'block';
-    document.getElementById('compileCustomSection').style.display = 'block';
+    _applyCompilePresetView();
 
     // 加载MCU平台列表
     loadCompileMcuPlatforms(false);
@@ -1471,47 +1734,44 @@ async function onCompilePresetModelChange() {
     const pinInput = document.getElementById('compileStartupPin');
     if (pinInput) pinInput.value = config.boot_pins || '';
 
-    // 自动选择通信方式
-    if (config.default_connection) {
-        _autoSelectPresetConnection(config);
-    }
+    // 自动选择默认通信方式；未声明默认值时选择首个板卡可用方式。
+    _autoSelectPresetConnection(config);
 
     const blSection = document.getElementById('blFlashSection');
     if (blSection && blSection.style.display !== 'none') {
         await loadBlFiles();
     }
 
-    showSuccess(`已从预设「${presetName}」加载完整配置，所有参数已自动填充，可修改后编译`);
+    _applyCompilePresetView();
+    showSuccess(`已加载预设「${presetName}」，连接方式已按板卡声明过滤；需要调整底层参数时可展开高级选项`);
 }
 
 // 自动匹配预设的通信方式到两级通信选择
 function _autoSelectPresetConnection(config) {
-    const connStr = (config.default_connection || '').toUpperCase();
     const connSelect = document.getElementById('compileConnection');
     if (!connSelect) return;
 
-    // 判断通信类型
-    let commType = '';
-    if (connStr.includes('BRIDGE') || connStr.includes('USB转CAN') || connStr.includes('USBCANBUS') ||
-        (connStr.includes('USB') && connStr.includes('CAN') && !connStr.includes('(ON'))) {
-        commType = 'usbcanbridge';
-    } else if (connStr.includes('CAN')) {
-        commType = 'can';
-    } else if (connStr.includes('USB') || connStr.includes('USBSERIAL')) {
-        commType = 'usb';
-    } else if (connStr.includes('SERIAL') || connStr.includes('UART')) {
-        commType = 'serial';
-    }
-
-    if (!commType) return;
+    const commType = _normalizePresetConnectionType(config.default_connection);
 
     // 选择第一级：通信类型
     let found = false;
-    for (let i = 0; i < connSelect.options.length; i++) {
-        if (connSelect.options[i].value === commType) {
-            connSelect.value = commType;
-            found = true;
-            break;
+    if (commType) {
+        for (let i = 0; i < connSelect.options.length; i++) {
+            if (connSelect.options[i].value === commType) {
+                connSelect.value = commType;
+                found = true;
+                break;
+            }
+        }
+    }
+    if (!found && connSelect.options.length > 1) {
+        connSelect.selectedIndex = 1;
+        found = true;
+        if (config.default_connection) {
+            _setCompilePresetConnectionWarning(
+                `默认连接方式「${config.default_connection}」不可用，已选择首个已声明方式。`,
+                true
+            );
         }
     }
     if (!found) return;
@@ -1667,8 +1927,7 @@ async function loadCurrentCompileConfig() {
         if (current.bridge_can_config) {
             _selectCompileSymbol(document.getElementById('compileBridgeCanPin'), current.bridge_can_config);
         }
-        _renderH503NestedOptions();
-        _restoreH503ExtraSymbols(current.comm_extra_symbols);
+        _restoreCommunicationExtraSymbols(current.comm_extra_symbols);
         if (current.canbus_frequency) {
             _setSelectedCanBitrate(current.canbus_frequency);
         }
@@ -1727,6 +1986,7 @@ async function compileFirmware() {
     compileParams.crystal = document.getElementById('compileCrystal').value;
     compileParams.bl_offset = document.getElementById('compileBlOffset').value;
     compileParams.startup_pin = document.getElementById('compileStartupPin').value;
+    compileParams.flash_mode = document.getElementById('flashMode')?.value || '';
 
     const commType = document.getElementById('compileConnection').value;
     if (!commType) {
@@ -1758,17 +2018,9 @@ async function compileFirmware() {
         if (bridgePinSelect?.value) compileParams.bridge_can_config = bridgePinSelect.value;
     }
 
-    const h503ExtraSymbols = _getH503ExtraSymbols();
-    const needsH503Serial = compileParams.comm_config_symbol === 'STM32_SERIAL_H503';
-    const needsH503Can = compileParams.comm_config_symbol === 'STM32_MMENU_CANBUS_H503'
-        || compileParams.bridge_can_config === 'STM32_CMENU_CANBUS_H503';
-    const expectedH503Symbols = needsH503Serial ? 3 : needsH503Can ? 2 : 0;
-    if (expectedH503Symbols && h503ExtraSymbols.length !== expectedH503Symbols) {
-        showError(needsH503Serial ? '请选择 H503 串口外设、RX 与 TX 引脚' : '请选择 H503 FDCAN1 RX 与 TX 引脚');
-        return;
-    }
-    if (h503ExtraSymbols.length) {
-        compileParams.comm_extra_symbols = h503ExtraSymbols;
+    const communicationExtraSymbols = _getCommunicationExtraSymbols();
+    if (communicationExtraSymbols.length) {
+        compileParams.comm_extra_symbols = communicationExtraSymbols;
     }
 
     if (commType === 'can' || commType === 'usbcanbridge') {
@@ -2627,6 +2879,7 @@ function toggleBlFlashSection() {
 
 // 加载 BL 文件列表
 async function loadBlFiles() {
+    resetBlDeviceDetection();
     try {
         const board = window._selectedCompileBoardConfig || {};
         const params = new URLSearchParams();
@@ -2743,13 +2996,352 @@ async function onBlFileChange() {
     const selected = _lastBlFiles.find(file => file.path === select.value);
     if (!selected) {
         await loadBlAddressOptions();
+        refreshBlDeviceCompatibilityOptions();
         return;
     }
     const toolEl = document.getElementById('blFlashTool');
-    if (toolEl && selected.recommended_tool) {
+    if (toolEl && selected.recommended_tool &&
+            [...toolEl.options].some(option => option.value === selected.recommended_tool)) {
         toolEl.value = selected.recommended_tool;
     }
     await loadBlAddressOptions();
+    refreshBlDeviceCompatibilityOptions();
+}
+
+function _normalizeBlPlatformKey(value) {
+    const raw = String(value || '').trim().toLowerCase().replace(/[_-]/g, '');
+    if (raw.includes('rp2350')) return 'rp2350';
+    if (raw.includes('rp2040') || raw === 'rp2') return 'rp2040';
+    if (raw.includes('stm32')) return 'stm32';
+    return raw;
+}
+
+function _selectedBlFileMeta() {
+    const select = document.getElementById('blFileSelect');
+    const path = select?.value || '';
+    const known = _lastBlFiles.find(file => file.path === path) || {};
+    const match = String(path).match(/\.[A-Za-z0-9]+$/);
+    return {
+        ...known,
+        path,
+        ext: String(known.ext || match?.[0] || '').toLowerCase(),
+    };
+}
+
+function _selectedBlContext(toolOverride = '', deviceOverride = null) {
+    const addressSelect = document.getElementById('blFlashAddress');
+    const addressOption = addressSelect?.options?.[addressSelect.selectedIndex];
+    const board = window._selectedCompileBoardConfig || {};
+    const tool = toolOverride || document.getElementById('blFlashTool')?.value || '';
+    const deviceSelect = document.getElementById('blDeviceSelect');
+    const device = deviceOverride || _lastBlDetectedDevices.find(item => item.id === deviceSelect?.value) || null;
+    const platformKey = _normalizeBlPlatformKey(
+        addressOption?.dataset?.platformKey ||
+        currentCompileMcu?.platform_key || currentCompileMcu?.platform ||
+        board.platform || ''
+    );
+    return {
+        tool,
+        device,
+        file: _selectedBlFileMeta(),
+        platformKey,
+        address: addressSelect?.value || '',
+        mcuId: currentCompileMcu?.mcu?.id || board.mcu || '',
+    };
+}
+
+function _buildBlCompatibility(toolOverride = '', deviceOverride = null) {
+    const context = _selectedBlContext(toolOverride, deviceOverride);
+    const { tool, device, file, platformKey, address, mcuId } = context;
+    const errors = [];
+    const toolStatus = _lastBlToolStatus[tool];
+
+    if (!file.path) errors.push('请选择 BL 文件');
+    if (!tool) errors.push('请选择烧录工具');
+    if (!device) errors.push('请先检测并选择 BL 烧录设备');
+    if (toolStatus && toolStatus.available === false) {
+        errors.push(`${tool} 未安装或不可用`);
+    }
+    if (device && Array.isArray(device.supported_tools) && !device.supported_tools.includes(tool)) {
+        errors.push(`所选设备不支持 ${tool}`);
+    }
+
+    if (tool === 'rp2040_flash') {
+        if (device && device.type !== 'uf2') errors.push('rp2040_flash 必须选择 BOOTSEL 设备');
+        if (!['rp2040', 'rp2350'].includes(platformKey)) errors.push('当前 MCU 平台不是 RP2040/RP2350');
+        if (file.path && file.ext !== '.uf2') errors.push('BOOTSEL 烧录必须使用 .uf2 BL 文件');
+    } else if (tool === 'dfu-util') {
+        if (device && device.type !== 'dfu') errors.push('dfu-util 必须选择 DFU 设备');
+        if (platformKey !== 'stm32') errors.push('DFU BL 烧录仅支持 STM32 平台');
+        if (file.path && file.ext !== '.bin') errors.push('DFU BL 烧录必须使用 .bin 文件');
+    } else if (tool === 'st-flash') {
+        if (device && device.type !== 'stlink') errors.push('st-flash 必须选择 ST-Link');
+        if (platformKey !== 'stm32') errors.push('st-flash 仅支持 STM32 平台');
+        if (file.path && file.ext !== '.bin') errors.push('st-flash 必须使用 .bin 文件');
+    } else if (tool === 'openocd') {
+        if (device && device.type !== 'stlink') errors.push('OpenOCD 必须选择 ST-Link');
+        if (platformKey !== 'stm32') errors.push('OpenOCD BL 烧录仅支持 STM32 平台');
+        if (file.path && !['.bin', '.hex'].includes(file.ext)) errors.push('OpenOCD 仅支持 .bin 或 .hex 文件');
+        const normalizedMcu = String(mcuId || '').toLowerCase().replace(/[_-]/g, '');
+        if (mcuId && !/^stm32(?:f[0-47]|f7|g[04]|h7|l[04])/.test(normalizedMcu)) {
+            errors.push(`OpenOCD 不支持自动匹配当前 MCU：${mcuId}`);
+        }
+    }
+
+    if (tool !== 'rp2040_flash' && !/^0x[0-9a-f]+$/i.test(address)) {
+        errors.push('BL 烧录地址无效');
+    }
+    return {...context, errors, ok: errors.length === 0};
+}
+
+function _setBlDeviceHint(message, kind = 'info') {
+    const hint = document.getElementById('blDeviceDetectHint');
+    if (!hint) return;
+    const colors = {
+        success: ['var(--success-color)', 'rgba(76,175,80,.10)'],
+        warning: ['var(--warning-color)', 'rgba(255,193,7,.12)'],
+        error: ['var(--danger-color)', 'rgba(244,67,54,.10)'],
+        info: ['var(--info-color)', 'rgba(33,150,243,.10)'],
+    };
+    const [border, background] = colors[kind] || colors.info;
+    hint.style.display = 'block';
+    hint.style.borderLeftColor = border;
+    hint.style.background = background;
+    hint.textContent = message;
+}
+
+function _applyBlToolAvailability() {
+    const toolSelect = document.getElementById('blFlashTool');
+    if (!toolSelect) return;
+    [...toolSelect.options].forEach(option => {
+        if (!option.dataset.baseLabel) option.dataset.baseLabel = option.textContent;
+        const status = _lastBlToolStatus[option.value];
+        option.disabled = Boolean(status && status.available === false);
+        option.textContent = option.dataset.baseLabel + (option.disabled ? '（未安装）' : '');
+    });
+}
+
+function resetBlDeviceDetection(message = '点击“检测”扫描 DFU 与 BOOTSEL 设备') {
+    _blDeviceScanRequestId += 1;
+    _lastBlDetectedDevices = [];
+    _lastBlToolStatus = {};
+    _blDetectionState = {status: 'idle', message};
+    const select = document.getElementById('blDeviceSelect');
+    if (select) select.innerHTML = '<option value="">-- 点击检测设备 --</option>';
+    const toolSelect = document.getElementById('blFlashTool');
+    if (toolSelect) {
+        [...toolSelect.options].forEach(option => {
+            if (option.dataset.baseLabel) option.textContent = option.dataset.baseLabel;
+            option.disabled = false;
+        });
+    }
+    renderBlFlashCompatibility();
+}
+
+function _compatibleBlToolsForDevice(device) {
+    const file = _selectedBlFileMeta();
+    const toolSelect = document.getElementById('blFlashTool');
+    const currentTool = toolSelect?.value || '';
+    const visibleTools = new Set([...toolSelect?.options || []].map(option => option.value));
+    const preferred = [file.recommended_tool, currentTool, ...(device.supported_tools || [])].filter(Boolean);
+    return [...new Set(preferred)].filter(tool =>
+        visibleTools.has(tool) && (device.supported_tools || []).includes(tool) &&
+        _buildBlCompatibility(tool, device).ok
+    );
+}
+
+function _renderDetectedBlDevices() {
+    const select = document.getElementById('blDeviceSelect');
+    if (!select) return [];
+    select.innerHTML = '<option value="">-- 选择检测到的设备 --</option>';
+    const usable = [];
+    for (const device of _lastBlDetectedDevices) {
+        const compatibleTools = _compatibleBlToolsForDevice(device);
+        const typeLabel = device.type === 'dfu' ? 'DFU' : device.type === 'uf2' ? 'BOOTSEL' : 'ST-Link';
+        const suffix = compatibleTools.length ? compatibleTools.join('/') : '与当前配置不兼容';
+        const option = new Option(`[${typeLabel}] ${device.name} — ${suffix}`, device.id);
+        option.disabled = compatibleTools.length === 0;
+        select.appendChild(option);
+        if (compatibleTools.length) usable.push({device, tools: compatibleTools});
+    }
+    return usable;
+}
+
+function refreshBlDeviceCompatibilityOptions() {
+    const select = document.getElementById('blDeviceSelect');
+    if (!select || _lastBlDetectedDevices.length === 0) {
+        renderBlFlashCompatibility();
+        return;
+    }
+    const previous = select.value;
+    const usable = _renderDetectedBlDevices();
+    const previousOption = [...select.options].find(option => option.value === previous);
+    select.value = previousOption && !previousOption.disabled ? previous : '';
+    if (select.value) {
+        const selected = usable.find(item => item.device.id === select.value);
+        const toolSelect = document.getElementById('blFlashTool');
+        if (selected?.tools?.length && toolSelect && !selected.tools.includes(toolSelect.value)) {
+            toolSelect.value = selected.tools[0];
+        }
+    }
+    renderBlFlashCompatibility();
+}
+
+async function detectBlFlashDevices() {
+    if (_blFlashRequestActive) {
+        showError('BL 正在烧录，暂时不能重新检测设备');
+        return;
+    }
+    const requestId = ++_blDeviceScanRequestId;
+    const button = document.getElementById('detectBlDevicesBtn');
+    const select = document.getElementById('blDeviceSelect');
+    if (!button || !select) return;
+    button.disabled = true;
+    button.textContent = '⏳ 检测中';
+    select.innerHTML = '<option value="">-- 正在检测 --</option>';
+    _blDetectionState = {status: 'scanning', message: '正在检测烧录工具与设备…'};
+    renderBlFlashCompatibility();
+
+    try {
+        const [deviceResult, programmerResult] = await Promise.allSettled([
+            fetch('/api/firmware/detect', {cache: 'no-store'}).then(async response => {
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || `设备检测 HTTP ${response.status}`);
+                return data;
+            }),
+            fetch('/api/firmware/bl/detect', {cache: 'no-store'}).then(async response => {
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.success) throw new Error(data.error || `烧录器检测 HTTP ${response.status}`);
+                return data;
+            }),
+        ]);
+        if (requestId !== _blDeviceScanRequestId) return;
+
+        const errors = [];
+        const devices = [];
+        if (programmerResult.status === 'fulfilled') {
+            _lastBlToolStatus = programmerResult.value.tools || {};
+            for (const programmer of programmerResult.value.programmers || []) {
+                const visibleTools = new Set([
+                    ...document.getElementById('blFlashTool')?.options || []
+                ].map(option => option.value));
+                if ((programmer.supported_tools || []).some(tool => visibleTools.has(tool))) {
+                    devices.push({...programmer, type: 'stlink'});
+                }
+            }
+        } else {
+            const toolError = programmerResult.reason?.message || String(programmerResult.reason || '未知错误');
+            _lastBlToolStatus = Object.fromEntries(
+                ['dfu-util', 'rp2040_flash', 'st-flash', 'openocd'].map(tool => [
+                    tool, {available: false, error: toolError}
+                ])
+            );
+            errors.push(`烧录工具检测失败：${toolError}`);
+        }
+        if (deviceResult.status === 'fulfilled') {
+            for (const item of deviceResult.value.devices || []) {
+                const id = String(item.id || '');
+                if (item.type === 'dfu' || id.startsWith('dfu:')) {
+                    devices.push({...item, type: 'dfu', supported_tools: ['dfu-util']});
+                } else if (id === 'rp2040_boot') {
+                    devices.push({...item, type: 'uf2', supported_tools: ['rp2040_flash']});
+                }
+            }
+        } else {
+            errors.push(`USB 启动设备检测失败：${deviceResult.reason?.message || deviceResult.reason}`);
+        }
+
+        const seen = new Set();
+        _lastBlDetectedDevices = devices.filter(device => {
+            if (!device.id || seen.has(device.id)) return false;
+            seen.add(device.id);
+            return true;
+        });
+        _applyBlToolAvailability();
+        const usable = _renderDetectedBlDevices();
+        const toolSelect = document.getElementById('blFlashTool');
+
+        if (_lastBlDetectedDevices.length === 1 && usable.length === 1) {
+            select.value = usable[0].device.id;
+            if (toolSelect) toolSelect.value = usable[0].tools[0];
+            _blDetectionState = {
+                status: 'done',
+                message: `已检测并选择 ${usable[0].device.name}，烧录工具：${usable[0].tools[0]}`,
+            };
+        } else if (usable.length > 0) {
+            select.value = '';
+            _blDetectionState = {
+                status: 'done',
+                message: `检测到 ${_lastBlDetectedDevices.length} 个设备，其中 ${usable.length} 个兼容，请手动选择`,
+            };
+        } else if (_lastBlDetectedDevices.length > 0) {
+            _blDetectionState = {
+                status: 'done',
+                message: `检测到 ${_lastBlDetectedDevices.length} 个设备，但没有设备兼容当前 BL 文件、MCU 平台和烧录工具`,
+            };
+        } else {
+            _blDetectionState = {
+                status: 'done',
+                message: '未检测到 DFU 或 BOOTSEL 设备，请先让主板进入对应烧录模式',
+            };
+        }
+        if (errors.length) _blDetectionState.message += `；${errors.join('；')}`;
+        renderBlFlashCompatibility();
+    } catch (error) {
+        if (requestId !== _blDeviceScanRequestId) return;
+        _lastBlDetectedDevices = [];
+        _blDetectionState = {status: 'error', message: `BL 设备检测失败：${error.message || error}`};
+        select.innerHTML = '<option value="">-- 检测失败 --</option>';
+        renderBlFlashCompatibility();
+    } finally {
+        if (requestId === _blDeviceScanRequestId) {
+            button.disabled = false;
+            button.textContent = '🔍 检测';
+        }
+    }
+}
+
+function onBlDeviceChange() {
+    const select = document.getElementById('blDeviceSelect');
+    const device = _lastBlDetectedDevices.find(item => item.id === select?.value);
+    if (device) {
+        const tools = _compatibleBlToolsForDevice(device);
+        const toolSelect = document.getElementById('blFlashTool');
+        if (tools.length && toolSelect && !tools.includes(toolSelect.value)) {
+            toolSelect.value = tools[0];
+        }
+    }
+    renderBlFlashCompatibility();
+}
+
+function onBlFlashToolChange() {
+    renderBlFlashCompatibility();
+}
+
+function onBlFlashAddressChange() {
+    refreshBlDeviceCompatibilityOptions();
+}
+
+function renderBlFlashCompatibility() {
+    const button = document.getElementById('flashBootloaderBtn');
+    const deviceId = document.getElementById('blDeviceSelect')?.value || '';
+    const device = _lastBlDetectedDevices.find(item => item.id === deviceId) || null;
+    const plan = _buildBlCompatibility('', device);
+    if (button) button.disabled = _blFlashRequestActive || !plan.ok;
+
+    if (plan.ok) {
+        _setBlDeviceHint(
+            `校验通过：${plan.device.name} · ${plan.tool} · ${plan.file.ext || '未知格式'} · ${plan.platformKey.toUpperCase()}`,
+            'success'
+        );
+    } else if (device) {
+        _setBlDeviceHint(`暂不可烧录：${plan.errors.join('；')}`, 'warning');
+    } else {
+        const kind = _blDetectionState.status === 'error' ? 'error' :
+            _blDetectionState.status === 'done' && _lastBlDetectedDevices.length === 0 ? 'warning' : 'info';
+        _setBlDeviceHint(_blDetectionState.message, kind);
+    }
+    return plan;
 }
 
 // 烧录 Bootloader
@@ -2766,21 +3358,13 @@ async function flashBootloader() {
     const selectedAddress = addressSelect.options[addressSelect.selectedIndex];
     const address = addressSelect.value;
     const dfuOffset = selectedAddress?.dataset.offset || '';
-    const platformKey = selectedAddress?.dataset.platformKey || '';
     const tool = document.getElementById('blFlashTool').value;
     const eraseFlash = document.getElementById('blEraseFlash').checked;
-    const deviceId = document.getElementById('flashDeviceId').value || '';
+    const deviceId = document.getElementById('blDeviceSelect')?.value || '';
+    const compatibility = renderBlFlashCompatibility();
 
-    if (!blFile) {
-        showError('请选择 BL 文件');
-        return;
-    }
-    if (!address && tool !== 'rp2040_flash') {
-        showError('请选择 BL 烧录地址');
-        return;
-    }
-    if (!deviceId && ['dfu-util', 'rp2040_flash'].includes(tool)) {
-        showError('请先选择需要烧录的设备');
+    if (!compatibility.ok) {
+        showError('BL 烧录预检未通过：' + compatibility.errors.join('；'));
         return;
     }
     if (eraseFlash && !confirm('擦除整个 Flash 会清除当前固件，确认继续烧录 BL？')) {
@@ -2793,6 +3377,8 @@ async function flashBootloader() {
     _blFlashRequestActive = true;
     const blButton = document.getElementById('flashBootloaderBtn');
     if (blButton) blButton.disabled = true;
+    const detectButton = document.getElementById('detectBlDevicesBtn');
+    if (detectButton) detectButton.disabled = true;
     const resultDiv = document.getElementById('blFlashResult');
     resultDiv.style.display = 'block';
     resultDiv.querySelector('.result-box').innerHTML = eraseFlash
@@ -2807,8 +3393,8 @@ async function flashBootloader() {
                 bl_firmware_path: blFile,
                 dfu_address: address,
                 dfu_offset: dfuOffset,
-                platform_key: platformKey,
-                mcu_id: currentCompileMcu?.mcu?.id || '',
+                platform_key: compatibility.platformKey,
+                mcu_id: compatibility.mcuId,
                 flash_mode: tool === 'dfu-util' ? 'DFU' : tool === 'rp2040_flash' ? 'UF2' : tool === 'st-flash' ? 'st-flash' : 'openocd',
                 device_id: deviceId,
                 erase_flash: eraseFlash
@@ -2850,7 +3436,8 @@ async function flashBootloader() {
         showError('BL 烧录请求失败: ' + error.message);
     } finally {
         _blFlashRequestActive = false;
-        if (blButton) blButton.disabled = false;
+        if (detectButton) detectButton.disabled = false;
+        renderBlFlashCompatibility();
     }
 }
 
@@ -3134,8 +3721,7 @@ async function importCompileConfig(event) {
         if (current.bridge_can_config) {
             _selectCompileSymbol(document.getElementById('compileBridgeCanPin'), current.bridge_can_config);
         }
-        _renderH503NestedOptions();
-        _restoreH503ExtraSymbols(current.comm_extra_symbols);
+        _restoreCommunicationExtraSymbols(current.comm_extra_symbols);
         if (current.canbus_frequency) {
             _setSelectedCanBitrate(current.canbus_frequency);
         }

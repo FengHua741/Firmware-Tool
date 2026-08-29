@@ -466,7 +466,8 @@ function getCmCommunicationOptions(platform, mcuId) {
     const processor = String(mcuId || '').toUpperCase();
     return (data.communication_options || []).filter(option => {
         const compatible = option.compatible_processors || [];
-        return !compatible.length || compatible.includes(processor);
+        if (option.compatibility_resolved === true) return compatible.includes(processor);
+        return compatible.length > 0 && compatible.includes(processor);
     });
 }
 

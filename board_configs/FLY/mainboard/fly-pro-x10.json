@@ -7,21 +7,32 @@
     "USB",
     "USB转CAN"
   ],
+  "connection_profiles": {
+    "usb": {
+      "bl_offset": "131072",
+      "config_symbol": "STM32_USB_PA11_PA12",
+      "flash_mode": "KAT"
+    },
+    "usbcanbridge": {
+      "bl_offset": "131072",
+      "config_symbol": "STM32_USBCANBUS_PA11_PA12",
+      "canbus_frequency": "1000000",
+      "flash_mode": "CAN_BRIDGE_KAT"
+    }
+  },
   "crystal": "25000000",
   "default_connection": "USB (on PA11/PA12)",
-  "default_flash": "TF",
+  "default_flash": "KAT",
   "firmware_update": {
     "custom_config": "",
     "device_id": "",
     "enabled": false,
-    "flash_mode": "TF",
+    "flash_mode": "KAT",
     "katapult_mode": "USB"
   },
   "flash_modes": [
-    "DFU",
     "KAT",
-    "CAN_BRIDGE_KAT",
-    "TF"
+    "CAN_BRIDGE_KAT"
   ],
   "id": "fly-pro-x10",
   "manufacturer": "FLY",

@@ -4,9 +4,24 @@
   "bl_offset": "16384",
   "boot_pins": "gpio24",
   "connections": [
-    "CANBUS",
-    "USB"
+    "CANBUS"
   ],
+  "can_gpio": {
+    "rx": 4,
+    "tx": 5
+  },
+  "connection_profiles": {
+    "can": {
+      "bl_offset": "16384",
+      "config_symbol": "RPXXXX_CANBUS",
+      "can_gpio": {
+        "rx": 4,
+        "tx": 5
+      },
+      "canbus_frequency": "1000000",
+      "flash_mode": "CAN"
+    }
+  },
   "default_connection": "CAN bus",
   "default_flash": "CAN",
   "firmware_update": {
@@ -17,9 +32,7 @@
     "katapult_mode": "USB"
   },
   "flash_modes": [
-    "KAT",
-    "CAN",
-    "UF2"
+    "CAN"
   ],
   "id": "sb2040-pro",
   "manufacturer": "FLY",

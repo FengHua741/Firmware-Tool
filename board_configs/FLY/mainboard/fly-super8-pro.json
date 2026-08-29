@@ -13,7 +13,7 @@
     "TF"
   ],
   "default_flash": "TF",
-  "boot_pins": "!PF8",
+  "boot_pins": null,
   "crystal": "25000000",
   "bl_flash_support": "支持",
   "bl_default_flash": "DFU",

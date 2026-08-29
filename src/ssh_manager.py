@@ -31,7 +31,17 @@ def _load_config_file():
     try:
         if os.path.exists(_CONFIG_FILE):
             with open(_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                cfg = json.load(f)
+                # 兼容尚未由 shared.py 写回磁盘的旧版配置。
+                if cfg.get('connection_mode') == 'fast-ssh':
+                    cfg['connection_mode'] = 'ssh'
+                    cfg['ssh_user'] = (
+                        cfg.get('ssh_user')
+                        or os.environ.get('FAST_SSH_USER')
+                        or cfg.get('fast_ssh_user')
+                        or 'root'
+                    )
+                return cfg
     except Exception:
         pass
     return {}
@@ -294,6 +304,7 @@ class SSHManager:
         self._client = None
         self._sftp = None
         self._config_hash_value = None
+        self._remote_system = 'unknown'
         self._cmd_lock = threading.Lock()       # 命令执行锁（粒度：命令执行，不含连接建立）
         self._conn_lock = threading.Lock()      # 连接建立锁（粒度：连接建立/重建）
         # 断路器状态（支持指数退避）
@@ -312,20 +323,43 @@ class SSHManager:
     def _current_ssh_config(self):
         """从配置文件获取当前 SSH 配置"""
         cfg = _load_config_file()
-        if cfg.get('connection_mode') == 'fast-ssh':
-            fast_user, _ = get_fast_ssh_credentials()
-            return {
-                'ssh_host': _normalize_host_value(cfg.get('ssh_host', '')),
-                'ssh_port': cfg.get('ssh_port', 22),
-                'ssh_user': fast_user or 'root',
-                'sudo_mode': 'password',
-            }
         return {
             'ssh_host': _normalize_host_value(cfg.get('ssh_host', '')),
             'ssh_port': cfg.get('ssh_port', 22),
             'ssh_user': cfg.get('ssh_user', ''),
             'sudo_mode': cfg.get('sudo_mode', 'password'),
         }
+
+    @staticmethod
+    def _detect_remote_system(client):
+        """通过已认证的 SSH 连接识别远端系统类型。"""
+        command = (
+            "if grep -qi 'FlyOS-Fast' /etc/issue 2>/dev/null || "
+            "command -v flyos-fast-ota >/dev/null 2>&1; "
+            "then printf 'flyos-fast'; else printf 'linux'; fi"
+        )
+        try:
+            _, stdout, _ = client.exec_command(command, timeout=5)
+            detected = stdout.read(64).decode('utf-8', errors='replace').strip()
+            return 'flyos-fast' if detected == 'flyos-fast' else 'linux'
+        except Exception as e:
+            logger.warning(f"远端系统类型检测失败，按普通 Linux 处理: {e}")
+            return 'linux'
+
+    def get_remote_system(self, connect=True):
+        """返回远端系统类型；未知时可自动建立 SSH 连接完成检测。"""
+        if not is_ssh_mode():
+            return 'local'
+        if self._remote_system == 'unknown' and connect:
+            try:
+                self.get_connection()
+            except Exception:
+                return 'unknown'
+        return self._remote_system
+
+    def is_fast_remote(self, connect=True):
+        """当前 SSH 目标是否被自动识别为 FlyOS-Fast。"""
+        return self.get_remote_system(connect=connect) == 'flyos-fast'
 
     def _config_hash(self, cfg):
         """计算配置哈希，用于检测变更"""
@@ -466,8 +500,12 @@ class SSHManager:
                     if transport:
                         transport.set_keepalive(self.KEEPALIVE_INTERVAL)
                     self._config_hash_value = cfg_hash
+                    self._remote_system = self._detect_remote_system(self._client)
                     self._mark_connection_success()
-                    logger.info(f"SSH 连接成功: {cfg['ssh_user']}@{host}:{cfg.get('ssh_port', 22)}")
+                    logger.info(
+                        f"SSH 连接成功: {cfg['ssh_user']}@{host}:{cfg.get('ssh_port', 22)} "
+                        f"(远端系统: {self._remote_system})"
+                    )
                     return self._client
                 except paramiko.BadHostKeyException as e:
                     # 主机密钥不匹配：目标设备可能已更换/重装系统
@@ -560,6 +598,7 @@ class SSHManager:
                 pass
             self._client = None
         self._config_hash_value = None
+        self._remote_system = 'unknown'
         # 注意：不断路器状态不在 _disconnect 中重置，
         # 因为断开可能是正常的模式切换，不需要保持断路器状态
 
@@ -585,7 +624,8 @@ class SSHManager:
             host = cfg.get('ssh_host', '')
             user = cfg.get('ssh_user', '')
             port = cfg.get('ssh_port', 22)
-            return True, f"重连成功: {user}@{host}:{port}"
+            system_label = '，已识别 FlyOS-Fast' if self.is_fast_remote(connect=False) else ''
+            return True, f"重连成功: {user}@{host}:{port}{system_label}"
         except ConnectionError as e:
             return False, f"重连失败: {e}"
         except Exception as e:
@@ -620,6 +660,8 @@ class SSHManager:
             'host': cfg.get('ssh_host', ''),
             'port': cfg.get('ssh_port', 22),
             'user': cfg.get('ssh_user', ''),
+            'remote_system': self._remote_system,
+            'is_fast': self._remote_system == 'flyos-fast',
         }
 
     def wrap_sudo(self, cmd):
@@ -741,7 +783,8 @@ class SSHManager:
                 host = cfg.get('ssh_host', '')
                 user = cfg.get('ssh_user', '')
                 port = cfg.get('ssh_port', 22)
-                return True, f"已连接 {user}@{host}:{port}"
+                system_label = '，已识别 FlyOS-Fast' if self.is_fast_remote(connect=False) else ''
+                return True, f"已连接 {user}@{host}:{port}{system_label}"
             else:
                 return False, f"连接测试失败: {result.stderr}"
         except Exception as e:
@@ -832,43 +875,20 @@ class SSHManager:
 
 # ==================== 统一命令执行函数 ====================
 
-# FAST-SSH 模式凭据 — 环境变量优先，其次配置文件显式配置。
-# 注意：不再提供任何内置默认密码，未配置时返回空密码（连接将失败并提示）。
-FAST_SSH_USER = os.environ.get('FAST_SSH_USER', '')
-FAST_SSH_PASSWORD = os.environ.get('FAST_SSH_PASSWORD', '')
-
-
-def get_fast_ssh_credentials():
-    """获取 FAST-SSH 凭据，优先级：环境变量 > 配置文件显式配置。
-
-    未配置密码时返回空字符串，调用方应提示用户配置。
-    """
-    user = os.environ.get('FAST_SSH_USER', '')
-    password = os.environ.get('FAST_SSH_PASSWORD', '')
-    if user and password:
-        return user, password
-    cfg = _load_config_file()
-    user = cfg.get('fast_ssh_user', '') or 'root'
-    password = cfg.get('fast_ssh_password', '') or ''
-    return user, password
-
-
 def is_ssh_mode():
-    """判断当前是否为 SSH 远程模式（含标准 SSH 和 FAST-SSH）"""
+    """判断当前是否为 SSH 远程模式。"""
     try:
         cfg = _load_config_file()
-        return cfg.get('connection_mode') in ('ssh', 'fast-ssh')
+        return cfg.get('connection_mode') == 'ssh'
     except Exception:
         return False
 
 
-def is_fast_ssh_mode():
-    """判断当前是否为 FAST-SSH 模式"""
-    try:
-        cfg = _load_config_file()
-        return cfg.get('connection_mode') == 'fast-ssh'
-    except Exception:
+def is_fast_remote():
+    """SSH 建连后自动判断当前远端是否为 FlyOS-Fast。"""
+    if not is_ssh_mode():
         return False
+    return SSHManager.get_instance().is_fast_remote()
 
 
 def run_cmd(cmd, shell=False, capture_output=True, text=True,

@@ -4,18 +4,24 @@
   "bl_offset": "8192",
   "boot_pins": "!PC13",
   "connections": [
-    "CANBUS",
-    "USB"
+    "CANBUS"
   ],
+  "connection_profiles": {
+    "can": {
+      "bl_offset": "8192",
+      "config_symbol": "STM32_MMENU_CANBUS_PB8_PB9",
+      "canbus_frequency": "1000000",
+      "flash_mode": "CAN"
+    }
+  },
   "crystal": "8000000",
-  "default_connection": "USB",
-  "default_flash": "KAT",
+  "default_connection": "CAN bus (on PB8/PB9)",
+  "default_flash": "CAN",
   "flash_modes": [
-    "KAT",
     "CAN"
   ],
   "firmware_update": {
-    "flash_mode": "KAT"
+    "flash_mode": "CAN"
   },
   "id": "fly-sht36-v2-072",
   "manufacturer": "FLY",

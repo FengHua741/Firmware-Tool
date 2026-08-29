@@ -20,7 +20,7 @@ from shared import (
     config, logger, BASE_DIR, BOARD_CONFIGS_DIR,
     DFU_KNOWN_DEVICES,
     run_cmd, run_cmd_stream, path_exists, get_file_size,
-    is_ssh_mode, is_fast_ssh_mode,
+    is_ssh_mode, is_fast_remote,
     expand_klipper_path, get_klipper_owner, get_klipper_python_bin,
     download_firmware_from_remote, upload_bl_firmware_for_remote,
     sudo_write_file,
@@ -41,6 +41,11 @@ _flash_lock = threading.Lock()
 _bl_flash_lock = threading.Lock()
 BL_UPLOAD_DIR = os.path.join(BASE_DIR, 'data', 'bl_uploads')
 BL_UPLOAD_MAX_BYTES = 4 * 1024 * 1024
+STLINK_USB_IDS = {
+    '0483:3744', '0483:3748', '0483:374a', '0483:374b',
+    '0483:374d', '0483:374e', '0483:374f', '0483:3752',
+    '0483:3753', '0483:3754',
+}
 
 
 def load_klipper_rules():
@@ -263,6 +268,165 @@ def _openocd_target_for_mcu(mcu_id):
         if value.startswith(prefixes):
             return target
     return ''
+
+
+def _command_path(command):
+    """在当前执行目标（本机或 SSH 远端）查找命令。"""
+    result = run_cmd(
+        f'command -v {shlex.quote(command)} 2>/dev/null',
+        shell=True, capture_output=True, text=True, timeout=5
+    )
+    if result.returncode != 0:
+        return ''
+    return (result.stdout or '').strip().split('\n', 1)[0]
+
+
+def _stlink_device_id(serial='', usb_path=''):
+    if serial:
+        return 'stlink:serial=' + urllib.parse.quote(str(serial), safe='')
+    return 'stlink:usb=' + urllib.parse.quote(str(usb_path or 'unknown'), safe='')
+
+
+def _stlink_serial_from_device(device):
+    raw = str(device or '').strip()
+    if not raw.startswith('stlink:serial='):
+        return ''
+    serial = urllib.parse.unquote(raw.split('=', 1)[1])
+    if not re.fullmatch(r'[A-Za-z0-9._:+-]{1,128}', serial):
+        raise ValueError('ST-Link 序列号无效')
+    return serial
+
+
+def _stlink_usb_path_from_device(device):
+    raw = str(device or '').strip()
+    if not raw.startswith('stlink:usb='):
+        return ''
+    usb_path = urllib.parse.unquote(raw.split('=', 1)[1])
+    if not re.fullmatch(r'[A-Za-z0-9._:-]{1,128}', usb_path):
+        raise ValueError('ST-Link USB 路径无效')
+    return usb_path
+
+
+def _parse_stlink_programmers(sysfs_output, probe_output, supported_tools):
+    """合并 sysfs 与 st-info 的只读结果，返回可定向的 ST-Link。"""
+    programmers = []
+    seen_ids = set()
+
+    for line in (sysfs_output or '').splitlines():
+        parts = line.split('\t', 3)
+        if len(parts) != 4:
+            continue
+        vid_pid, serial, product, usb_path = (part.strip() for part in parts)
+        text = f'{product} {vid_pid}'.lower()
+        if vid_pid.lower() not in STLINK_USB_IDS and 'st-link' not in text and 'stlink' not in text:
+            continue
+        device_id = _stlink_device_id(serial, usb_path)
+        if device_id in seen_ids:
+            continue
+        seen_ids.add(device_id)
+        label = product or 'ST-Link'
+        if serial:
+            label += f' (SN: {serial})'
+        elif usb_path:
+            label += f' ({usb_path})'
+        programmers.append({
+            'id': device_id,
+            'name': label,
+            'type': 'stlink',
+            'serial': serial,
+            'usb_path': usb_path,
+            'supported_tools': list(supported_tools),
+        })
+
+    # 某些系统不暴露完整 sysfs 属性，使用 st-info 的序列号补全。
+    for match in re.finditer(r'(?im)^\s*(?:serial|hla-serial)\s*:\s*["\']?([^"\'\r\n]+)', probe_output or ''):
+        serial = match.group(1).strip()
+        if not serial:
+            continue
+        device_id = _stlink_device_id(serial)
+        if device_id in seen_ids:
+            continue
+        seen_ids.add(device_id)
+        programmers.append({
+            'id': device_id,
+            'name': f'ST-Link (SN: {serial})',
+            'type': 'stlink',
+            'serial': serial,
+            'usb_path': '',
+            'supported_tools': list(supported_tools),
+        })
+    if len(programmers) > 1:
+        for programmer in programmers:
+            if not programmer.get('serial'):
+                programmer['supported_tools'] = []
+                programmer['targetable'] = False
+            else:
+                programmer['targetable'] = True
+    else:
+        for programmer in programmers:
+            programmer['targetable'] = True
+    return programmers
+
+
+def _detect_bl_programmers():
+    """检测 BL 烧录工具与 ST-Link；不会连接、复位或修改目标 MCU。"""
+    tool_commands = {
+        'dfu-util': 'dfu-util',
+        'st-flash': 'st-flash',
+        'openocd': 'openocd',
+    }
+    tools = {}
+    for tool, command in tool_commands.items():
+        path = _command_path(command)
+        tools[tool] = {'available': bool(path), 'path': path}
+
+    klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'))
+    rp2040_flash_path = os.path.join(klipper_path, 'lib', 'rp2040_flash', 'rp2040_flash')
+    rp2040_flash_available = path_exists(rp2040_flash_path)
+    tools['rp2040_flash'] = {
+        'available': rp2040_flash_available,
+        'path': rp2040_flash_path if rp2040_flash_available else '',
+    }
+
+    st_info_path = _command_path('st-info')
+    tools['st-info'] = {'available': bool(st_info_path), 'path': st_info_path}
+    supported_tools = [
+        tool for tool in ('st-flash', 'openocd')
+        if tools[tool]['available']
+    ]
+
+    sysfs_command = (
+        "for d in /sys/bus/usb/devices/*; do "
+        "[ -r \"$d/idVendor\" ] && [ -r \"$d/idProduct\" ] || continue; "
+        "vid=$(cat \"$d/idVendor\" 2>/dev/null); pid=$(cat \"$d/idProduct\" 2>/dev/null); "
+        "serial=$(cat \"$d/serial\" 2>/dev/null); product=$(cat \"$d/product\" 2>/dev/null); "
+        "printf '%s:%s\\t%s\\t%s\\t%s\\n' \"$vid\" \"$pid\" \"$serial\" \"$product\" \"${d##*/}\"; "
+        "done"
+    )
+    sysfs_result = run_cmd(
+        sysfs_command, shell=True, capture_output=True, text=True, timeout=10
+    )
+    probe_output = ''
+    if st_info_path:
+        probe_result = run_cmd(
+            'st-info --probe 2>&1', shell=True,
+            capture_output=True, text=True, timeout=15
+        )
+        probe_output = (probe_result.stdout or '') + (probe_result.stderr or '')
+
+    programmers = _parse_stlink_programmers(
+        sysfs_result.stdout or '', probe_output, supported_tools
+    )
+    warnings = []
+    if programmers and not supported_tools:
+        warnings.append('检测到 ST-Link，但未安装 st-flash 或 OpenOCD')
+    if any(not programmer.get('targetable', True) for programmer in programmers):
+        warnings.append('检测到多个 ST-Link，但部分设备没有序列号，已禁止对这些设备烧录')
+    return {
+        'tools': tools,
+        'programmers': programmers,
+        'warnings': warnings,
+    }
 
 
 def _manifest_path(klipper_path):
@@ -524,15 +688,14 @@ def _resolve_current_config_params(kconfig_klipper_path, config_values):
         params['bridge_can_config'] = bridge_option.get('config', '')
         params['bridge_can_display'] = bridge_option.get('display', '')
 
-    h503_nested = platform_data.get('h503_nested_options') or {}
-    h503_extra_symbols = []
-    for entries in h503_nested.values():
-        for entry in entries:
+    communication_extra_symbols = []
+    for choice in platform_data.get('communication_subchoices') or []:
+        for entry in choice.get('options') or []:
             symbol = entry.get('config_symbol', '')
             if symbol and _config_truthy(config_values, symbol):
-                h503_extra_symbols.append(symbol)
-    if h503_extra_symbols:
-        params['comm_extra_symbols'] = h503_extra_symbols
+                communication_extra_symbols.append(symbol)
+    if communication_extra_symbols:
+        params['comm_extra_symbols'] = communication_extra_symbols
 
     if 'RPXXXX_CANBUS_GPIO_RX' in config_values:
         params['rp2040_can_rx_gpio'] = config_values.get('RPXXXX_CANBUS_GPIO_RX')
@@ -714,6 +877,7 @@ def _create_manifest(klipper_path, firmware_path, firmware_size, mcu_info, reque
             'canbus_frequency': compile_values.get('canbus_frequency', ''),
             'bridge_can_config': compile_values.get('bridge_can_config', ''),
             'comm_extra_symbols': compile_values.get('comm_extra_symbols', []),
+            'selected_flash_mode': request_data.get('flash_mode', ''),
         },
         'firmware': {
             'path': firmware_path,
@@ -745,6 +909,10 @@ def _recommended_flash_mode(manifest, firmware_path='', device_id=''):
         return 'DFU'
     if re.match(r'^(can\d+:)?[a-f0-9]{8,32}$', device):
         return 'CAN'
+    selected_flash = str(build.get('selected_flash_mode') or '')
+    board_flash_modes = set(board.get('flash_modes') or [])
+    if selected_flash and (not board_flash_modes or selected_flash in board_flash_modes):
+        return selected_flash
     default_flash = board.get('default_flash') or ''
     if default_flash and default_flash != 'DFU':
         return default_flash
@@ -990,10 +1158,16 @@ def _infer_comm_type(communication):
 
 def _compatible_options(options, processor):
     processor = str(processor or '').upper()
-    return [
-        option for option in options
-        if not option.get('compatible_processors') or processor in option.get('compatible_processors', [])
-    ]
+    compatible = []
+    for option in options:
+        processors = option.get('compatible_processors') or []
+        if option.get('compatibility_resolved') is True:
+            if processor in processors:
+                compatible.append(option)
+        elif processors and processor in processors:
+            # 兼容旧缓存：只有明确列出当前 MCU 时才接受。
+            compatible.append(option)
+    return compatible
 
 
 def _match_communication_option(options, communication, comm_type):
@@ -1033,8 +1207,6 @@ def _match_communication_option(options, communication, comm_type):
 def _resolve_bridge_can_option(platform_data, processor, bridge_can_config):
     bridge_options = _compatible_options(platform_data.get('bridge_can', []), processor)
     if not bridge_options:
-        bridge_options = platform_data.get('bridge_can', [])
-    if not bridge_options:
         return None
 
     symbol = _normalize_config_symbol(bridge_can_config)
@@ -1055,76 +1227,92 @@ def _resolve_bridge_can_option(platform_data, processor, bridge_can_config):
     return bridge_options[0]
 
 
-def _resolve_h503_extra_symbols(
-        platform_data, processor, comm_symbol, bridge_can_symbol, raw_symbols):
-    """校验并返回 H503 分级 UART/FDCAN 配置符号。"""
+def _resolve_communication_extra_symbols(
+        platform_data, processor, comm_symbol, bridge_can_symbol, raw_symbols,
+        condition_parser):
+    """按 Kconfig 通信子 choice 校验并排序附加符号。"""
+    subchoices = platform_data.get('communication_subchoices') or []
+    if not subchoices:
+        if raw_symbols not in (None, [], '', '[]'):
+            raise ValueError('当前 Klipper Kconfig 不支持通信子选项')
+        return [], []
+
     if isinstance(raw_symbols, str):
         try:
             raw_symbols = json.loads(raw_symbols)
         except json.JSONDecodeError as exc:
-            raise ValueError('H503 分级通信参数格式错误') from exc
+            raise ValueError('通信子选项参数格式错误') from exc
     if raw_symbols is None:
         raw_symbols = []
     if not isinstance(raw_symbols, list):
-        raise ValueError('H503 分级通信参数必须是数组')
+        raise ValueError('通信子选项参数必须是数组')
 
-    symbols = [_normalize_config_symbol(symbol) for symbol in raw_symbols]
-    if any(not symbol for symbol in symbols) or len(set(symbols)) != len(symbols):
-        raise ValueError('H503 分级通信参数包含无效或重复符号')
+    selected = [_normalize_config_symbol(symbol) for symbol in raw_symbols]
+    if any(not symbol for symbol in selected) or len(set(selected)) != len(selected):
+        raise ValueError('通信子选项包含无效或重复符号')
+    selected_set = set(selected)
 
-    serial_mode = comm_symbol == 'STM32_SERIAL_H503'
-    can_mode = (comm_symbol == 'STM32_MMENU_CANBUS_H503'
-                or bridge_can_symbol == 'STM32_CMENU_CANBUS_H503')
-    if not serial_mode and not can_mode:
-        if symbols:
-            raise ValueError('当前通信方式不接受 H503 分级通信参数')
-        return [], []
-    if str(processor or '').upper() != 'STM32H503':
-        raise ValueError('H503 分级通信参数只能用于 STM32H503')
+    processor_upper = str(processor or '').upper()
+    processor_capabilities = platform_data.get('processor_capabilities') or {}
+    active = set(processor_capabilities.get(processor_upper) or [])
+    if not active:
+        raise ValueError(f'当前 Klipper Kconfig 未解析出 {processor} 的能力闭包')
+    active.update({'LOW_LEVEL_OPTIONS', comm_symbol, bridge_can_symbol})
+    active.discard('')
 
-    nested = platform_data.get('h503_nested_options') or {}
-    entries_by_symbol = {}
-    for group_name, entries in nested.items():
-        for entry in entries:
-            normalized = _normalize_config_symbol(entry.get('config_symbol'))
-            if normalized:
-                entries_by_symbol[normalized] = (group_name, entry)
-    selected = []
-    for symbol in symbols:
-        match = entries_by_symbol.get(symbol)
-        if not match:
-            raise ValueError(f'当前 Klipper Kconfig 不支持 H503 通信子选项: {symbol}')
-        selected.append((symbol, match[0], match[1]))
+    for option in platform_data.get('communication_options', []):
+        if _normalize_config_symbol(option.get('config_symbol')) != comm_symbol:
+            continue
+        selected_feature = _normalize_config_symbol(option.get('select'))
+        if selected_feature:
+            active.add(selected_feature)
+        break
 
-    required_groups = (
-        ('serial_peripheral', 'serial_rx', 'serial_tx') if serial_mode
-        else ('can_rx', 'can_tx')
-    )
-    selected_by_group = {}
-    for symbol, group_name, entry in selected:
-        if group_name not in required_groups:
-            raise ValueError(f'H503 通信子选项与当前通信方式不匹配: {symbol}')
-        selected_by_group.setdefault(group_name, []).append((symbol, entry))
-    for group_name in required_groups:
-        if len(selected_by_group.get(group_name, [])) != 1:
-            raise ValueError(f'H503 通信配置必须且只能选择一个 {group_name}')
+    ordered = []
+    logs = []
+    known_symbols = set()
+    for choice in subchoices:
+        options = choice.get('options') or []
+        known_symbols.update(
+            _normalize_config_symbol(option.get('config_symbol'))
+            for option in options
+        )
+        if not condition_parser._eval_condition(choice.get('condition', ''), active):
+            continue
+        visible = [
+            option for option in options
+            if condition_parser._eval_condition(option.get('condition', ''), active)
+        ]
+        if not visible:
+            continue
+        visible_by_symbol = {
+            _normalize_config_symbol(option.get('config_symbol')): option
+            for option in visible
+        }
+        chosen = selected_set & set(visible_by_symbol)
+        if len(chosen) != 1:
+            raise ValueError(
+                f'通信子选项「{choice.get("prompt") or choice.get("id") or "未命名"}」必须且只能选择一项'
+            )
+        symbol = next(iter(chosen))
+        option = visible_by_symbol[symbol]
+        ordered.append(symbol)
+        active.add(symbol)
+        selected_feature = _normalize_config_symbol(option.get('select'))
+        if selected_feature:
+            active.add(selected_feature)
+        logs.append(
+            f'通信子选项 {choice.get("prompt") or choice.get("id")}: '
+            f'CONFIG_{symbol}=y'
+        )
 
-    if serial_mode:
-        peripheral = selected_by_group['serial_peripheral'][0][0]
-        for group_name in ('serial_rx', 'serial_tx'):
-            entry = selected_by_group[group_name][0][1]
-            parent = _normalize_config_symbol(entry.get('parent'))
-            if parent and parent != peripheral:
-                raise ValueError('H503 串口 RX/TX 引脚与所选 USART/LPUART 不匹配')
-    elif bridge_can_symbol == 'STM32_CMENU_CANBUS_H503':
-        for group_name in ('can_rx', 'can_tx'):
-            entry = selected_by_group[group_name][0][1]
-            if entry.get('available_for_usbcanbridge') is False:
-                raise ValueError('USB-CAN 桥接不能把 PA11/PA12 同时用于 FDCAN')
-
-    ordered_symbols = [selected_by_group[group][0][0] for group in required_groups]
-    logs = [f'H503 通信子选项: CONFIG_{symbol}=y' for symbol in ordered_symbols]
-    return ordered_symbols, logs
+    unknown = selected_set - set(ordered)
+    if unknown:
+        invalid = sorted(unknown - known_symbols)
+        if invalid:
+            raise ValueError(f'当前 Klipper Kconfig 不支持通信子选项: {", ".join(invalid)}')
+        raise ValueError(f'通信子选项与当前连接条件不匹配: {", ".join(sorted(unknown))}')
+    return ordered, logs
 
 
 def _build_klipper_config_lines(
@@ -1171,7 +1359,7 @@ def _build_klipper_config_lines(
     processor_upper = str(processor or '').upper()
     comm_options = _compatible_options(platform_data.get('communication_options', []), processor_upper)
     if not comm_options:
-        comm_options = platform_data.get('communication_options', [])
+        raise ValueError(f'当前 Klipper Kconfig 未解析出 {processor} 的兼容通信方式')
 
     comm_symbol = _normalize_config_symbol(comm_config_symbol)
     comm_option = None
@@ -1205,9 +1393,9 @@ def _build_klipper_config_lines(
             logs.append(f"USB-CAN桥接CAN引脚: {bridge_option.get('display')}")
 
     bridge_symbol = _normalize_config_symbol(bridge_can_config)
-    extra_symbols, extra_logs = _resolve_h503_extra_symbols(
+    extra_symbols, extra_logs = _resolve_communication_extra_symbols(
         platform_data, processor_upper, comm_symbol, bridge_symbol,
-        comm_extra_symbols,
+        comm_extra_symbols, parser,
     )
     config_lines.extend(_config_line(symbol) for symbol in extra_symbols)
     logs.extend(extra_logs)
@@ -2113,15 +2301,15 @@ def flash_firmware():
             if re.match(r'^can\d+:', device) or _is_can_uuid:
                 can_uuid = re.sub(r'^can\d+:', '', device)
 
-                if is_fast_ssh_mode():
-                    logger.info('FAST-SSH 模式：使用 CAN 直接烧录')
+                if is_fast_remote():
+                    logger.info('远端 FlyOS-Fast：使用 CAN 直接烧录')
                     yield f'data: [LOG] 正在通过 CAN ({can_iface}) 烧录设备 {can_uuid}...\n\n'
                     if flashtool_script:
                         cmd = f'{shlex.quote(python_bin)} {shlex.quote(flashtool_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
-                        logger.info(f'FAST-SSH 新版烧录命令 (katapult/flashtool.py, {can_iface}): {cmd}')
+                        logger.info(f'FlyOS-Fast 新版烧录命令 (katapult/flashtool.py, {can_iface}): {cmd}')
                     elif flash_can_script:
                         cmd = f'{shlex.quote(python_bin)} {shlex.quote(flash_can_script)} -i {shlex.quote(can_iface)} -u {shlex.quote(can_uuid)} -f {shlex.quote(firmware_path)}'
-                        logger.info(f'FAST-SSH 旧版烧录命令 (canboot/flash_can.py, {can_iface}): {cmd}')
+                        logger.info(f'FlyOS-Fast 旧版烧录命令 (canboot/flash_can.py, {can_iface}): {cmd}')
                     else:
                         _err_msg = _missing_flash_tool_message(
                             flashtool_candidates + flash_can_candidates
@@ -2258,7 +2446,7 @@ def install_host_firmware():
             yield f'data: {json.dumps({"error": f"固件文件不存在: {firmware_path}"})}\n\n'
             return
 
-        if is_fast_ssh_mode():
+        if is_fast_remote():
             flash_cmd = f'fly-flash -d auto -h -f {shlex.quote(firmware_path)}'
             logger.info(f'HOST 烧录命令: {flash_cmd}')
             result = run_cmd(flash_cmd, shell=True, capture_output=True, text=True, timeout=120)
@@ -2476,6 +2664,17 @@ def remote_browse():
         return jsonify({'error': safe_error(e)}), 500
 
 # ==================== BL固件烧录 API ====================
+@firmware_bp.route('/api/firmware/bl/detect')
+def detect_bl_programmers():
+    """只读检测 BL 烧录工具与 ST-Link；DFU/BOOTSEL 由通用设备接口提供。"""
+    try:
+        result = _detect_bl_programmers()
+        result['success'] = True
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': safe_error(e)}), 500
+
+
 @firmware_bp.route('/api/firmware/bl/address-options')
 def get_bl_address_options():
     """根据当前 Klipper Kconfig 和 MCU 返回 BL 烧录地址选项"""
@@ -2541,6 +2740,7 @@ def flash_bl_firmware():
         dfu_address = data.get('dfu_address', '0x08000000')
         katapult_serial = data.get('katapult_serial', '')
         erase_flash = _truthy(data.get('erase_flash', True))
+        stlink_serial = ''
 
         if dfu_offset:
             dfu_address = _application_address(platform_key, dfu_offset)
@@ -2567,6 +2767,8 @@ def flash_bl_firmware():
                 return jsonify({'error': 'STM32 DFU 烧录仅支持原始 .bin BL 固件'}), 400
         elif flash_mode in ('st-flash', 'openocd') and platform_key != 'stm32':
             return jsonify({'error': f'当前 MCU 平台 {platform_key} 与 STM32 调试器烧录方式不兼容'}), 400
+        elif flash_mode in ('st-flash', 'openocd') and not str(device).startswith('stlink:'):
+            return jsonify({'error': 'ST-Link 烧录必须先检测并选择明确的 ST-Link 设备'}), 400
         elif flash_mode == 'st-flash' and firmware_ext != '.bin':
             return jsonify({'error': 'st-flash 仅支持原始 .bin BL 固件'}), 400
         elif flash_mode == 'openocd' and firmware_ext not in ('.bin', '.hex'):
@@ -2574,6 +2776,23 @@ def flash_bl_firmware():
 
         if flash_mode in ('DFU', 'st-flash', 'openocd') and not _valid_flash_address(dfu_address):
             return jsonify({'error': f'烧录地址无效: {dfu_address}'}), 400
+        if flash_mode in ('st-flash', 'openocd'):
+            try:
+                stlink_serial = _stlink_serial_from_device(device)
+                stlink_usb_path = _stlink_usb_path_from_device(device)
+            except ValueError as exc:
+                return jsonify({'error': str(exc)}), 400
+            if not stlink_serial and not stlink_usb_path:
+                return jsonify({'error': 'ST-Link 设备 ID 无效，请重新检测'}), 400
+            if stlink_usb_path:
+                detected_programmers = _detect_bl_programmers().get('programmers') or []
+                selected_programmer = next(
+                    (item for item in detected_programmers if item.get('id') == device), None
+                )
+                if not selected_programmer or len(detected_programmers) != 1:
+                    return jsonify({
+                        'error': '无序列号 ST-Link 仅能在系统只连接一个 ST-Link 时烧录，请断开其他设备后重新检测'
+                    }), 400
 
         if is_ssh_mode():
             bl_firmware_path = upload_bl_firmware_for_remote(bl_firmware_path)
@@ -2671,15 +2890,26 @@ def flash_bl_firmware():
             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=60)
 
         elif flash_mode == 'st-flash':
-            stflash_cmd = f'sudo st-flash --reset write {shlex.quote(bl_firmware_path)} {shlex.quote(dfu_address)}'
+            serial_arg = f' --serial {shlex.quote(stlink_serial)}' if stlink_serial else ''
+            stflash_cmd = (
+                f'sudo st-flash{serial_arg} --reset write '
+                f'{shlex.quote(bl_firmware_path)} {shlex.quote(dfu_address)}'
+            )
             result = run_cmd(stflash_cmd, shell=True, capture_output=True, text=True, timeout=60)
 
         elif flash_mode == 'openocd':
             openocd_target = _openocd_target_for_mcu(mcu_id)
             if not openocd_target:
                 return jsonify({'error': f'无法根据 MCU 型号选择 OpenOCD target: {mcu_id or "未提供"}'}), 400
+            serial_arg = (
+                f'-c {shlex.quote(f"adapter serial {stlink_serial}")} '
+                if stlink_serial else ''
+            )
             openocd_program = f'program {bl_firmware_path} {dfu_address} verify reset exit'
-            openocd_cmd = f'sudo openocd -f interface/stlink.cfg -f target/{openocd_target}.cfg -c {shlex.quote(openocd_program)}'
+            openocd_cmd = (
+                f'sudo openocd -f interface/stlink.cfg {serial_arg}'
+                f'-f target/{openocd_target}.cfg -c {shlex.quote(openocd_program)}'
+            )
             result = run_cmd(openocd_cmd, shell=True, capture_output=True, text=True, timeout=120)
 
         else:

@@ -896,10 +896,6 @@ async function loadSettings() {
             const sudoMode = document.getElementById('settingsSudoMode');
             if (sudoMode) sudoMode.value = config.sudo_mode || 'password';
 
-            // FAST-SSH IP 地址
-            const fastSshHost = document.getElementById('settingsFastSshHost');
-            if (fastSshHost) fastSshHost.value = normalizeHostInput(config.ssh_host || '');
-
             toggleSshConfig();
 
             // 加载凭据状态（仅标准 SSH 模式显示）
@@ -934,7 +930,6 @@ async function saveSettings() {
     const sshPort = document.getElementById('settingsSshPort');
     const sshUser = document.getElementById('settingsSshUser');
     const sudoMode = document.getElementById('settingsSudoMode');
-    const fastSshHost = document.getElementById('settingsFastSshHost');
 
     const settings = {
         klipper_path: kp ? kp.value : '~/klipper',
@@ -949,20 +944,16 @@ async function saveSettings() {
         settings.ssh_port = sshPort ? parseInt(sshPort.value) || 22 : 22;
         settings.ssh_user = sshUser ? sshUser.value : '';
         settings.sudo_mode = sudoMode ? sudoMode.value : 'password';
-    } else if (connectionMode === 'fast-ssh') {
-        settings.ssh_host = fastSshHost ? normalizeHostInput(fastSshHost.value) : '';
-        settings.ssh_port = 22;
-        // ssh_user 和 sudo_mode 由后端自动设置固定值
     } else {
-        // local 模式: 保留 ssh_host/port 的值以便将来切换回来
+        // local 模式: 保留完整 SSH 配置，方便之后切回远程执行。
         settings.ssh_host = sshHost ? normalizeHostInput(sshHost.value) : '';
         settings.ssh_port = sshPort ? parseInt(sshPort.value) || 22 : 22;
-        settings.ssh_user = '';
+        settings.ssh_user = sshUser ? sshUser.value : '';
+        settings.sudo_mode = sudoMode ? sudoMode.value : 'password';
     }
 
     if (mrHost) mrHost.value = settings.moonraker_host;
     if (sshHost) sshHost.value = normalizeHostInput(sshHost.value);
-    if (fastSshHost) fastSshHost.value = normalizeHostInput(fastSshHost.value);
 
     try {
         const response = await fetch('/api/settings/config', {
@@ -992,7 +983,6 @@ async function saveSettings() {
                     }
                 }
             }
-            // FAST-SSH 模式凭据由后端自动保存，前端无需处理
             showSuccess('设置已保存');
 
             // 模式切换时刷新页面，确保后台线程和前端状态同步
@@ -1007,21 +997,16 @@ async function saveSettings() {
     }
 }
 
-// 切换 SSH/FAST-SSH 配置区显隐
+// 切换本地/SSH 配置区显隐
 function toggleSshConfig() {
     const modeRadio = document.querySelector('input[name="connectionMode"]:checked');
     const mode = modeRadio ? modeRadio.value : 'local';
     const sshSection = document.getElementById('sshConfigSection');
-    const fastSshSection = document.getElementById('fastSshConfigSection');
     const localSection = document.getElementById('localConfigSection');
 
     // 标准 SSH 配置区
     if (sshSection) {
         sshSection.style.display = mode === 'ssh' ? 'block' : 'none';
-    }
-    // FAST-SSH 配置区
-    if (fastSshSection) {
-        fastSshSection.style.display = mode === 'fast-ssh' ? 'block' : 'none';
     }
     // 本地执行确认区
     if (localSection) {
@@ -1089,7 +1074,7 @@ async function updatePathHints() {
     }
 }
 
-// SSH/FAST-SSH 模式下自动将 Moonraker 地址同步为远程主机地址
+// SSH 模式下自动将 Moonraker 地址同步为远程主机地址
 let _savedMoonrakerHost = ''; // 记住加载时的 Moonraker 地址
 
 function updateMoonrakerHostFromSsh() {
@@ -1097,20 +1082,15 @@ function updateMoonrakerHostFromSsh() {
     const mode = modeRadio ? modeRadio.value : 'local';
     const mrHost = document.getElementById('settingsMoonrakerHost');
     const sshHost = document.getElementById('settingsSshHost');
-    const fastSshHost = document.getElementById('settingsFastSshHost');
 
     if (!mrHost) return;
 
-    // 确定当前远程主机 IP（仅用于同步 Moonraker 地址，不回写输入框本身，
-    // 避免输入过程中被规范化改写导致无法正常输入）
-    let remoteHost = '';
-    if (mode === 'ssh') {
-        remoteHost = sshHost ? normalizeHostInput(sshHost.value) : '';
-    } else if (mode === 'fast-ssh') {
-        remoteHost = fastSshHost ? normalizeHostInput(fastSshHost.value) : '';
-    }
+    // 仅用于同步 Moonraker 地址，不回写 SSH 输入框本身。
+    const remoteHost = mode === 'ssh' && sshHost
+        ? normalizeHostInput(sshHost.value)
+        : '';
 
-    if ((mode === 'ssh' || mode === 'fast-ssh') && remoteHost) {
+    if (mode === 'ssh' && remoteHost) {
         // 首次进入远程模式时记住原始地址。
         // 仅在当前值不是远程地址本身时才记住：远程模式重载后字段里已是从配置加载的
         // 远程主机地址，若重新记住会把远程地址误当作“本地地址”，导致切回本地模式无法恢复。
@@ -1167,27 +1147,17 @@ async function testLocalConnection() {
     if (btnEl) btnEl.disabled = false;
 }
 
-// 测试 SSH 连接（支持标准 SSH 和 FAST-SSH）
+// 测试 SSH 连接；后端会在建连后自动识别 FlyOS-Fast。
 async function testSshConnection() {
-    const modeRadio = document.querySelector('input[name="connectionMode"]:checked');
-    const mode = modeRadio ? modeRadio.value : 'local';
-
-    // 根据模式选择结果显示元素
-    let resultEl, btnEl;
-    if (mode === 'fast-ssh') {
-        resultEl = document.getElementById('fastSshTestResult');
-        btnEl = document.getElementById('btnTestFastSsh');
-    } else {
-        resultEl = document.getElementById('sshTestResult');
-        btnEl = document.getElementById('btnTestSsh');
-    }
+    const resultEl = document.getElementById('sshTestResult');
+    const btnEl = document.getElementById('btnTestSsh');
     if (!resultEl) return;
 
     resultEl.textContent = '连接测试中...';
     resultEl.style.color = '#888';
     if (btnEl) btnEl.disabled = true;
 
-    // 先保存当前设置（后端会自动设置 FAST-SSH 凭据）
+    // 先保存当前 SSH 设置与凭据。
     await saveSettings();
 
     try {
@@ -1408,7 +1378,7 @@ async function updateResources() {
             updateNetworkDisplay(current.network);
         }
 
-        // 更新 FlyOS 版本信息（仅 FAST-SSH 模式显示）
+        // 远端自动识别为 FlyOS-Fast 时显示版本信息。
         const flyosBar = document.getElementById('flyosVersionBar');
         const flyosText = document.getElementById('flyosVersionText');
         if (flyosBar && flyosText) {
@@ -1420,7 +1390,7 @@ async function updateResources() {
             }
         }
 
-        // 更新主板型号信息（仅 FAST-SSH 模式显示）
+        // 远端自动识别为 FlyOS-Fast 时显示主板型号。
         const boardBar = document.getElementById('flyosBoardBar');
         const boardText = document.getElementById('flyosBoardText');
         if (boardBar && boardText) {
@@ -1463,6 +1433,7 @@ async function updateSshConnectionStatus() {
         }
 
         bar.style.display = 'block';
+        const remoteSystemLabel = status.is_fast ? '（FlyOS-Fast）' : '';
 
         if (status.connected) {
             // 连接正常
@@ -1472,7 +1443,7 @@ async function updateSshConnectionStatus() {
                 content.style.color = 'var(--success-color)';
                 content.style.border = '1px solid rgba(76,175,80,0.3)';
                 content.innerHTML = `
-                    <span>SSH 连接已恢复: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
+                    <span>SSH 连接已恢复${remoteSystemLabel}: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                     <span></span>
                 `;
                 // 3 秒后切为简洁状态
@@ -1480,7 +1451,7 @@ async function updateSshConnectionStatus() {
                     if (bar.style.display !== 'none') {
                         content.style.background = 'rgba(76,175,80,0.05)';
                         content.innerHTML = `
-                            <span style="color:var(--success-color);">SSH 已连接: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
+                            <span style="color:var(--success-color);">SSH 已连接${remoteSystemLabel}: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                             <span></span>
                         `;
                     }
@@ -1491,7 +1462,7 @@ async function updateSshConnectionStatus() {
                 content.style.color = 'var(--success-color)';
                 content.style.border = '1px solid rgba(76,175,80,0.2)';
                 content.innerHTML = `
-                    <span>SSH 已连接: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
+                    <span>SSH 已连接${remoteSystemLabel}: ${escapeHtml(status.user)}@${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                     <span></span>
                 `;
             }
@@ -1499,7 +1470,6 @@ async function updateSshConnectionStatus() {
         } else {
             // 连接断开
             _lastSshConnected = false;
-            const modeLabel = status.mode === 'fast-ssh' ? 'FAST-SSH' : 'SSH';
             let detailHtml = '';
 
             if (status.circuit_open) {
@@ -1515,7 +1485,7 @@ async function updateSshConnectionStatus() {
             content.style.border = '1px solid rgba(244,67,54,0.25)';
             content.innerHTML = `
                 <div style="display:flex;flex-direction:column;gap:4px;">
-                    <span style="font-weight:600;">${modeLabel} 连接已断开: ${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
+                    <span style="font-weight:600;">SSH 连接已断开: ${escapeHtml(status.host)}:${escapeHtml(status.port)}</span>
                     ${detailHtml}
                 </div>
                 <button onclick="manualReconnect()" style="padding:6px 16px;border:1px solid rgba(244,67,54,0.5);border-radius:4px;background:rgba(244,67,54,0.1);color:var(--danger-color);cursor:pointer;font-size:13px;white-space:nowrap;">重新连接</button>

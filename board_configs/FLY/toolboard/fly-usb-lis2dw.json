@@ -2,7 +2,7 @@
   "bl_default_flash": "UF2",
   "bl_flash_support": "支持",
   "bl_offset": "256",
-  "boot_pins": null,
+  "boot_pins": "gpio8",
   "connections": [
     "USB"
   ],
@@ -26,10 +26,10 @@
   "flash_modes": [
     "UF2"
   ],
-  "id": "fly-usb-adxl",
+  "id": "fly-usb-lis2dw",
   "manufacturer": "FLY",
   "mcu": "rp2040",
-  "name": "FLY-USB-ADXL",
+  "name": "FLY-USB-LIS2DW",
   "platform": "RP2040",
   "type": "toolboard"
 }

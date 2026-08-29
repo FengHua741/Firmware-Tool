@@ -2,24 +2,21 @@
   "bl_default_flash": "UF2",
   "bl_flash_support": "支持",
   "bl_offset": "16384",
-  "boot_pins": "gpio5",
+  "boot_pins": null,
   "connections": [
-    "USB",
-    "USB转CAN"
+    "USB"
   ],
   "default_connection": "USB",
-  "default_flash": "UF2",
+  "default_flash": "KAT",
   "firmware_update": {
     "custom_config": "",
     "device_id": "",
     "enabled": false,
-    "flash_mode": "UF2",
+    "flash_mode": "KAT",
     "katapult_mode": "USB"
   },
   "flash_modes": [
-    "KAT",
-    "CAN_BRIDGE_KAT",
-    "UF2"
+    "KAT"
   ],
   "id": "fly-rpfmex",
   "manufacturer": "FLY",

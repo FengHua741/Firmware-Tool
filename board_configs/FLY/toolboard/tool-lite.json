@@ -8,16 +8,28 @@
     "tx": 0
   },
   "connections": [
-    "CANBUS",
-    "USB"
+    "CANBUS"
   ],
+  "connection_profiles": {
+    "can": {
+      "bl_offset": "16384",
+      "config_symbol": "RPXXXX_CANBUS",
+      "can_gpio": {
+        "rx": 1,
+        "tx": 0
+      },
+      "canbus_frequency": "1000000",
+      "flash_mode": "CAN"
+    }
+  },
   "crystal": "12000000",
   "default_connection": "CAN bus",
-  "default_flash": "CAN_BRIDGE_KAT",
+  "default_flash": "CAN",
   "firmware_update": {
     "custom_config": "",
     "device_id": "",
     "enabled": false,
+    "flash_mode": "CAN",
     "katapult_mode": "USB"
   },
   "flash_modes": [
@@ -26,7 +38,7 @@
   "id": "tool-lite",
   "manufacturer": "FLY",
   "mcu": "rp2040",
-  "name": "TOOL-LITE",
+  "name": "FLY-TOOL-LITE-CAN",
   "platform": "RP2040",
   "type": "toolboard"
 }

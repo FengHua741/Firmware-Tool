@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 # 导入主板配置
 from board_config_loader import load_all_boards, load_board_config, get_manufacturers, get_board_types, get_bl_firmwares
 from kconfig_can_parser import parse_can_options
-from ssh_manager import run_cmd, run_cmd_check, run_cmd_stream, path_exists, get_file_size, list_dir, is_ssh_mode, is_fast_ssh_mode, download_firmware_from_remote, upload_bl_firmware_for_remote, cleanup_remote_bl_dir, SSHManager, get_fast_ssh_credentials
+from ssh_manager import run_cmd, run_cmd_check, run_cmd_stream, path_exists, get_file_size, list_dir, is_ssh_mode, is_fast_remote, download_firmware_from_remote, upload_bl_firmware_for_remote, cleanup_remote_bl_dir, SSHManager
 
 # 配置日志
 _log_handlers = [logging.StreamHandler()]
@@ -128,7 +128,7 @@ DEFAULT_CONFIG = {
     'moonraker_host': '127.0.0.1',
     'moonraker_port': 7125,
     # SSH 远程连接配置
-    'connection_mode': 'local',  # 'local', 'ssh' 或 'fast-ssh'
+    'connection_mode': 'local',  # 'local' 或 'ssh'
     'ssh_host': '',
     'ssh_port': 22,
     'ssh_user': '',
@@ -165,6 +165,42 @@ def save_config(config):
         return False
 
 config = load_config()
+
+# 旧版 FAST-SSH 配置迁移：统一为 SSH，并复用原有用户与凭据。
+_legacy_fast_mode = config.get('connection_mode') == 'fast-ssh'
+_legacy_fast_keys = any(
+    key in config for key in ('fast_ssh_user', 'fast_ssh_password')
+)
+if _legacy_fast_mode:
+    from ssh_manager import save_credential as _save_legacy_credential
+
+    _legacy_user = (
+        config.get('ssh_user')
+        or os.environ.get('FAST_SSH_USER')
+        or config.get('fast_ssh_user')
+        or 'root'
+    )
+    _legacy_password = (
+        os.environ.get('FAST_SSH_PASSWORD')
+        or config.get('fast_ssh_password')
+        or ''
+    )
+    config['connection_mode'] = 'ssh'
+    config['ssh_user'] = _legacy_user
+    config['sudo_mode'] = 'password'
+    if _legacy_password:
+        _save_legacy_credential('ssh_password', _legacy_password)
+        _save_legacy_credential('sudo_password', _legacy_password)
+if _legacy_fast_mode or _legacy_fast_keys:
+    config.pop('fast_ssh_user', None)
+    config.pop('fast_ssh_password', None)
+    if save_config(config):
+        if _legacy_fast_mode:
+            logger.info('旧版 FAST-SSH 配置已迁移为统一 SSH 模式')
+        else:
+            logger.info('已清理旧版 FAST-SSH 遗留配置字段')
+    else:
+        logger.warning('旧版 FAST-SSH 配置清理后无法写回配置文件')
 # 配置文件权限：仅属主可读写（可能包含 api_token 等敏感配置）
 for _cfg_path in (CONFIG_PATH,):
     try:
@@ -289,29 +325,10 @@ def public_config(raw_config=None):
     source = raw_config or config
     hidden_keys = {
         'api_token',
-        'fast_ssh_password',
         'ssh_password',
         'sudo_password',
     }
     return {k: v for k, v in source.items() if k not in hidden_keys}
-
-# FAST-SSH 模式保障：启动时自动设置凭据
-if config.get('connection_mode') == 'fast-ssh':
-    from ssh_manager import save_credential as _save_cred
-    _fast_user, _fast_pwd = get_fast_ssh_credentials()
-    config['ssh_user'] = _fast_user
-    config['sudo_mode'] = 'password'
-    if _fast_pwd:
-        _save_cred('ssh_password', _fast_pwd)
-        _save_cred('sudo_password', _fast_pwd)
-    else:
-        logger.warning(
-            'FAST-SSH 模式未配置密码（可通过环境变量 FAST_SSH_PASSWORD '
-            '或 data/config.json 的 fast_ssh_password 设置），SSH 连接将不可用'
-        )
-    # 首次使用时只持久化用户名
-    if not config.get('fast_ssh_user'):
-        config['fast_ssh_user'] = _fast_user
 
 # ==================== 工具函数 ====================
 
@@ -322,15 +339,10 @@ def get_klipper_owner(klipper_path=None):
 
     # SSH 模式: 通过远程命令获取 SSH 用户的 home 目录
     if is_ssh_mode():
-        # FAST-SSH: klipper 安装在 /data/klipper，返回 /data 作为家目录
-        if is_fast_ssh_mode() and path_exists('/data/klipper'):
-            try:
-                stat_info = os.stat('/data/klipper')
-                pw = pwd.getpwuid(stat_info.st_uid)
-                return pw.pw_name, '/data'
-            except (KeyError, OSError):
-                pass
         ssh_user = config.get('ssh_user', 'root')
+        # FlyOS-Fast 由 SSH 建连后自动识别，Klipper 约定安装在 /data。
+        if is_fast_remote() and path_exists('/data/klipper'):
+            return ssh_user, '/data'
         try:
             result = run_cmd(f'eval echo ~{ssh_user}', shell=True, capture_output=True, text=True, timeout=5)
             remote_home = result.stdout.strip()
@@ -418,6 +430,8 @@ def expand_klipper_path(path, force_local=False):
         return '/home/fenghua' + path[1:]
     # SSH 模式: 使用 SSH 用户的远程 home 目录
     if is_ssh_mode():
+        if is_fast_remote():
+            return '/data' + path[1:]
         ssh_user = config.get('ssh_user', 'root')
         if ssh_user == 'root':
             remote_home = '/root'

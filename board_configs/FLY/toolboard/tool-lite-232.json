@@ -2,19 +2,19 @@
   "bl_default_flash": "UF2",
   "bl_flash_support": "支持",
   "bl_offset": "256",
-  "boot_pins": null,
+  "boot_pins": "!gpio18",
   "connections": [
-    "USB"
+    "RS232"
   ],
   "connection_profiles": {
-    "usb": {
+    "serial": {
       "bl_offset": "256",
-      "config_symbol": "RPXXXX_USB",
+      "config_symbol": "RPXXXX_SERIAL_UART0_PINS_0_1",
       "flash_mode": "UF2"
     }
   },
   "crystal": "12000000",
-  "default_connection": "USB",
+  "default_connection": "RS232",
   "default_flash": "UF2",
   "firmware_update": {
     "custom_config": "",
@@ -26,10 +26,10 @@
   "flash_modes": [
     "UF2"
   ],
-  "id": "fly-usb-adxl",
+  "id": "tool-lite-232",
   "manufacturer": "FLY",
   "mcu": "rp2040",
-  "name": "FLY-USB-ADXL",
+  "name": "FLY-TOOL-LITE-232",
   "platform": "RP2040",
   "type": "toolboard"
 }

@@ -1,6 +1,6 @@
 # Firmware-Tool
 
-Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板固件。支持本地模式、SSH 远程模式与 FAST-SSH 模式，可在远程设备上直接编译和烧录固件。
+Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板固件。支持本地与 SSH 远程执行，可在远程设备上直接编译和烧录固件。
 
 ## 目录
 
@@ -84,6 +84,13 @@ Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板
 - CAN 方式：CAN 总线重置 -> USB 枚举 -> 烧录
 - 支持 Klipper / Katapult 运行状态的智能判断
 
+#### BL（Bootloader）烧录
+- BL 区域使用独立设备选择，不复用主固件烧录的设备 ID
+- 检测按钮只读扫描 DFU 与 RP2040/RP2350 BOOTSEL，并检查烧录工具是否可用
+- 单个兼容设备自动联动烧录工具；多个兼容设备必须手动选择
+- 烧录前校验 BL 文件格式、MCU 平台、烧录地址、设备类型与工具兼容性
+- `st-flash` 与 OpenOCD 后端接口仍保留，但当前浏览器界面隐藏这两个选项
+
 #### UF2 模式（RP2040 / RP2350）
 - 自动检测 RP2040 BOOT 设备
 - 自动挂载 -> 复制 UF2 -> 同步 -> 卸载
@@ -92,7 +99,7 @@ Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板
 - 下载固件到本地，手动复制到 TF 卡烧录
 
 #### HOST MCU 烧录
-- FAST-SSH / FlyOS 场景使用 fly-flash 烧录 HOST 固件并尝试重启 Klipper
+- SSH 自动识别 FlyOS-Fast 后使用 fly-flash 烧录 HOST 固件并尝试重启 Klipper
 - 普通本地 / SSH 模式将固件复制到 Klipper out 目录，便于后续手动处理
 
 ### BL 固件烧录
@@ -173,10 +180,9 @@ Firmware-Tool 与 Klipper 运行在同一台设备上，直接执行本地命令
 ### SSH 远程模式
 Firmware-Tool 通过 SSH 连接到运行 Klipper 的远程设备，所有编译、烧录、设备检测操作均在远程设备上执行。支持 SSH 密钥认证与密码认证。
 
-SSH 模式会通过远程命令访问 Klipper、Katapult、系统设备与配置文件；部分本地静态资源（如板卡数据库、机型预设、Mainsail 基准配置）仍由 Firmware-Tool 本项目目录提供。
+SSH 模式会通过远程命令访问 Klipper、Katapult、系统设备与配置文件；部分本地静态资源（如板卡数据库、机型预设、Mainsail 基准配置）仍由 Firmware-Tool 本项目目录提供。SSH 建连成功后会自动检查远端是否为 FlyOS-Fast；识别成功时自动使用 `/data/klipper`、`/data` 等路径以及对应的 CAN 和固件烧录逻辑，无需选择单独模式。
 
-### FAST-SSH 模式
-`connection_mode` 设置为 `fast-ssh` 时会使用 FlyOS-Fast 约定的 SSH 凭据，并按 `/data/klipper`、`/data` 等路径习惯处理远程环境。
+旧版本中的 `fast-ssh` 配置会在首次启动时迁移为统一的 `ssh` 模式，并复用原有用户名与已保存凭据。
 
 ## 安装方法
 
@@ -192,8 +198,9 @@ sudo ./install.sh
 安装脚本会自动：
 - 检测系统类型（FlyOS-Fast / 普通 Linux）
 - FlyOS-Fast 环境中要求 root 用户运行，并将项目安装到 `/data/Firmware-Tool`
+- FlyOS-Fast 和普通 Linux 首次安装均默认监听 `0.0.0.0`，安装启动后可通过局域网浏览器访问
 - 安装 Python 依赖（flask, flask-cors, psutil, paramiko, cryptography, requests）
-- 首次安装时创建 `data/config.json` 并生成 `api_token`，已有配置文件时不会覆盖
+- 首次安装时创建 `data/config.json`，已有配置文件时不会覆盖
 - 创建 systemd 服务
 - 在用户确认后启动服务并配置开机自启
 - 设置默认端口（9999）
@@ -247,18 +254,18 @@ python3 src/app.py
 
 安全说明：服务默认启用同源 CSRF 校验（防跨站请求）与 Origin 校验（跨源请求一律 403）；`api_token` 为可选增强，不配置不影响使用。
 
-手动安装并监听局域网地址时，建议先生成并填写 `api_token`。未配置 `api_token` 时，请不要把服务直接暴露到不可信网络。
+手动安装或使用安装脚本监听局域网地址时，建议在不可信网络环境中生成并填写 `api_token`。未配置 `api_token` 时，请勿将服务暴露到公网或不可信网络。
 
 ### 配置项说明
 
 | 配置项 | 说明 |
 |--------|------|
 | `port` | Web 服务端口，默认 `9999` |
-| `bind_host` | Web 服务监听地址，默认 `127.0.0.1`（安装脚本与样例配置一致） |
+| `bind_host` | Web 服务监听地址；安装脚本首次安装默认 `0.0.0.0`，手动安装使用的样例配置默认 `127.0.0.1` |
 | `klipper_path` | Klipper 源码目录，用于编译、读取 `.config`、调用 Klipper 脚本 |
 | `katapult_path` | Katapult 源码目录，用于 Katapult 相关烧录流程 |
 | `moonraker_host` / `moonraker_port` | Moonraker 地址，用于读取配置文件和版本信息 |
-| `connection_mode` | 连接模式，可用值为 `local`、`ssh`、`fast-ssh` |
+| `connection_mode` | 连接模式，可用值为 `local`、`ssh`；SSH 会自动识别 FlyOS-Fast |
 | `ssh_host` / `ssh_port` / `ssh_user` | SSH 远程模式的目标设备信息 |
 | `sudo_mode` | 远程或本地提权方式，可用值为 `password`、`nopasswd` |
 | `allowed_origins` | CORS 允许来源列表 |
@@ -301,8 +308,8 @@ systemd 服务文件由安装脚本写入 `/etc/systemd/system/firmware-tool.ser
 ## 运行时文件
 
 - `data/config.json`：运行时配置文件，首次安装时由安装脚本创建；手动安装时可从 `data/config.example.json` 复制。
-- `data/boards_index.json`：板卡索引，供板卡选择和引脚映射接口使用。
-- `data/mcu_database.json`：MCU 数据库，来自 Klipper Kconfig 解析结果。
+- `data/boards_index.json`：由板卡预设与 `data/boards/` 映射资源生成的索引，仅供板卡工具和引脚映射接口使用，不是固件编译预设源。
+- `data/mcu_database.json`：手动运行 Kconfig 解析器时可生成的离线快照；Web 运行时直接解析当前 Klipper Kconfig，不读取此文件作为配置源。
 - `src/can_options_cache.json`：CAN 通信选项缓存。
 - `data/mainsail_baseline.cfg`：Mainsail 宏基准，用于配置解析器对比。
 - `~/klipper/out/firmware-tool-manifest.json`：最近一次固件编译 manifest。
@@ -310,11 +317,15 @@ systemd 服务文件由安装脚本写入 `/etc/systemd/system/firmware-tool.ser
 
 ## 数据维护
 
-`scripts/build_boards_index.py` 用于从板卡 JSON 与映射文件生成 `data/boards_index.json`。当新增或调整 `board_configs/`、`data/boards/board/` 下的板卡数据后，应同步更新索引文件。
+`board_configs/` 是固件编译预设的唯一数据源。`scripts/build_boards_index.py` 用于从板卡预设与映射文件生成 `data/boards_index.json`；当新增或调整 `board_configs/`、`data/boards/board/` 下的板卡数据后，应同步更新索引文件。
+
+同一板卡的不同连接方式若需要不同的 Bootloader 偏移、Kconfig 通信符号、CAN GPIO/速率或烧录模式，可在板卡 JSON 的 `connection_profiles` 中按 `usb`、`serial`、`can`、`usbcanbridge` 分别声明。预设模式切换连接方式时会联动这些参数；例如 FLY 文档中的 RS232 在 Klipper 中对应 `serial`/UART。
 
 板卡 JSON 数据主要分两类：
 - `board_configs/FLY/mainboard/` 与 `board_configs/FLY/toolboard/`：用于固件编译预设。
 - `data/boards/board/`：用于配置生成器的板卡元数据、图片路径与 Klipper/RRF 引脚映射。
+
+MCU 型号、能力和连接接口在运行时统一从当前 Klipper Kconfig 解析。解析器会根据 `select`、`default`、`depends on` 以及嵌套 `choice/if` 条件计算每个 MCU 的 USB、UART、CAN 与 USB-CAN 桥接兼容性；同一已支持平台新增 MCU 时无需维护独立能力表。全新 MCU 平台仍需在 `KlipperKconfigParser.PLATFORM_DEFINITIONS` 中声明其目录、显示名称和架构符号。
 
 固件文件主要存放在 `board_configs/FLY/BL/` 下，目录名区分 MainBoard、ToolBoard、ExtensionBoard、Screen 等类别。
 
@@ -332,7 +343,7 @@ BL 固件接口还接受 `st-flash` 与 `openocd` 模式，调用本机对应命
 ## 路径访问限制
 
 - 固件下载和主固件烧录只允许访问 Klipper `out` 目录、`/data/klipper/out`、项目 `board_configs/` 和项目 `out/`。
-- BL 固件烧录只允许使用项目 `board_configs/` 下的固件文件。
+- BL 固件烧录只允许使用项目 `board_configs/` 下的固件文件，或经上传接口保存到 `data/bl_uploads/` 的临时 BL 文件。
 - 远程浏览接口限制在 Klipper 目录、Klipper `out` 目录、项目 `board_configs/`、Klipper 所属用户家目录、`/data` 与 `/tmp`。
 - 板卡图片接口只允许读取项目 `data/` 目录下由索引指向的图片文件。
 
@@ -363,7 +374,7 @@ Firmware-Tool/
 │   ├── boards/                   # 板卡元数据与引脚映射
 │   ├── mainsail_baseline.cfg     # Mainsail 宏基准配置
 │   ├── klipper_rules.json        # 旧版 Klipper 编译规则数据（兼容 API）
-│   └── mcu_database.json         # MCU 芯片数据库
+│   └── mcu_database.json         # 手动生成的 MCU 数据库离线快照
 ├── board_configs/                # 主板固件与配置
 │   └── FLY/
 │       ├── mainboard/            # 主板 JSON 配置
@@ -499,7 +510,7 @@ Firmware-Tool/
 
 ### CAN UUID 扫描
 
-`src/canbus_query.py` 由 `/api/system/can-uuid` 在本地模式优先调用；SSH/FAST-SSH 模式会临时上传到远端 `/tmp/firmware-tool-canbus_query.py` 后执行。脚本通过 Python 直接运行，无单独构建步骤。
+`src/canbus_query.py` 由 `/api/system/can-uuid` 在本地模式优先调用；SSH 模式会临时上传到远端 `/tmp/firmware-tool-canbus_query.py` 后执行。脚本通过 Python 直接运行，无单独构建步骤。
 
 MCU 型号、固件版本、CAN 速率、CAN 保留引脚和启动引脚来自 Klipper 节点的 identify 字典。Klipper 节点的连接方式优先由固件常量推断，例如 `CANBUS_BRIDGE=1` 会标记为 USB桥接CAN，`CANBUS_FREQUENCY` 或 `RESERVE_PINS_CAN` 会标记为 CANBUS。Katapult 节点可通过 `flashtool.py -s` 读取 MCU 型号、Katapult 版本、协议版本、块大小和应用启动地址，并由应用启动地址计算 BL 偏移。旧 Katapult 固件不直接上报 CAN RX/TX、LED 引脚或启动引脚；这些字段仅在命中板卡数据库时标记为数据库推断。固件没有足够信息时，连接方式才会结合板卡库候选兜底归纳为 USB桥接CAN、CANBUS、USB 或串口/UART。
 
