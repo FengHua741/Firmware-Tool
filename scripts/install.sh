@@ -285,12 +285,25 @@ else
     $PIP_CMD install $PIP_INSTALL_OPTS flask flask-cors flask-sock psutil paramiko cryptography requests 2>&1 | tail -5
 fi
 
+# flask-sock 不在 apt 源中只能靠 pip；Debian 12+/Ubuntu 24.04+ 的 PEP 668
+# 保护会拒绝 root 的普通 pip 安装，检测缺失后改用 --break-system-packages 重试。
+if ! $PYTHON3_BIN -c "import flask_sock" >/dev/null 2>&1; then
+    echo "flask-sock 缺失，重试安装（--break-system-packages）..."
+    $PIP_CMD install $PIP_INSTALL_OPTS --break-system-packages "flask-sock>=0.7.0,<1.0.0" 2>&1 | tail -3 || \
+        $PIP_CMD install $PIP_INSTALL_OPTS "flask-sock>=0.7.0,<1.0.0" 2>&1 | tail -3
+fi
+
 # 验证关键包是否可导入
 echo "验证依赖安装..."
 $PYTHON3_BIN -c "import flask; import flask_cors; import psutil; import paramiko; import requests; print('依赖验证通过')" || {
     echo -e "${RED}依赖验证失败！请检查 pip 安装日志${NC}"
     exit 1
 }
+
+# WebSocket 为增强功能：flask-sock 缺失仅提示（前端会自动重连），不中止安装
+if ! $PYTHON3_BIN -c "import flask_sock" >/dev/null 2>&1; then
+    echo -e "${YELLOW}警告: flask-sock 未安装，WebSocket 实时推送不可用${NC}"
+fi
 
 # 设置目录权限
 echo "设置目录权限..."
