@@ -58,9 +58,11 @@ Klipper 固件编译与烧录工具，提供 Web 界面管理 3D 打印机主板
   - LPC176x 系列
   - HC32F460
   - ATSAM 系列（SAM3X8E/SAM4E/SAME70 等）
+  - GD32 系列（GD32F502 等）
   - AVR 系列（ATmega2560 等）
 - MCU 型号、通信接口、晶振频率与 Bootloader 偏移从 Klipper Kconfig 实时解析
 - 通信接口支持：USB / UART / Serial / CAN / USB-CAN 桥接
+- USB 序列号选项（仅 USB / USB-CAN 桥接固件显示）：`[ ] USB serial number from CHIPID` 默认使用芯片 ID（CHIPID），取消勾选后可填写 `(main) USB serial number` 自定义序列号
 - 启动引脚（CONFIG_INITIAL_PINS）配置
 - 晶振频率与 Bootloader 偏移量设置
 
@@ -167,6 +169,7 @@ Python 依赖来自 `requirements.txt`：
 ```text
 flask
 flask-cors
+flask-sock
 psutil
 paramiko
 cryptography
@@ -233,6 +236,8 @@ cd Firmware-Tool
 
 pip install -r requirements.txt
 ```
+
+Ubuntu 24.04+ / Debian 12+ 等启用 PEP 668 保护的系统需在该命令追加 `--break-system-packages`；或直接使用方法一的安装脚本（已内置依赖安装与校验兜底）。
 
 复制并编辑 `data/config.json` 基础配置：
 ```bash
@@ -336,6 +341,7 @@ systemd 服务文件由安装脚本写入 `/etc/systemd/system/firmware-tool.ser
 - `src/can_options_cache.json`：CAN 通信选项缓存。
 - `data/mainsail_baseline.cfg`：Mainsail 宏基准，用于配置解析器对比。
 - `~/klipper/out/firmware-tool-manifest.json`：最近一次固件编译 manifest。
+- `/tmp/fwtool_cache/kconfig/`：SSH 模式下按远端 Klipper 路径哈希分目录缓存的 Kconfig 文件与 `.manifest.json` 签名清单，供 MCU/通信选项解析使用。
 - `/tmp/firmware-tool.log`：后端运行日志文件；无权限写入时仅输出到控制台或 systemd journal。
 
 ## 数据维护
@@ -350,13 +356,15 @@ systemd 服务文件由安装脚本写入 `/etc/systemd/system/firmware-tool.ser
 
 MCU 型号、能力和连接接口在运行时统一从当前 Klipper Kconfig 解析。解析器会根据 `select`、`default`、`depends on` 以及嵌套 `choice/if` 条件计算每个 MCU 的 USB、UART、CAN 与 USB-CAN 桥接兼容性；同一已支持平台新增 MCU 时无需维护独立能力表。全新 MCU 平台仍需在 `KlipperKconfigParser.PLATFORM_DEFINITIONS` 中声明其目录、显示名称和架构符号。
 
+Kconfig 解析源与编译目标保持一致：本地模式直接解析本机 Klipper 目录；SSH 模式由 `src/kconfig_source.py` 将远端 Klipper 的 `src/Kconfig` 与 `PLATFORM_DEFINITIONS` 中各平台的 Kconfig 同步到本地缓存目录后再解析，因此页面展示的 MCU、晶振、Bootloader 偏移与通信选项始终与远端实际可编译参数一致（远端能编译什么就显示什么）。同步通过远端文件 mtime/size 签名比对触发，15 秒内复用缓存；同步失败时依次降级为上一次缓存或本地路径。远端 Klipper 缺少某平台目录时该平台不会出现，属预期行为。
+
 固件文件主要存放在 `board_configs/FLY/BL/` 下，目录名区分 MainBoard、ToolBoard、ExtensionBoard、Screen 等类别。
 
 ## 烧录模式速查
 
 | 模式 | 主要用途 | 关键依赖 |
 |------|----------|----------|
-| `DFU` | STM32/APM32 等 DFU 设备烧录 | `dfu-util` 与正确 DFU 地址 |
+| `DFU` | STM32/GD32/APM32 等 DFU 设备烧录 | `dfu-util` 与正确 DFU 地址 |
 | `KAT` / `CAN` | Katapult/CanBoot 设备通过 USB 或 CAN 烧录 | Katapult `flashtool.py` 或 Klipper `flash_can.py` |
 | `UF2` | RP2040/RP2350 BOOTSEL 设备烧录 | Klipper `lib/rp2040_flash/rp2040_flash` |
 | `TF` | 生成可下载固件后由用户复制到 TF 卡 | 浏览器下载固件文件 |
@@ -388,6 +396,7 @@ Firmware-Tool/
 │   ├── ssh_manager.py            # SSH 远程执行管理
 │   ├── board_config_loader.py    # 主板配置加载器 - 三级结构解析与标准化
 │   ├── kconfig_can_parser.py     # Klipper Kconfig CAN 解析
+│   ├── kconfig_source.py         # Kconfig 来源解析 - SSH 模式同步远端 Kconfig 到本地缓存
 │   └── klipper_kconfig_parser.py # Klipper Kconfig 全平台解析
 ├── data/                         # 数据文件
 │   ├── config.example.json       # 配置文件样例

@@ -2,6 +2,7 @@
 
 let compileMcuDatabase = {};  // MCU 数据库
 let currentCompileMcu = null; // 当前选中的 MCU
+let _usbSerialOptions = null; // 后端提供的 USB 序列号配置（USB_SERIAL_NUMBER_CHIPID / USB_SERIAL_NUMBER）
 let compiledFirmwarePath = null; // 编译成功的固件路径
 let compiledFirmwareManifest = null; // 编译成功的固件元数据
 let _lastBlFiles = [];
@@ -376,15 +377,9 @@ async function onCompileModeChange() {
         _applyCompilePresetView();
         currentCompileMcu = null;
         document.getElementById('compileMcuDetails').style.display = 'none';
+        // 平台列表加载完成后会自动选中默认平台，onCompileMcuPlatformChange
+        // 内部已完成首个型号的联动与详细参数展开。
         await loadCompileMcuPlatforms();
-
-        // 默认平台加载完成后，浏览器会自动选中首个 MCU。此时必须执行与
-        // 手动选择型号相同的联动，才能展开并填充 MCU 详细参数。
-        const currentMode = document.querySelector('input[name="compileMode"]:checked')?.value;
-        const modelSelect = document.getElementById('compileMcuModel');
-        if (currentMode === 'custom' && modelSelect?.value) {
-            await onCompileMcuModelChange();
-        }
         return;
     }
 
@@ -408,8 +403,10 @@ function loadCompileMcuPlatforms(autoDefault = true) {
     return Promise.resolve();
 }
 
-// MCU 平台选择变化
-async function onCompileMcuPlatformChange() {
+// MCU 平台选择变化。autoSelectModel 为 true 时（手动切换平台/自定义模式默认
+// 平台），型号列表加载后自动展开首个型号的详细参数；由配置回填流程调用时
+// 传 false，避免先展开首项再被目标型号覆盖的中间态。
+async function onCompileMcuPlatformChange(autoSelectModel = true) {
     const requestId = ++_compileMcuPlatformRequestId;
     const platform = document.getElementById('compileMcuPlatform').value;
     const modelSelect = document.getElementById('compileMcuModel');
@@ -432,6 +429,12 @@ async function onCompileMcuPlatformChange() {
         if (data.success) {
             modelSelect.innerHTML = data.mcus.map(mcu => `<option value="${escapeHtml(mcu.id)}">${escapeHtml(mcu.name)}</option>`).join('');
             modelSelect.disabled = false;
+
+            // 浏览器会自动选中首个型号，此时执行与手动选择型号相同的联动，
+            // 否则详情区（晶振、通信方式等）会一直保持隐藏。
+            if (autoSelectModel && modelSelect.value) {
+                await onCompileMcuModelChange();
+            }
         }
     } catch (error) {
         if (requestId !== _compileMcuPlatformRequestId) return;
@@ -546,6 +549,11 @@ async function displayCompileMcuDetails(data) {
     if (window._preserveFlashMode) {
         window._preserveFlashMode = false;
     }
+
+    // USB 序列号控件：按当前 Kconfig 默认值与 MCU 的 CHIPID 支持情况初始化
+    _usbSerialOptions = data.usb_serial || _usbSerialOptions;
+    _resetUsbSerialControls(data.mcu ? data.mcu.have_chipid : undefined);
+    _syncCompileUsbSerialVisibility();
 
     document.getElementById('compileMcuDetails').style.display = 'block';
     _applyCompilePresetView();
@@ -690,6 +698,7 @@ function onCompileConnectionChange() {
     const commType = document.getElementById('compileConnection').value;
     const canBridgeOptions = document.getElementById('compileCanBridgeOptions');
     if (canBridgeOptions) canBridgeOptions.style.display = 'none';
+    _syncCompileUsbSerialVisibility();
 
     // 移除旧的子选项和引脚选项
     let subContainer = document.getElementById('compileConnectionSub');
@@ -755,6 +764,48 @@ function onCompileConnectionChange() {
     _renderCommunicationSubchoices();
     const selectedDev = _lastDetectedCanDevicesByUuid[String(document.getElementById('flashDeviceId')?.value || '').toLowerCase()];
     _renderFlashDeviceCompare(selectedDev || null);
+}
+
+// ==================== USB 序列号（Kconfig: USB serial number from CHIPID / USB serial number） ====================
+function _shouldShowUsbSerialGroup() {
+    if (!_usbSerialOptions || !_usbSerialOptions.available) return false;
+    const commType = document.getElementById('compileConnection')?.value || '';
+    if (commType !== 'usb' && commType !== 'usbcanbridge') return false;
+    const presetWithBoard = _isCompilePresetMode() && Boolean(window._selectedCompileBoardConfig);
+    return !presetWithBoard || _compilePresetAdvancedExpanded;
+}
+
+function _syncCompileUsbSerialVisibility() {
+    const group = document.getElementById('compileUsbSerialGroup');
+    if (!group) return;
+    const show = _shouldShowUsbSerialGroup();
+    group.dataset.mcuDisplay = show ? 'flex' : 'none';
+    group.style.display = show ? 'flex' : 'none';
+}
+
+function _applyUsbSerialChipidState() {
+    const chipidEl = document.getElementById('compileUsbSerialChipid');
+    const numberEl = document.getElementById('compileUsbSerialNumber');
+    if (!chipidEl || !numberEl) return;
+    // Kconfig: string "USB serial number" if !USB_SERIAL_NUMBER_CHIPID
+    numberEl.disabled = chipidEl.checked;
+}
+
+function onCompileUsbSerialChipidChange() {
+    _applyUsbSerialChipidState();
+}
+
+// 按 Kconfig 默认值与 MCU 的 CHIPID 支持情况重置控件
+function _resetUsbSerialControls(haveChipid) {
+    const chipidEl = document.getElementById('compileUsbSerialChipid');
+    const numberEl = document.getElementById('compileUsbSerialNumber');
+    if (!chipidEl || !numberEl) return;
+    const supported = haveChipid !== false;
+    chipidEl.disabled = !supported;
+    const chipidDefault = !_usbSerialOptions || _usbSerialOptions.chipid_default !== false;
+    chipidEl.checked = supported && chipidDefault;
+    numberEl.value = (_usbSerialOptions && _usbSerialOptions.number_default) || '';
+    _applyUsbSerialChipidState();
 }
 
 function _insertAfterCompileConnectionOptions(connGroup, container) {
@@ -1133,10 +1184,10 @@ async function _selectCompileMcuFromDetected(dev, changes) {
     }
     if (platformSelect.value !== match.platform) {
         platformSelect.value = match.platform;
-        await onCompileMcuPlatformChange();
+        await onCompileMcuPlatformChange(false);
         changes.push(`MCU平台 ${match.platform}`);
     } else if (![...modelSelect.options].some(opt => opt.value === match.mcuId)) {
-        await onCompileMcuPlatformChange();
+        await onCompileMcuPlatformChange(false);
     }
     if (match.detected_details) {
         _ensureCompileOption(
@@ -1682,8 +1733,8 @@ async function onCompilePresetModelChange() {
         return;
     }
 
-    // 加载该平台的MCU列表
-    await onCompileMcuPlatformChange();
+    // 加载该平台的MCU列表（型号由预设声明指定，此处不自动展开首项）
+    await onCompileMcuPlatformChange(false);
 
     // 选择预设对应的MCU型号
     const mcuModelSelect = document.getElementById('compileMcuModel');
@@ -1890,7 +1941,7 @@ async function loadCurrentCompileConfig() {
         if (!_selectCompileOption(platformSelect, platformValue)) {
             throw new Error(`当前 .config 的平台 ${platformValue || ''} 不在 MCU 数据库中`);
         }
-        await onCompileMcuPlatformChange();
+        await onCompileMcuPlatformChange(false);
 
         const modelSelect = document.getElementById('compileMcuModel');
         if (!_selectCompileOption(modelSelect, current.mcu)) {
@@ -1911,6 +1962,15 @@ async function loadCurrentCompileConfig() {
 
         const startupPin = document.getElementById('compileStartupPin');
         if (startupPin) startupPin.value = current.startup_pin || '';
+
+        const usbChipidEl = document.getElementById('compileUsbSerialChipid');
+        const usbNumberEl = document.getElementById('compileUsbSerialNumber');
+        if (usbChipidEl && !usbChipidEl.disabled) {
+            // USB 序列号默认使用芯片 ID（默认勾选）
+            usbChipidEl.checked = true;
+        }
+        if (usbNumberEl) usbNumberEl.value = current.usb_serial_number || '';
+        _applyUsbSerialChipidState();
 
         let commType = current.comm_type || '';
         if (!commType && current.comm_config_symbol) {
@@ -2048,6 +2108,13 @@ async function compileFirmware() {
         }
         compileParams.rp2040_can_rx_gpio = String(rx);
         compileParams.rp2040_can_tx_gpio = String(tx);
+    }
+
+    if (commType === 'usb' || commType === 'usbcanbridge') {
+        const usbChipidEl = document.getElementById('compileUsbSerialChipid');
+        const usbNumberEl = document.getElementById('compileUsbSerialNumber');
+        compileParams.usb_serial_chipid = !!(usbChipidEl && usbChipidEl.checked);
+        compileParams.usb_serial_number = usbNumberEl ? usbNumberEl.value.trim() : '';
     }
 
     // 显示编译中
@@ -2293,6 +2360,13 @@ async function refreshDeviceIds() {
                     select.selectedIndex = i;
                     break;
                 }
+            }
+        }
+        // 只有一个可选设备时自动选中（例如单板 DFU/KAT 场景）
+        if (!select.value) {
+            const selectableOptions = [...select.options].filter(opt => opt.value && !opt.disabled);
+            if (selectableOptions.length === 1) {
+                select.value = selectableOptions[0].value;
             }
         }
         const selectedDev = _lastDetectedCanDevicesByUuid[String(select.value || '').toLowerCase()];
@@ -3443,14 +3517,18 @@ async function flashBootloader() {
 
 // 重置编译表单
 async function resetCompileForm() {
+    // 先清空预设三级下拉，否则 onCompileModeChange 会误触发上次选中预设的
+    // 重新加载，异步回填污染重置结果（型号/详情区残留）。
     document.querySelector('input[name="compileMode"][value="preset"]').checked = true;
-    onCompileModeChange();
-
     document.getElementById('compilePresetManufacturer').value = '';
     document.getElementById('compilePresetType').innerHTML = '<option value="">-- 先选择厂家 --</option>';
     document.getElementById('compilePresetType').disabled = true;
     document.getElementById('compilePresetModel').innerHTML = '<option value="">-- 先选择类型 --</option>';
     document.getElementById('compilePresetModel').disabled = true;
+    await onCompileModeChange();
+
+    // 作废在途的平台/型号加载请求，避免过期响应污染重置后的界面
+    _compileMcuPlatformRequestId++;
 
     document.getElementById('compileMcuPlatform').value = '';
     document.getElementById('compileMcuModel').innerHTML = '<option value="">-- 先选择平台 --</option>';
@@ -3476,6 +3554,20 @@ async function resetCompileForm() {
     // 清理启动引脚
     const startupPin = document.getElementById('compileStartupPin');
     if (startupPin) startupPin.value = '';
+
+    // 清理 USB 序列号控件
+    _usbSerialOptions = null;
+    const usbChipidEl = document.getElementById('compileUsbSerialChipid');
+    const usbNumberEl = document.getElementById('compileUsbSerialNumber');
+    if (usbChipidEl) {
+        usbChipidEl.checked = false;
+        usbChipidEl.disabled = false;
+    }
+    if (usbNumberEl) {
+        usbNumberEl.value = '';
+        usbNumberEl.disabled = false;
+    }
+    _syncCompileUsbSerialVisibility();
 
     compiledFirmwarePath = null;
     compiledFirmwareManifest = null;
@@ -3695,7 +3787,7 @@ async function importCompileConfig(event) {
             const platformSelect = document.getElementById('compileMcuPlatform');
             const platformValue = current.platform || current.platform_key;
             if (platformValue && _selectCompileOption(platformSelect, platformValue)) {
-                await onCompileMcuPlatformChange();
+                await onCompileMcuPlatformChange(false);
                 const modelSelect = document.getElementById('compileMcuModel');
                 if (current.mcu && _selectCompileOption(modelSelect, current.mcu)) {
                     await onCompileMcuModelChange();
@@ -3709,9 +3801,25 @@ async function importCompileConfig(event) {
         const startupPin = document.getElementById('compileStartupPin');
         if (startupPin) startupPin.value = current.startup_pin || '';
 
-        if (current.comm_type) {
+        const usbChipidEl = document.getElementById('compileUsbSerialChipid');
+        const usbNumberEl = document.getElementById('compileUsbSerialNumber');
+        if (usbChipidEl && !usbChipidEl.disabled) {
+            // USB 序列号默认使用芯片 ID（默认勾选）
+            usbChipidEl.checked = true;
+        }
+        if (usbNumberEl) usbNumberEl.value = current.usb_serial_number || '';
+        _applyUsbSerialChipidState();
+
+        let commType = current.comm_type || '';
+        if (!commType && current.comm_config_symbol) {
+            const matched = _commAllOptions.find(opt =>
+                _normalizeCompileSymbol(opt.config_symbol) === _normalizeCompileSymbol(current.comm_config_symbol)
+            );
+            commType = matched ? matched.comm_type : '';
+        }
+        if (commType) {
             const connSelect = document.getElementById('compileConnection');
-            if (_selectCompileOption(connSelect, current.comm_type)) {
+            if (_selectCompileOption(connSelect, commType)) {
                 onCompileConnectionChange();
                 if (current.comm_config_symbol) {
                     _selectCompileSymbol(document.getElementById('compileConnectionDetail'), current.comm_config_symbol);
@@ -3725,11 +3833,11 @@ async function importCompileConfig(event) {
         if (current.canbus_frequency) {
             _setSelectedCanBitrate(current.canbus_frequency);
         }
-        if (current.rp2040_can_rx_gpio) {
+        if (current.rp2040_can_rx_gpio !== undefined) {
             const rxInput = document.getElementById('compileRp2040CanRx');
             if (rxInput) rxInput.value = current.rp2040_can_rx_gpio;
         }
-        if (current.rp2040_can_tx_gpio) {
+        if (current.rp2040_can_tx_gpio !== undefined) {
             const txInput = document.getElementById('compileRp2040CanTx');
             if (txInput) txInput.value = current.rp2040_can_tx_gpio;
         }

@@ -9,18 +9,21 @@ import threading
 from shared import config, logger, expand_klipper_path, safe_error
 from klipper_kconfig_parser import KlipperKconfigParser
 from kconfig_can_parser import parse_can_options
+from kconfig_source import resolve_kconfig_klipper_path
 
 klipper_bp = Blueprint('klipper', __name__, url_prefix='/api/klipper')
 
 # 初始化解析器
 klipper_parser = None
 klipper_mcu_db = {}
+_usb_serial_options = {'available': False, 'chipid_default': True, 'number_default': ''}
 _mcu_db_signature = None
 _mcu_db_lock = threading.Lock()
 
 
-def _local_klipper_path():
-    return expand_klipper_path(config.get('klipper_path', '~/klipper'), force_local=True)
+def _kconfig_klipper_path(force=False):
+    """用于 Kconfig 解析的 Klipper 目录（SSH 模式下为远端 Kconfig 的本地同步缓存）。"""
+    return resolve_kconfig_klipper_path(config.get('klipper_path', '~/klipper'), force=force)
 
 
 def _kconfig_signature(klipper_path):
@@ -42,15 +45,16 @@ def _kconfig_signature(klipper_path):
 
 def init_klipper_mcu_db(force=False):
     """初始化 Klipper MCU 数据库"""
-    global klipper_parser, klipper_mcu_db, _mcu_db_signature
+    global klipper_parser, klipper_mcu_db, _mcu_db_signature, _usb_serial_options
     with _mcu_db_lock:
         try:
-            klipper_path = _local_klipper_path()
+            klipper_path = _kconfig_klipper_path(force)
             signature = _kconfig_signature(klipper_path)
             if not force and klipper_mcu_db and signature == _mcu_db_signature:
                 return
             klipper_parser = KlipperKconfigParser(klipper_path)
             klipper_mcu_db = klipper_parser.parse_all_platforms()
+            _usb_serial_options = klipper_parser.parse_usb_serial_options()
             _mcu_db_signature = signature
             logger.info(f"✓ Klipper MCU 数据库已加载: {len(klipper_mcu_db)} 个平台")
             for platform, data in klipper_mcu_db.items():
@@ -72,7 +76,7 @@ def init_can_options(force=False):
     """初始化通信选项：从当前 Klipper Kconfig 解析，Kconfig 变化时自动刷新。"""
     global _can_options_data, _can_options_signature
     try:
-        klipper_path = _local_klipper_path()
+        klipper_path = _kconfig_klipper_path(force)
         signature = _kconfig_signature(klipper_path)
         if not force and _can_options_data and signature == _can_options_signature:
             return
@@ -154,7 +158,8 @@ def get_klipper_mcus(platform):
             'name': mcu_info['name'],
             'crystals': mcu_info.get('crystals', []),
             'bl_offsets': mcu_info.get('bl_offsets', []),
-            'connections': mcu_info.get('connections', [])
+            'connections': mcu_info.get('connections', []),
+            'have_chipid': 'HAVE_CHIPID' in (mcu_info.get('capabilities') or []),
         })
 
     return jsonify({
@@ -164,7 +169,8 @@ def get_klipper_mcus(platform):
         'arch_config': data.get('arch_config', ''),
         'mcus': mcus,
         'flash_modes': data.get('flash_modes', []),
-        'connections': data.get('connections', [])
+        'connections': data.get('connections', []),
+        'usb_serial': _usb_serial_options,
     })
 
 
@@ -177,14 +183,17 @@ def get_klipper_mcu_info(mcu_id):
     for platform, data in klipper_mcu_db.items():
         if mcu_id in data['mcus']:
             mcu = data['mcus'][mcu_id]
+            mcu_payload = dict(mcu)
+            mcu_payload['have_chipid'] = 'HAVE_CHIPID' in (mcu.get('capabilities') or [])
             return jsonify({
                 'success': True,
                 'platform': platform,
                 'platform_key': data.get('platform'),
                 'arch_config': data.get('arch_config', ''),
-                'mcu': mcu,
+                'mcu': mcu_payload,
                 'flash_modes': data.get('flash_modes', []),
-                'connections': data.get('connections', [])
+                'connections': data.get('connections', []),
+                'usb_serial': _usb_serial_options,
             })
 
     return jsonify({

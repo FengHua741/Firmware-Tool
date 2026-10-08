@@ -31,6 +31,7 @@ from shared import (
 from routes_system import _scan_can_uuids, _is_valid_can_iface
 from klipper_kconfig_parser import KlipperKconfigParser
 from kconfig_can_parser import parse_can_options
+from kconfig_source import resolve_kconfig_klipper_path
 
 firmware_bp = Blueprint('firmware', __name__)
 MANIFEST_FILENAME = 'firmware-tool-manifest.json'
@@ -241,7 +242,7 @@ def _dfu_device_filter(device):
         if not sep:
             continue
         value = urllib.parse.unquote(encoded)
-        if key == 'serial' and value:
+        if key == 'serial' and value and re.fullmatch(r'[\x20-\x7e]+', value):
             filters.append(f'-S {shlex.quote(value)}')
         elif key == 'path' and value:
             filters.append(f'-p {shlex.quote(value)}')
@@ -656,6 +657,10 @@ def _resolve_current_config_params(kconfig_klipper_path, config_values):
         'mcu_config_symbol': mcu.get('config_symbol') or mcu.get('config_name', ''),
         'startup_pin': config_values.get('INITIAL_PINS', ''),
     }
+
+    # USB 序列号（Klipper menuconfig: USB serial number from CHIPID / USB serial number）
+    params['usb_serial_chipid'] = _config_truthy(config_values, 'USB_SERIAL_NUMBER_CHIPID')
+    params['usb_serial_number'] = str(config_values.get('USB_SERIAL_NUMBER', '') or '')
 
     crystal_option = _first_enabled_option(mcu.get('crystal_options', []), config_values)
     if crystal_option:
@@ -1319,7 +1324,8 @@ def _build_klipper_config_lines(
         kconfig_klipper_path, mcu_arch, processor, crystal, bootloader_offset,
         communication, comm_type, comm_config_symbol, bridge_can_config,
         comm_extra_symbols,
-        rp2040_can_rx_gpio, rp2040_can_tx_gpio, canbus_frequency):
+        rp2040_can_rx_gpio, rp2040_can_tx_gpio, canbus_frequency,
+        usb_serial_chipid=False, usb_serial_number=''):
     """从当前 Klipper Kconfig 解析结果生成 .config 行。"""
     parser = KlipperKconfigParser(kconfig_klipper_path)
     parser.parse_all_platforms()
@@ -1391,6 +1397,20 @@ def _build_klipper_config_lines(
         if bridge_option:
             config_lines.append(_config_line(bridge_option.get('config')))
             logs.append(f"USB-CAN桥接CAN引脚: {bridge_option.get('display')}")
+
+    # USB 序列号：仅 USB / USB-CAN 桥接固件生效，对应 menuconfig 的
+    # [ ] USB serial number from CHIPID 与 (main) USB serial number
+    if resolved_comm_type in ('usb', 'usbcanbridge'):
+        if _truthy(usb_serial_chipid):
+            config_lines.append('CONFIG_USB_SERIAL_NUMBER_CHIPID=y')
+            logs.append('USB序列号: 使用芯片ID (CHIPID)')
+        else:
+            config_lines.append('# CONFIG_USB_SERIAL_NUMBER_CHIPID is not set')
+            serial_number = str(usb_serial_number or '').strip()
+            if serial_number:
+                config_lines.append(
+                    f'CONFIG_USB_SERIAL_NUMBER="{_kconfig_string(serial_number)}"')
+                logs.append(f'USB序列号: {serial_number}')
 
     bridge_symbol = _normalize_config_symbol(bridge_can_config)
     extra_symbols, extra_logs = _resolve_communication_extra_symbols(
@@ -1579,7 +1599,7 @@ def get_current_firmware_config():
     try:
         raw_klipper_path = request.args.get('klipper_path') or config.get('klipper_path', '~/klipper')
         klipper_path = expand_klipper_path(raw_klipper_path)
-        kconfig_klipper_path = expand_klipper_path(raw_klipper_path, force_local=True)
+        kconfig_klipper_path = resolve_kconfig_klipper_path(raw_klipper_path)
         config_path = os.path.join(klipper_path, '.config')
         content = _read_text_file(config_path)
         if not content.strip():
@@ -1663,11 +1683,42 @@ def install_compile_dependencies():
 
 
 # ==================== 固件编译 API ====================
+
+def _restore_klipper_ownership(klipper_path):
+    """将 out/ 与 .config 属主恢复为 Klipper 目录属主（仅本地模式）
+
+    本地模式下服务以 root 运行，编译失败/超时/异常中断时产物会残留
+    root 属主，普通用户手动清理 out/ 或编辑 .config 时需要 sudo。
+    SSH 模式远端 Klipper 由 root 管理，无需处理。
+    """
+    if not klipper_path or is_ssh_mode():
+        return
+    try:
+        import pwd as _pwd, grp as _grp
+        klipper_stat = os.stat(klipper_path)
+        owner_name = _pwd.getpwuid(klipper_stat.st_uid).pw_name
+        group_name = _grp.getgrgid(klipper_stat.st_gid).gr_name
+    except (KeyError, OSError):
+        return
+    for target in (os.path.join(klipper_path, '.config'), os.path.join(klipper_path, 'out')):
+        if not os.path.exists(target):
+            continue
+        try:
+            if os.path.isdir(target):
+                for root_dir, dirs, files in os.walk(target):
+                    for name in dirs + files:
+                        shutil.chown(os.path.join(root_dir, name), user=owner_name, group=group_name)
+            shutil.chown(target, user=owner_name, group=group_name)
+        except (OSError, LookupError):
+            continue
+
+
 @firmware_bp.route('/api/firmware/compile', methods=['POST'])
 def compile_firmware():
     """编译Klipper固件 - 支持预设配置和自定义MCU（SSE 流式输出）"""
     req_data = request.get_json(silent=True) or {}  # 在请求上下文中提前捕获
     def _compile_stream():
+     klipper_path = None  # 提前初始化，供 finally 中恢复文件属主使用
      if not _compile_lock.acquire(blocking=False):
         yield f'data: {json.dumps({"error": "已有固件编译任务正在执行，请稍后再试"})}\n\n'
         return
@@ -1677,7 +1728,7 @@ def compile_firmware():
 
         raw_klipper_path = data.get('klipper_path', config.get('klipper_path', '~/klipper'))
         klipper_path = expand_klipper_path(raw_klipper_path)
-        kconfig_klipper_path = expand_klipper_path(raw_klipper_path, force_local=True)
+        kconfig_klipper_path = resolve_kconfig_klipper_path(raw_klipper_path)
 
         config_data = data.get('config')
         board_config_data = data.get('board_config') if isinstance(data.get('board_config'), dict) else None
@@ -1691,6 +1742,8 @@ def compile_firmware():
             rp2040_can_rx_gpio = str(config_data.get('can_gpio', {}).get('rx', '4'))
             rp2040_can_tx_gpio = str(config_data.get('can_gpio', {}).get('tx', '5'))
             canbus_frequency = config_data.get('canbus_frequency', config_data.get('can_bitrate', DEFAULT_CANBUS_FREQUENCY))
+            usb_serial_chipid = _truthy(config_data.get('usb_serial_chipid'))
+            usb_serial_number = str(config_data.get('usb_serial_number') or '')
             comm_type = ''
             comm_config_symbol = ''
             bridge_can_config = ''
@@ -1709,6 +1762,8 @@ def compile_firmware():
             rp2040_can_rx_gpio = data.get('rp2040_can_rx_gpio', '4')
             rp2040_can_tx_gpio = data.get('rp2040_can_tx_gpio', '5')
             canbus_frequency = data.get('canbus_frequency', DEFAULT_CANBUS_FREQUENCY)
+            usb_serial_chipid = _truthy(data.get('usb_serial_chipid'))
+            usb_serial_number = str(data.get('usb_serial_number') or '')
 
             if not str(comm_type or '').strip():
                 yield f'data: {json.dumps({"error": "请选择通信方式"})}\n\n'
@@ -1726,7 +1781,8 @@ def compile_firmware():
                 kconfig_klipper_path, mcu_arch, processor, crystal, bootloader_offset,
                 communication, comm_type, comm_config_symbol, bridge_can_config,
                 comm_extra_symbols,
-                rp2040_can_rx_gpio, rp2040_can_tx_gpio, canbus_frequency
+                rp2040_can_rx_gpio, rp2040_can_tx_gpio, canbus_frequency,
+                usb_serial_chipid, usb_serial_number
             )
         except ValueError as e:
             yield f'data: {json.dumps({"error": safe_error(e)})}\n\n'
@@ -1828,27 +1884,9 @@ def compile_firmware():
                         config_file = os.path.join(klipper_path, '.config')
                         run_cmd(f'chown {shlex.quote(owner_name)} {shlex.quote(config_file)}', shell=True, capture_output=True, timeout=5)
                 else:
-                    import pwd as _pwd, grp as _grp
                     os.chmod(firmware_path, 0o664)
                     os.chmod(out_dir, 0o755)
-                    try:
-                        klipper_stat = os.stat(klipper_path)
-                        owner_name = _pwd.getpwuid(klipper_stat.st_uid).pw_name
-                        group_name = _grp.getgrgid(klipper_stat.st_gid).gr_name
-                    except (KeyError, OSError):
-                        owner_name = None
-                        group_name = None
-                    if owner_name and group_name:
-                        shutil.chown(firmware_path, user=owner_name, group=group_name)
-                        shutil.chown(out_dir, user=owner_name, group=group_name)
-                        for root_dir, dirs, files in os.walk(out_dir):
-                            for d in dirs:
-                                shutil.chown(os.path.join(root_dir, d), user=owner_name, group=group_name)
-                            for f in files:
-                                shutil.chown(os.path.join(root_dir, f), user=owner_name, group=group_name)
-                        config_file = os.path.join(klipper_path, '.config')
-                        if os.path.exists(config_file):
-                            shutil.chown(config_file, user=owner_name, group=group_name)
+                    _restore_klipper_ownership(klipper_path)
             except Exception as e:
                 logger.warning(f"修改文件权限失败: {e}")
 
@@ -1896,6 +1934,8 @@ def compile_firmware():
      except Exception as e:
             yield f'data: {json.dumps({"error": safe_error(e)})}\n\n'
      finally:
+            # 失败/超时/异常中断时 out/ 与 .config 可能残留 root 属主，统一恢复
+            _restore_klipper_ownership(klipper_path)
             _compile_lock.release()
     return Response(_compile_stream(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
@@ -1962,6 +2002,7 @@ def detect_devices():
         devices = []
 
         if is_ssh_mode():
+            dfu_lsusb_pattern = '|'.join(DFU_KNOWN_DEVICES)
             cmd = (
                 "echo '===BY_ID==='; ls /dev/serial/by-id/* 2>/dev/null; "
                 "echo '===ACM==='; ls /dev/ttyACM* 2>/dev/null; "
@@ -1969,7 +2010,7 @@ def detect_devices():
                 "echo '===DFU==='; sudo dfu-util -l 2>/dev/null; "
                 "echo '===LSBLK==='; lsblk -o NAME,MODEL 2>/dev/null | grep -i 'RP2'; "
                 "echo '===LSUSB_RP==='; lsusb 2>/dev/null | grep -i '2e8a:'; "
-                "echo '===LSUSB_DFU==='; lsusb 2>/dev/null | grep -iE '0483:df11|314b:0106'; "
+                f"echo '===LSUSB_DFU==='; lsusb 2>/dev/null | grep -iE '{dfu_lsusb_pattern}'; "
                 "echo '===END==='"
             )
             result = run_cmd(cmd, shell=True, capture_output=True, text=True, timeout=15)
@@ -2024,6 +2065,9 @@ def detect_devices():
                 devnum = devnum_match.group(1) if devnum_match else ''
                 serial_match = re.search(r'serial="([^"]+)"', line)
                 serial = serial_match.group(1) if serial_match else ''
+                if serial and not re.fullmatch(r'[\x20-\x7e]+', serial):
+                    # GD32 等设备 serial 含非 ASCII 原始字节，解码为乱码后无法用于 dfu-util -S 过滤
+                    serial = ''
                 path_match = re.search(r'path="([^"]+)"', line)
                 usb_path = path_match.group(1) if path_match else ''
                 dedup_key = f'{vid_pid}:{devnum}'
@@ -2100,6 +2144,9 @@ def detect_devices():
                         devnum = devnum_match.group(1) if devnum_match else ''
                         serial_match = re.search(r'serial="([^"]+)"', line)
                         serial = serial_match.group(1) if serial_match else ''
+                        if serial and not re.fullmatch(r'[\x20-\x7e]+', serial):
+                            # GD32 等设备 serial 含非 ASCII 原始字节，解码为乱码后无法用于 dfu-util -S 过滤
+                            serial = ''
                         path_match = re.search(r'path="([^"]+)"', line)
                         usb_path = path_match.group(1) if path_match else ''
                         dedup_key = f'{vid_pid}:{devnum}'
@@ -2695,7 +2742,7 @@ def get_bl_address_options():
         if not mcu_id:
             return jsonify({'success': False, 'error': '缺少 MCU 型号，无法生成 BL 烧录地址选项'}), 400
 
-        klipper_path = expand_klipper_path(config.get('klipper_path', '~/klipper'), force_local=True)
+        klipper_path = resolve_kconfig_klipper_path(config.get('klipper_path', '~/klipper'))
         parser = KlipperKconfigParser(klipper_path)
         parser.parse_all_platforms()
         mcu_info = parser.resolve_mcu_info(mcu_id, platform)
@@ -2933,7 +2980,7 @@ def export_compile_config():
     try:
         raw_klipper_path = request.args.get('klipper_path') or config.get('klipper_path', '~/klipper')
         klipper_path = expand_klipper_path(raw_klipper_path)
-        kconfig_klipper_path = expand_klipper_path(raw_klipper_path, force_local=True)
+        kconfig_klipper_path = resolve_kconfig_klipper_path(raw_klipper_path)
 
         config_path = os.path.join(klipper_path, '.config')
         content = _read_text_file(config_path)
@@ -2985,6 +3032,8 @@ def export_compile_config():
                 'startup_pin': params.get('startup_pin', ''),
                 'rp2040_can_rx_gpio': params.get('rp2040_can_rx_gpio', ''),
                 'rp2040_can_tx_gpio': params.get('rp2040_can_tx_gpio', ''),
+                'usb_serial_chipid': params.get('usb_serial_chipid', False),
+                'usb_serial_number': params.get('usb_serial_number', ''),
             },
             'klipper_path': raw_klipper_path,
         }
@@ -3036,6 +3085,8 @@ def import_compile_config():
             'startup_pin': compile_cfg.get('startup_pin', ''),
             'rp2040_can_rx_gpio': compile_cfg.get('rp2040_can_rx_gpio', ''),
             'rp2040_can_tx_gpio': compile_cfg.get('rp2040_can_tx_gpio', ''),
+            'usb_serial_chipid': compile_cfg.get('usb_serial_chipid', False),
+            'usb_serial_number': compile_cfg.get('usb_serial_number', ''),
         }
 
         return jsonify({

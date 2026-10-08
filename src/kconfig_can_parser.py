@@ -491,6 +491,7 @@ def parse_can_options(klipper_path='~/klipper'):
         ('hc32f460','HC32F460_','hc32f460'),
         ('atsam',   'ATSAM_',   'atsam'),
         ('avr',     'AVR_',     'avr'),
+        ('gd32',    'GD32_',    'gd32'),
     ]
 
     result = {}

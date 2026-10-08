@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 DFU_KNOWN_DEVICES = {
     '0483:df11': 'STM32',
     '314b:0106': 'APM32',
+    '28e9:0189': 'GD32',
 }
 DFU_KNOWN_VIDPIDS = list(DFU_KNOWN_DEVICES.keys())
 

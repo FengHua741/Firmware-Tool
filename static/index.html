@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Firmware-Tool - 固件工具</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%A7%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="/static/css/style.css?v=20260605c">
     <link rel="stylesheet" href="/static/css/config-manager.css?v=20260320f">
     <link rel="stylesheet" href="/static/css/tools-pages.css?v=20260704a">
@@ -307,6 +308,22 @@
                                     <label class="form-label">🚀 启动引脚（可选）</label>
                                     <input type="text" class="form-control" id="compileStartupPin" placeholder="例如: PA2 或 gpio5（多个用逗号分隔）">
                                     <small class="form-text text-muted">STM32格式: PA2,PB9 | RP2040格式: gpio5,gpio19</small>
+                                </div>
+                            </div>
+
+                            <!-- USB 序列号（仅 USB / USB-CAN 桥接固件显示） -->
+                            <div class="form-row compile-preset-advanced-only" id="compileUsbSerialGroup" data-mcu-display="none" style="display:none;">
+                                <div class="form-group">
+                                    <label class="form-label" data-i18n="form.usb_serial_chipid">🔑 USB 序列号使用芯片 ID</label>
+                                    <label style="display:flex; align-items:center; min-height:40px; margin-bottom:0; cursor:pointer; font-weight:normal;">
+                                        <input type="checkbox" id="compileUsbSerialChipid" onchange="onCompileUsbSerialChipidChange()" style="margin-right:8px; vertical-align:middle;">
+                                        <span data-i18n="form.usb_serial_chipid_hint">使用芯片唯一 ID 作为序列号</span>
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" data-i18n="form.usb_serial_number">🔢 USB 序列号</label>
+                                    <input type="text" class="form-control" id="compileUsbSerialNumber" placeholder="例如: main">
+                                    <small class="form-text text-muted" data-i18n="form.usb_serial_hint">未启用芯片 ID 时生效</small>
                                 </div>
                             </div>
                         </div>

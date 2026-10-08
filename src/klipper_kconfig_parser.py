@@ -20,6 +20,7 @@ class KlipperKconfigParser:
         'hc32f460': {'name': 'HC32F460', 'arch_symbol': 'MACH_HC32F460'},
         'atsam': {'name': 'ATSAM', 'arch_symbol': 'MACH_ATSAM'},
         'avr': {'name': 'AVR', 'arch_symbol': 'MACH_AVR'},
+        'gd32': {'name': 'GD32', 'arch_symbol': 'MACH_GD32'},
     }
 
     def __init__(self, klipper_path='~/klipper'):
@@ -418,7 +419,9 @@ class KlipperKconfigParser:
                 i += 1
 
             block_text = '\n'.join(block)
-            if prompt_text not in block_text:
+            # Kconfig 各平台 prompt 大小写不完全一致（如 GD32 的 "Clock reference"），
+            # 统一按小写比较，避免选项被静默丢弃。
+            if prompt_text.lower() not in block_text.lower():
                 i += 1
                 continue
 
@@ -461,6 +464,9 @@ class KlipperKconfigParser:
     def _frequency_from_prompt(self, prompt):
         """从 Kconfig prompt 中提取频率 Hz。"""
         if 'Internal clock' in prompt:
+            return 'internal'
+        # GD32 等平台的内部 RC 时钟（如 "Internal IRC8M"），无 Hz 字样
+        if re.search(r'\bIRC\d', prompt, re.IGNORECASE):
             return 'internal'
         match = re.search(r'([\d.]+)\s*([kKmM])\s*[hH]z', prompt)
         if not match:
@@ -707,6 +713,58 @@ class KlipperKconfigParser:
             return self.resolve_mcu_info(mcu_id)
         return None
 
+    def parse_usb_serial_options(self):
+        """解析顶层 src/Kconfig 中的 USB 序列号配置。
+
+        对应 Klipper menuconfig 的:
+          [ ] USB serial number from CHIPID
+          (main) USB serial number
+
+        返回:
+            {
+              'available': bool,       # 是否找到两个符号
+              'chipid_default': bool,  # CHIPID 选项默认值
+              'number_default': str,   # 序列号默认值（未启用 CHIPID 时生效）
+            }
+        """
+        kconfig_path = os.path.join(self.src_path, 'Kconfig')
+        result = {
+            'available': False,
+            'chipid_default': True,
+            'number_default': '',
+        }
+        try:
+            with open(kconfig_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        except (IOError, OSError) as e:
+            logger.warning(f"无法读取 Kconfig 文件 {kconfig_path}: {e}")
+            return result
+
+        found_chipid = False
+        found_number = False
+        # 顶层 Kconfig 中同一符号可能声明多次（通用区 + menu 区），
+        # 以实际携带 default 的声明为准。
+        for symbol, block in self._iter_config_blocks(content):
+            if symbol == 'USB_SERIAL_NUMBER_CHIPID':
+                found_chipid = True
+                for raw_line in block[1:]:
+                    default_match = re.match(
+                        r'^default\s+([ynYN])\b', raw_line.strip())
+                    if default_match:
+                        result['chipid_default'] = default_match.group(1).lower() == 'y'
+                        break
+            elif symbol == 'USB_SERIAL_NUMBER':
+                found_number = True
+                for raw_line in block[1:]:
+                    default_match = re.match(
+                        r'^default\s+"([^"]*)"', raw_line.strip())
+                    if default_match:
+                        result['number_default'] = default_match.group(1)
+                        break
+
+        result['available'] = found_chipid and found_number
+        return result
+
     def _parse_connections(self, content):
         """解析连接方式"""
         connections = []
@@ -736,7 +794,8 @@ class KlipperKconfigParser:
             'lpc176x': ['DFU', 'KAT'],
             'hc32f460': ['DFU', 'KAT'],
             'atsam': ['DFU', 'KAT'],
-            'avr': ['DFU']
+            'avr': ['DFU'],
+            'gd32': ['DFU', 'KAT'],
         }
         return flash_modes_map.get(platform_dir, ['DFU'])
 
