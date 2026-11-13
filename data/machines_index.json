@@ -1,0 +1,154 @@
+[
+  {
+    "id": "ender-3",
+    "name": "Ender-3 V2",
+    "description": "Cartesian 双Z入门级打印机",
+    "geometry": {
+      "type": "cartesian",
+      "mins": [
+        0,
+        0,
+        0
+      ],
+      "maxes": [
+        235,
+        235,
+        250
+      ]
+    },
+    "drive_count": 5
+  },
+  {
+    "id": "i3",
+    "name": "I3",
+    "description": "Cartesian 单Z入门级打印机",
+    "geometry": {
+      "type": "cartesian",
+      "mins": [
+        0,
+        0,
+        0
+      ],
+      "maxes": [
+        235,
+        235,
+        250
+      ]
+    },
+    "drive_count": 4
+  },
+  {
+    "id": "voron-0",
+    "name": "Voron 0",
+    "description": "CoreXY 四电机小型打印机",
+    "geometry": {
+      "type": "corexy",
+      "mins": [
+        0,
+        0,
+        0
+      ],
+      "maxes": [
+        120,
+        120,
+        120
+      ]
+    },
+    "drive_count": 4
+  },
+  {
+    "id": "voron-2.4-awd",
+    "name": "Voron 2.4 AWD",
+    "description": "CoreXY 九电机全轮驱动配置",
+    "geometry": {
+      "type": "corexy",
+      "mins": [
+        0,
+        0,
+        -2
+      ],
+      "maxes": [
+        250,
+        250,
+        250
+      ]
+    },
+    "drive_count": 9
+  },
+  {
+    "id": "voron-2.4",
+    "name": "Voron 2.4",
+    "description": "CoreXY 七电机标准配置",
+    "geometry": {
+      "type": "corexy",
+      "mins": [
+        0,
+        0,
+        -2
+      ],
+      "maxes": [
+        250,
+        250,
+        250
+      ]
+    },
+    "drive_count": 7
+  },
+  {
+    "id": "voron-trident-awd",
+    "name": "Voron Trident AWD",
+    "description": "CoreXY 八电机全轮驱动三Z配置",
+    "geometry": {
+      "type": "corexy",
+      "mins": [
+        0,
+        0,
+        0
+      ],
+      "maxes": [
+        250,
+        250,
+        250
+      ]
+    },
+    "drive_count": 8
+  },
+  {
+    "id": "voron-trident",
+    "name": "Voron Trident",
+    "description": "CoreXY 六电机三Z配置",
+    "geometry": {
+      "type": "corexy",
+      "mins": [
+        0,
+        0,
+        0
+      ],
+      "maxes": [
+        250,
+        250,
+        250
+      ]
+    },
+    "drive_count": 6
+  },
+  {
+    "id": "vzbot",
+    "name": "VZBOT",
+    "description": "CoreXY 六电机高速打印机",
+    "geometry": {
+      "type": "corexy",
+      "mins": [
+        0,
+        0,
+        0
+      ],
+      "maxes": [
+        335,
+        260,
+        200
+      ]
+    },
+    "drive_count": 6
+  }
+]

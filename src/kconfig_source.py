@@ -17,7 +17,7 @@ import threading
 import time
 
 from shared import config, logger, expand_klipper_path
-from ssh_manager import SSHManager, is_ssh_mode, run_cmd
+from ssh_manager import SSHManager, is_ssh_mode, run_cmd, sftp_serialized
 from klipper_kconfig_parser import KlipperKconfigParser
 
 # 缓存根目录（与 ssh_manager.LOCAL_CACHE_DIR 同级的独立子目录）
@@ -102,6 +102,7 @@ def _remote_signature(remote_root):
     return signature
 
 
+@sftp_serialized
 def _sync_files(remote_root, cache_dir, signature):
     """通过 SFTP 将远端 Kconfig 下载到本地缓存（先写 staging 再整体替换）。"""
     rels = sorted(signature.keys())

@@ -17,6 +17,8 @@ import logging
 import subprocess
 import re
 import paramiko
+import functools
+from contextlib import contextmanager
 from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
@@ -106,6 +108,80 @@ def clear_host_keys():
         return True, '主机密钥信任已清除'
     except Exception as e:
         return False, f'清除失败: {e}'
+
+
+# 主机密钥自动更新记录（host -> 时间戳），供设置页/排查查看
+_HOST_KEY_UPDATES = {}
+
+
+def get_host_key_updates():
+    """返回最近自动更新过主机密钥的主机及时间。"""
+    return dict(_HOST_KEY_UPDATES)
+
+
+def _auto_trust_host_key():
+    """是否在主机密钥变更时自动更新信任（默认开启，可在 config.json 关闭）。"""
+    try:
+        cfg = _load_config_file()
+        return bool(cfg.get('auto_trust_host_key', True))
+    except Exception:
+        return True
+
+
+def _update_host_key(host, key):
+    """把 known_hosts 里该主机的旧密钥替换为新密钥。
+
+    重装系统 / 更换控制板后主机密钥必然变化，自动接管以免每次手动
+    「清除主机密钥」。旧文件会保留一份 known_hosts.bak 便于回查。
+    """
+    try:
+        host_keys = paramiko.HostKeys()
+        if os.path.exists(KNOWN_HOSTS_PATH):
+            try:
+                host_keys.load(KNOWN_HOSTS_PATH)
+            except Exception:
+                pass
+            try:
+                import shutil
+                shutil.copy2(KNOWN_HOSTS_PATH, KNOWN_HOSTS_PATH + '.bak')
+            except Exception:
+                pass
+
+        # 删除该主机的所有旧条目（兼容 "host,ip" 与 "[host]:port" 写法）
+        targets = {host, '[%s]' % host, '[%s]:22' % host}
+        for name in list(host_keys.keys()):
+            first = name.split(',')[0].strip()
+            if name in targets or first in targets:
+                del host_keys[name]
+
+        host_keys.add(host, key.get_name(), key)
+        os.makedirs(os.path.dirname(KNOWN_HOSTS_PATH), exist_ok=True)
+        host_keys.save(KNOWN_HOSTS_PATH)
+        _HOST_KEY_UPDATES[host] = time.time()
+        return True
+    except Exception as e:
+        logger.warning(f'自动更新主机密钥失败 ({host}): {e}')
+        return False
+
+
+def _prepare_ssh_client():
+    """创建并初始化 SSHClient（加载 known_hosts + TOFU 策略）。"""
+    client = paramiko.SSHClient()
+    if os.path.exists(KNOWN_HOSTS_PATH):
+        try:
+            if hasattr(client, 'load_host_keys'):
+                client.load_host_keys(KNOWN_HOSTS_PATH)
+            elif hasattr(client, 'set_host_keys'):
+                host_keys = paramiko.HostKeys()
+                try:
+                    host_keys.load(KNOWN_HOSTS_PATH)
+                except Exception:
+                    pass
+                client.set_host_keys(host_keys)
+        except Exception:
+            logger.warning('known_hosts 解析失败，将重新建立信任')
+    client.set_missing_host_key_policy(_TrustOnFirstUsePolicy(KNOWN_HOSTS_PATH))
+    return client
 
 _fernet_instance = None
 _fernet_lock = threading.Lock()
@@ -299,6 +375,7 @@ class SSHManager:
     KEEPALIVE_INTERVAL = 15            # SSH keepalive 间隔（秒）
     KEEPALIVE_COUNT_MAX = 3             # keepalive 最大无响应次数
     TRANSPORT_PROBE_TIMEOUT = 5         # 传输层探测超时（秒）
+    SFTP_TIMEOUT = 30                   # SFTP 单次收发超时（秒）
 
     def __init__(self):
         self._client = None
@@ -307,6 +384,9 @@ class SSHManager:
         self._remote_system = 'unknown'
         self._cmd_lock = threading.Lock()       # 命令执行锁（粒度：命令执行，不含连接建立）
         self._conn_lock = threading.Lock()      # 连接建立锁（粒度：连接建立/重建）
+        # SFTP 串行锁（可重入）：paramiko 的 SFTPClient 不是线程安全的，
+        # 多线程并发 stat/put/get 会响应错配并永久阻塞，必须串行化。
+        self._sftp_lock = threading.RLock()
         # 断路器状态（支持指数退避）
         self._consecutive_failures = 0          # 连续失败计数
         self._circuit_open_until = 0            # 断路器打开至该时间戳（0=关闭）
@@ -457,26 +537,9 @@ class SSHManager:
             if not host:
                 raise ConnectionError("SSH 主机地址未配置")
 
-            self._client = paramiko.SSHClient()
-            # 主机密钥校验：优先使用已保存的 known_hosts（严格校验），
-            # 首次连接时信任并持久化（TOFU），替代 AutoAddPolicy 的任意接受策略。
-            # 兼容 paramiko 2.x（load_host_keys）与 3.x（set_host_keys）
-            if os.path.exists(KNOWN_HOSTS_PATH):
-                try:
-                    if hasattr(self._client, 'load_host_keys'):
-                        self._client.load_host_keys(KNOWN_HOSTS_PATH)
-                    elif hasattr(self._client, 'set_host_keys'):
-                        host_keys = paramiko.HostKeys()
-                        try:
-                            host_keys.load(KNOWN_HOSTS_PATH)
-                        except Exception:
-                            pass
-                        self._client.set_host_keys(host_keys)
-                except Exception:
-                    logger.warning("known_hosts 解析失败，将重新建立信任")
-            self._client.set_missing_host_key_policy(
-                _TrustOnFirstUsePolicy(KNOWN_HOSTS_PATH)
-            )
+            # 主机密钥校验：优先使用已保存的 known_hosts，首次连接信任并持久化（TOFU）。
+            # 密钥变更（重装系统）时的处理见下方 BadHostKeyException 分支。
+            self._client = _prepare_ssh_client()
 
             password = load_credential('ssh_password')
 
@@ -508,14 +571,31 @@ class SSHManager:
                     )
                     return self._client
                 except paramiko.BadHostKeyException as e:
-                    # 主机密钥不匹配：目标设备可能已更换/重装系统
-                    last_error = ConnectionError(
-                        f"SSH 连接失败: 主机密钥不匹配 — 设备 {host} 的密钥已变更。"
-                        f"请在设置页点击“清除主机密钥”，确认设备身份后重新连接；"
-                        f"也可在服务主机运行 'sudo ssh-keygen -f {KNOWN_HOSTS_PATH} -R {host}'。"
+                    # 主机密钥不匹配：目标设备重装系统/更换板卡后密钥必然变化。
+                    # 默认自动替换信任（旧密钥留 known_hosts.bak），
+                    # 免去每次手动「清除主机密钥」；可用 config.json 的
+                    # auto_trust_host_key=false 关掉，改回手动确认。
+                    if not _auto_trust_host_key():
+                        last_error = ConnectionError(
+                            f"SSH 连接失败: 主机密钥不匹配 — 设备 {host} 的密钥已变更。"
+                            f"请在设置页点击“清除主机密钥”后重新连接。"
+                        )
+                        logger.warning(f"SSH Host key mismatch for {host}（自动更新已关闭）")
+                        break
+                    if not _update_host_key(host, e.key):
+                        last_error = ConnectionError(
+                            f"SSH 连接失败: 主机密钥已变更且自动更新失败，"
+                            f"请手动清除主机密钥后重试。"
+                        )
+                        break
+                    logger.warning(
+                        f"SSH 主机密钥已变更，已自动更新信任: {host}（旧密钥备份在 known_hosts.bak）"
                     )
-                    logger.warning(f"SSH Host key mismatch for {host}")
-                    break  # 主机密钥错误不会因重试而解决，直接跳出
+                    # 重建客户端加载新 known_hosts，然后重试本次连接
+                    self._client = _prepare_ssh_client()
+                    if attempt < self.CONNECT_RETRIES - 1:
+                        time.sleep(self.CONNECT_RETRY_INTERVAL)
+                    continue
                 except paramiko.SSHException as e:
                     err_str = str(e)
                     # SSH 协议层错误，区分不同场景给出诊断建议
@@ -571,17 +651,48 @@ class SSHManager:
             raise ConnectionError(f"SSH 连接失败: {last_error}")
 
     def get_sftp(self):
-        """获取 SFTP 会话"""
-        if self._sftp is not None:
-            try:
-                self._sftp.stat('.')  # 活性检查
-                return self._sftp
-            except Exception:
-                self._sftp = None
+        """获取 SFTP 会话。
 
+        注意：会话与所有线程共享，paramiko 的 SFTPClient 不是线程安全的。
+        直接并发调用会出现响应错配、线程永久阻塞。请通过
+        ``with manager.sftp_locked():`` 或 ``@sftp_serialized`` 使用。
+        """
+        with self._sftp_lock:
+            return self._open_sftp()
+
+    def _open_sftp(self):
+        """在持有 _sftp_lock 的前提下获取或创建 SFTP 会话。"""
+        if self._sftp is not None:
+            return self._sftp
         client = self.get_connection()
-        self._sftp = client.open_sftp()
-        return self._sftp
+        sftp = client.open_sftp()
+        # paramiko 默认不给 SFTP channel 设超时，远端卡住会永久阻塞。
+        try:
+            sftp.get_channel().settimeout(self.SFTP_TIMEOUT)
+        except Exception:
+            pass
+        self._sftp = sftp
+        return sftp
+
+    def _drop_sftp(self):
+        """丢弃当前 SFTP 会话，下次使用时重建。"""
+        sftp, self._sftp = self._sftp, None
+        if sftp is not None:
+            try:
+                sftp.close()
+            except Exception:
+                pass
+
+    @contextmanager
+    def sftp_locked(self):
+        """串行化使用 SFTP 会话；块内出现异常即作废会话，避免复用坏通道。"""
+        with self._sftp_lock:
+            self._open_sftp()
+            try:
+                yield self._sftp
+            except BaseException:
+                self._drop_sftp()
+                raise
 
     def _disconnect(self):
         """断开 SSH 连接"""
@@ -995,6 +1106,23 @@ def run_cmd_check(cmd, **kwargs):
 
 # ==================== 文件系统替代函数 ====================
 
+def sftp_serialized(func):
+    """串行化函数内的 SFTP 操作。
+
+    paramiko 的 SFTPClient 非线程安全，多个 Flask 请求线程并发 stat/put 会
+    响应错配，导致某个线程永远等不到回复（Condition.wait 永久阻塞）。
+    本装饰器保证同一时刻只有一个线程使用 SFTP 会话，并在异常时作废会话。
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if not is_ssh_mode():
+            return func(*args, **kwargs)
+        manager = SSHManager.get_instance()
+        with manager.sftp_locked():
+            return func(*args, **kwargs)
+    return wrapper
+
+@sftp_serialized
 def path_exists(path):
     """路径存在性检查 — 自动适配本地/远程"""
     if not is_ssh_mode():
@@ -1007,14 +1135,13 @@ def path_exists(path):
         return True
     except FileNotFoundError:
         return False
-    except IOError:
-        return False
     except Exception:
         # SFTP 不可用时回退到命令行
         result = manager.exec_command(f'test -e {shlex.quote(path)} && echo YES || echo NO', timeout=5)
         return 'YES' in result.stdout
 
 
+@sftp_serialized
 def get_file_size(path):
     """获取文件大小 — 自动适配本地/远程"""
     if not is_ssh_mode():
@@ -1032,6 +1159,7 @@ def get_file_size(path):
             return 0
 
 
+@sftp_serialized
 def list_dir(path):
     """列出目录内容 — 自动适配本地/远程"""
     if not is_ssh_mode():
@@ -1052,6 +1180,7 @@ LOCAL_CACHE_DIR = '/tmp/fwtool_cache'
 REMOTE_BL_DIR = '/tmp/fwtool_bl'
 
 
+@sftp_serialized
 def ssh_download(remote_path, local_path=None):
     """从远程下载文件到本地"""
     if local_path is None:
@@ -1069,6 +1198,7 @@ def ssh_download(remote_path, local_path=None):
     return local_path
 
 
+@sftp_serialized
 def ssh_upload(local_path, remote_path=None):
     """从本地上传文件到远程"""
     if remote_path is None:

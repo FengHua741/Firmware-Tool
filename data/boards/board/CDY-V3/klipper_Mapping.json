@@ -1,0 +1,62 @@
+{
+    "Drives0": {
+        "step_pin": "PE5",
+        "dir_pin": "PC0",
+        "enable_pin": "PC1",
+        "uart_pin": "PC15"
+    },
+    "Drives1": {
+        "step_pin": "PE4",
+        "dir_pin": "PC13",
+        "enable_pin": "PC14",
+        "uart_pin": "PA8"
+    },
+    "Drives2": {
+        "step_pin": "PE3",
+        "dir_pin": "PB7",
+        "enable_pin": "PB8",
+        "uart_pin": "PB6"
+    },
+    "Drives3": {
+        "step_pin": "PE2",
+        "dir_pin": "PD6",
+        "enable_pin": "PD7",
+        "uart_pin": "PD5"
+    },
+    "Drives4": {
+        "step_pin": "PE1",
+        "dir_pin": "PD3",
+        "enable_pin": "PD4",
+        "uart_pin": "PD1"
+    },
+    "Drives5": {
+        "step_pin": "PE0",
+        "dir_pin": "PA15",
+        "enable_pin": "PD0",
+        "uart_pin": "PE9"
+    },
+    "heat0": "PD12",
+    "heat1": "PD13",
+    "heat2": "PD14",
+    "BED_OUT": "PB0",
+    "temp_bed": "PB1",
+    "temp0": "PA3",
+    "temp1": "PC4",
+    "temp2": "PC5",
+    "fan0": "PA0",
+    "fan1": "PA1",
+    "fan2": "PA2",
+    "stop0": "PC7",
+    "stop1": "PC6",
+    "stop2": "PD11",
+    "stop3": "PD10",
+    "stop4": "PB10",
+    "stop5": "PB11",
+    "servo": "PE6",
+    "probe": "PC2",
+    "rgb0": "PD15",
+    "灯": "PE6",
+    "激光": "PC2",
+    "uart-tx": "PA9",
+    "uart-rx": "PA10"
+}

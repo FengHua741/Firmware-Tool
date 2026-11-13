@@ -28,6 +28,7 @@ from shared import (
 )
 
 
+from ssh_manager import sftp_serialized
 backup_bp = Blueprint('backup_api', __name__)
 
 BACKUP_DIR = os.path.join(BASE_DIR, 'data', 'backups')
@@ -80,6 +81,7 @@ def _find_sftp_config_root(sftp):
     return None
 
 
+@sftp_serialized
 def _read_printer_cfg_content():
     """3 层读取 printer.cfg 内容: Moonraker → SSH → Local。"""
     base = get_moonraker_base_url()
@@ -116,6 +118,7 @@ def _read_printer_cfg_content():
     return None, None, '未找到 printer.cfg'
 
 
+@sftp_serialized
 def _write_printer_cfg(content):
     """兼容旧备份：通过 Moonraker 上传或 SSH/本地写入 printer.cfg。"""
     base = get_moonraker_base_url()
@@ -376,6 +379,7 @@ def _try_create_moonraker_archive(backup_path):
                 logger.warning(f'清理 Moonraker 临时 ZIP 失败: {remote_path}')
 
 
+@sftp_serialized
 def _write_sftp_archive(backup_path):
     manager = SSHManager.get_instance()
     sftp = manager.get_sftp()
@@ -548,6 +552,7 @@ def _sftp_makedirs(sftp, path):
                     raise
 
 
+@sftp_serialized
 def _restore_via_sftp(backup_path):
     manager = SSHManager.get_instance()
     sftp = manager.get_sftp()

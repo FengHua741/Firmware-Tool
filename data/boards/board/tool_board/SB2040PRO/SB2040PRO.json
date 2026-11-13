@@ -1,0 +1,89 @@
+{
+    "img": {
+        "Width": 800,
+        "Height": 1000,
+        "Zoom": 1
+    },
+    "drives": [
+        {
+            "left": 660,
+            "top": 140,
+            "Width": 150,
+            "Height": 150,
+            "name": "Drives0"
+        }
+    ],
+    "heat": [
+        {
+            "left": 535,
+            "top": 380,
+            "Width": 155,
+            "Height": 170,
+            "name": "heat0"
+        }
+    ],
+    "temp": [
+        {
+            "left": 160,
+            "top": 522,
+            "Width": 100,
+            "Height": 100,
+            "name": "temp0"
+        },
+        {
+            "left": 374,
+            "top": 446,
+            "Width": 160,
+            "Height": 90,
+            "name": "31865"
+        }
+    ],
+    "fan": [
+        {
+            "left": 530,
+            "top": 900,
+            "Width": 180,
+            "Height": 100,
+            "name": "fan0"
+        },
+        {
+            "left": 270,
+            "top": 1060,
+            "Width": 180,
+            "Height": 100,
+            "name": "fan1"
+        }
+    ],
+    "endstop": [
+        {
+            "left": 332,
+            "top": 200,
+            "Width": 130,
+            "Height": 80,
+            "name": "stop0"
+        },
+        {
+            "left": 462,
+            "top": 200,
+            "Width": 99,
+            "Height": 80,
+            "name": "stop1"
+        },
+        {
+            "left": 150,
+            "top": 180,
+            "Width": 99,
+            "Height": 130,
+            "name": "stop2"
+        }
+    ],
+    "rgb": [
+        {
+            "left": 470,
+            "top": 1060,
+            "Width": 100,
+            "Height": 100,
+            "name": "rgb0"
+        }
+    ]
+}

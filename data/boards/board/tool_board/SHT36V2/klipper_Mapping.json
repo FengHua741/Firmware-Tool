@@ -1,0 +1,22 @@
+{
+    "Drives0": {
+        "step_pin": "PB4",
+        "dir_pin": "PB3",
+        "enable_pin": "PA15",
+        "uart_pin": "PB5"
+    },
+    "heat0": "PA8",
+    "temp0": "PA3",
+    "temp1": "PA4",
+    "fan0": "PB11",
+    "fan1": "PB10",
+    "stop0": "PA1",
+    "stop1": "PA2",
+    "servo0": "PB1",
+    "probe": "PA1",
+    "rgb0": "PB0",
+    "31865": {
+        "spi_bus": "spi2",
+        "cs_pin": "PB12"
+    }
+}

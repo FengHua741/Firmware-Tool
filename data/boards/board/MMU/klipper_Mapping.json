@@ -1,0 +1,51 @@
+{
+    "Drives0": {
+        "step_pin": "PE14",
+        "dir_pin": "PE13",
+        "enable_pin": "PE12",
+        "uart_pin": "PE11",        
+        "spi_bus": "spi1a",
+        "diag_pin": "PE9"
+    },
+    "Drives1": {
+        "step_pin": "PC5",
+        "dir_pin": "PB1",
+        "enable_pin": "PB0",
+        "uart_pin": "PE7",        
+        "spi_bus": "spi1a",
+        "diag_pin": "PE8"
+    },
+    "Drives2": {
+        "step_pin": "PC4",
+        "dir_pin": "PA6",
+        "enable_pin": "PA7",
+        "uart_pin": "PA5",        
+        "spi_bus": "spi1a",
+        "diag_pin": "PA4"
+    },
+    "Drives3": {
+        "step_pin": "PE4",
+        "dir_pin": "PE6",
+        "enable_pin": "PE5",
+        "uart_pin": "PC13",        
+        "spi_bus": "spi1a",
+        "diag_pin": "PC14"
+    },
+
+    "stop0": "PD3",
+    "stop1": "PD4",
+    "stop2": "PD5",
+    "stop3": "PD6",
+    "stop4": "PD7",
+    "stop5": "PC0", 
+    "stop6": "PC1",
+    "stop7": "PC2",
+    "stop8": "PC3",
+    "stop9": "PE3",
+    "stop10": "PE2",
+    "servo0": "PA3",
+    "servo1": "PA2",
+    "servo2": "PA1",
+    "servo3": "PA0",
+    "rgb": "PE10"
+}

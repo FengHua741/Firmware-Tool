@@ -1,0 +1,194 @@
+{
+    "img": {
+        "Width": 2879,
+        "Height": 1396,
+        "Zoom": 2.879
+    },
+    "drives": [
+        {
+            "left": 90,
+            "top": 165,
+            "Width": 274,
+            "Height": 367,
+            "name": "Drives0"
+        },
+        {
+            "left": 375,
+            "top": 164,
+            "Width": 273,
+            "Height": 369,
+            "name": "Drives1"
+        },
+        {
+            "left": 659,
+            "top": 164,
+            "Width": 275,
+            "Height": 371,
+            "name": "Drives2"
+        },
+        {
+            "left": 948,
+            "top": 166,
+            "Width": 274,
+            "Height": 365,
+            "name": "Drives3"
+        },
+        {
+            "left": 1598,
+            "top": 163,
+            "Width": 274,
+            "Height": 376,
+            "name": "Drives4"
+        },
+        {
+            "left": 2198,
+            "top": 166,
+            "Width": 271,
+            "Height": 368,
+            "name": "Drives5"
+        }
+    ],
+    "heat": [
+        {
+            "left": 1289,
+            "top": 40,
+            "Width": 138,
+            "Height": 228,
+            "name": "heat0"
+        },
+        {
+            "left": 1888,
+            "top": 40,
+            "Width": 138,
+            "Height": 228,
+            "name": "heat1"
+        },
+        {
+            "left": 2487,
+            "top": 40,
+            "Width": 140,
+            "Height": 228,
+            "name": "heat2"
+        },
+        {
+            "left": 2606,
+            "top": 717,
+            "Width": 201,
+            "Height": 191,
+            "name": "BED_OUT"
+        }
+    ],
+    "temp": [
+        {
+            "left": 2231,
+            "top": 674,
+            "Width": 106,
+            "Height": 133,
+            "name": "temp_bed"
+        },
+        {
+            "left": 1454,
+            "top": 397,
+            "Width": 139,
+            "Height": 98,
+            "name": "temp0"
+        },
+        {
+            "left": 2059,
+            "top": 400,
+            "Width": 136,
+            "Height": 108,
+            "name": "temp1"
+        },
+        {
+            "left": 2485,
+            "top": 522,
+            "Width": 136,
+            "Height": 103,
+            "name": "temp2"
+        }
+    ],
+    "fan": [
+        {
+            "left": 1467,
+            "top": 162,
+            "Width": 133,
+            "Height": 105,
+            "name": "fan0"
+        },
+        {
+            "left": 2057,
+            "top": 165,
+            "Width": 136,
+            "Height": 109,
+            "name": "fan1"
+        },
+        {
+            "left": 2655,
+            "top": 164,
+            "Width": 127,
+            "Height": 100,
+            "name": "fan2"
+        }
+    ],
+    "endstop": [
+        {
+            "left": 952,
+            "top": 734,
+            "Width": 177,
+            "Height": 106,
+            "name": "stop0"
+        },
+        {
+            "left": 1131,
+            "top": 734,
+            "Width": 181,
+            "Height": 102,
+            "name": "stop1"
+        },
+        {
+            "left": 1315,
+            "top": 734,
+            "Width": 183,
+            "Height": 101,
+            "name": "stop2"
+        },
+        {
+            "left": 1506,
+            "top": 729,
+            "Width": 173,
+            "Height": 104,
+            "name": "stop3"
+        },
+        {
+            "left": 1678,
+            "top": 729,
+            "Width": 179,
+            "Height": 110,
+            "name": "stop4"
+        },
+        {
+            "left": 1859,
+            "top": 732,
+            "Width": 174,
+            "Height": 105,
+            "name": "stop5"
+        }
+    ],
+    "servo": [
+        {
+            "left": 2039,
+            "top": 734,
+            "Width": 175,
+            "Height": 106,
+            "name": "灯"
+        },
+        {
+            "left": 1812,
+            "top": 847,
+            "Width": 168,
+            "Height": 95,
+            "name": "激光"
+        }
+    ]
+}

@@ -32,9 +32,7 @@
         "diag_pin": "PB1"
     },
     "heat0": "PA0",
-    "bed-heat": "PA2",
     "temp0": "PC0",
-    "bed-temp": "PC2",
     "fan0": "PC6",
     "fan1": "PC7",
     "stop0": "PA4",
@@ -43,7 +41,8 @@
     "stop3": "PB1",
     "probe": "PA1",
     "servo": "PB0",
-    "BED-OUT": "PA2",
     "uart-tx": "PA9",
-    "uart-rx": "PA10"
+    "uart-rx": "PA10",
+    "BED_OUT": "PA2",
+    "temp_bed": "PC2"
 }

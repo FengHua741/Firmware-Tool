@@ -1,0 +1,108 @@
+{
+    "img": {
+        "Width": 1000,
+        "Height": 602.96,
+        "Zoom": 1
+    },
+    "drives": [
+        {
+            "left": 96,
+            "top": 10,
+            "Width": 158,
+            "Height": 77,
+            "name": "Drives0"
+        },
+        {
+            "left": 277,
+            "top": 11,
+            "Width": 161,
+            "Height": 77,
+            "name": "Drives1"
+        },
+        {
+            "left": 459,
+            "top": 13,
+            "Width": 161,
+            "Height": 73,
+            "name": "Drives2"
+        },
+        {
+            "left": 650,
+            "top": 10,
+            "Width": 159,
+            "Height": 77,
+            "name": "Drives3"
+        }
+    ],
+    "temp": [
+        {
+            "left": 9,
+            "top": 113,
+            "Width": 74,
+            "Height": 127,
+            "name": "temp0"
+        },
+        {
+            "left": 8,
+            "top": 243,
+            "Width": 73,
+            "Height": 126,
+            "name": "temp1"
+        },
+        {
+            "left": 8,
+            "top": 375,
+            "Width": 73,
+            "Height": 124,
+            "name": "temp2"
+        }
+    ],
+    "fan": [
+        {
+            "left": 897,
+            "top": 184,
+            "Width": 96,
+            "Height": 76,
+            "name": "fan0"
+        },
+        {
+            "left": 897,
+            "top": 106,
+            "Width": 94,
+            "Height": 73,
+            "name": "fan1"
+        }
+    ],
+    "endstop": [
+        {
+            "left": 9,
+            "top": 112,
+            "Width": 73,
+            "Height": 126,
+            "name": "stop0"
+        },
+        {
+            "left": 10,
+            "top": 242,
+            "Width": 73,
+            "Height": 126,
+            "name": "stop1"
+        },
+        {
+            "left": 9,
+            "top": 373,
+            "Width": 73,
+            "Height": 126,
+            "name": "stop2"
+        }
+    ],
+    "probe": [
+        {
+            "left": 120,
+            "top": 309,
+            "Width": 76,
+            "Height": 126,
+            "name": "probe"
+        }
+    ]
+}

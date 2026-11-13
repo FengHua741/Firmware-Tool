@@ -53,7 +53,6 @@
         "enable_pin": "PE10",
         "uart_pin": "PC15",
         "spi_bus": "spi1a"
-
     },
     "Drives7": {
         "step_pin": "PE8",
@@ -61,7 +60,6 @@
         "enable_pin": "PA6",
         "uart_pin": "PE9",
         "spi_bus": "spi1a"
-
     },
     "BED_OUT": "PB0",
     "heat0": "PD12",
@@ -86,7 +84,7 @@
     "probe": "PC0",
     "servo": "PE6",
     "rgb1": "PD15",
-    "rgb": "PA3",
     "uart-tx": "PA9",
-    "uart-rx": "PA10"
+    "uart-rx": "PA10",
+    "rgb0": "PA3"
 }

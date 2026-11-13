@@ -60,7 +60,7 @@
     "full_steps_per_rotation": 200,
     "filament_diameter": 1.75,
     "nozzle_diameter": 0.4,
-    "sensor_type": "NTC 100K beta 3950",
+    "sensor_type": "Generic 3950",
     "max_temp": 285,
     "min_temp": -235,
     "min_extrude_temp": 170,
@@ -74,7 +74,7 @@
   },
   "bed": {
     "present": true,
-    "sensor_type": "NTC 100K beta 3950",
+    "sensor_type": "Generic 3950",
     "max_temp": 110,
     "min_temp": -235,
     "max_power": 1.0,

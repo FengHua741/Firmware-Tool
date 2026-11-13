@@ -1,23 +1,24 @@
 {
     "Drives0": {
-        "step_pin": "gpio14",
-        "dir_pin": "gpio13",
-        "enable_pin": "gpio16",
+        "step_pin": "gpio7",
+        "dir_pin": "gpio6",
+        "enable_pin": "gpio14",
         "uart_pin": "gpio15"
     },
     "heat0": "gpio23",
+    "heat1": "gpio5",
     "temp0": [
         "gpio27",
         "4700",
         "1000"
     ],
-    "fan0": "gpio24",
-    "fan1": "gpio19",
-    "fan2": "gpio21",
-    "stop0": "gpio22",
-    "stop1": "gpio18",
-    "stop2": "gpio20",
-    "servo": "gpio26",
+    "fan0": "gpio13",
+    "fan1": "gpio21",
+    "stop0": "gpio16",
+    "stop1": "gpio20",
+    "probe": "gpio22",
+    "servo": "gpio24",
+    "rgb0": "gpio26",
     "31865": {
         "spi_bus": "spi0_gpio4_gpio3_gpio2",
         "cs_pin": "gpio17"

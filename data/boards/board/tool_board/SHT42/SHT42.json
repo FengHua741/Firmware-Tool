@@ -1,0 +1,114 @@
+{
+    "img": {
+        "Width": 1000,
+        "Height": 961.37,
+        "Zoom": 1
+    },
+    "drives": [
+        {
+            "left": 855,
+            "top": 460,
+            "Width": 127,
+            "Height": 273,
+            "name": "Drives0"
+        }
+    ],
+    "heat": [
+        {
+            "left": 646,
+            "top": 796,
+            "Width": 124,
+            "Height": 146,
+            "name": "heat0"
+        }
+    ],
+    "temp": [
+        {
+            "left": 260,
+            "top": 603,
+            "Width": 222,
+            "Height": 104,
+            "name": "temp1"
+        },
+        {
+            "left": 261,
+            "top": 820,
+            "Width": 103,
+            "Height": 133,
+            "name": "temp0"
+        }
+    ],
+    "fan": [
+        {
+            "left": 420,
+            "top": 820,
+            "Width": 107,
+            "Height": 132,
+            "name": "fan0"
+        },
+        {
+            "left": 531,
+            "top": 820,
+            "Width": 105,
+            "Height": 133,
+            "name": "fan1"
+        }
+    ],
+    "endstop": [
+        {
+            "left": 36,
+            "top": 569,
+            "Width": 101,
+            "Height": 45,
+            "name": "stop0"
+        },
+        {
+            "left": 37,
+            "top": 615,
+            "Width": 105,
+            "Height": 55,
+            "name": "stop1"
+        },
+        {
+            "left": 37,
+            "top": 670,
+            "Width": 105,
+            "Height": 55,
+            "name": "stop2"
+        },
+        {
+            "left": 95,
+            "top": 377,
+            "Width": 56,
+            "Height": 56,
+            "name": "stop3"
+        }
+    ],
+    "servo": [
+        {
+            "left": 36,
+            "top": 207,
+            "Width": 58,
+            "Height": 227,
+            "name": "servo"
+        }
+    ],
+    "probe": [
+        {
+            "left": 96,
+            "top": 266,
+            "Width": 55,
+            "Height": 56,
+            "name": "probe"
+        }
+    ],
+    "rgb": [
+        {
+            "left": 259,
+            "top": 708,
+            "Width": 178,
+            "Height": 105,
+            "name": "rgb0"
+        }
+    ]
+}

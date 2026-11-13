@@ -31,9 +31,7 @@
         "uart_address": "3",
         "diag_pin": "gpio12"
     },
-
     "heat0": "gpio20",
-    "bed-heat": "gpio21",
     "temp0": "gpio28",
     "temp1": "gpio29",
     "fan0": "gpio16",
@@ -45,5 +43,6 @@
     "probe": "gpio18",
     "servo": "gpio19",
     "pwm1": "gpio10",
-    "pwm2": "gpio11"
+    "pwm2": "gpio11",
+    "BED_OUT": "gpio21"
 }

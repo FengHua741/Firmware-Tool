@@ -1,6 +1,27 @@
 {
   "FLY": {
     "mainboards": {
+      "cdy-v3": {
+        "name": "FLY-CDY-V3",
+        "board_id": "cdy-v3",
+        "mcu": "stm32f407",
+        "platform": "STM32",
+        "drive_count": 6,
+        "has_bed": true,
+        "heat_count": 3,
+        "temp_count": 3,
+        "fan_count": 3,
+        "stop_count": 6,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB",
+          "SD卡"
+        ],
+        "image": "boards/CDY-V3/CDY-V3.png",
+        "mapping_dir": "board/CDY-V3"
+      },
       "fly-c5": {
         "name": "FLY-C5",
         "board_id": "fly-c5",
@@ -169,26 +190,6 @@
         "image": "boards/board/DP5/DP5.png",
         "mapping_dir": "board/DP5"
       },
-      "fly-e3pro": {
-        "name": "FLY-E3-PRO",
-        "board_id": "fly-e3pro",
-        "mcu": "unknown",
-        "platform": "unknown",
-        "drive_count": 5,
-        "has_bed": true,
-        "heat_count": 2,
-        "temp_count": 3,
-        "fan_count": 4,
-        "stop_count": 3,
-        "has_probe": true,
-        "has_servo": true,
-        "pin_style": "P",
-        "connections": [
-          "USB"
-        ],
-        "image": "boards/board/E3-PRO/E3-PRO.png",
-        "mapping_dir": "board/E3-PRO"
-      },
       "fly-e3-ultra": {
         "name": "FLY-E3 Ultra",
         "board_id": "fly-e3-ultra",
@@ -230,6 +231,26 @@
         ],
         "image": "boards/board/E3-V2/E3-V2.png",
         "mapping_dir": "board/E3-V2"
+      },
+      "fly-e3pro": {
+        "name": "FLY-E3-PRO",
+        "board_id": "fly-e3pro",
+        "mcu": "stm32f407",
+        "platform": "STM32",
+        "drive_count": 5,
+        "has_bed": true,
+        "heat_count": 2,
+        "temp_count": 3,
+        "fan_count": 4,
+        "stop_count": 3,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "USB"
+        ],
+        "image": "boards/board/E3-PRO/E3-PRO.png",
+        "mapping_dir": "board/E3-PRO"
       },
       "fly-f407zg": {
         "name": "FLY-F407ZG",
@@ -290,8 +311,17 @@
           "USB",
           "USB转CAN"
         ],
-        "image": null,
-        "mapping_dir": "board/Micro4"
+        "image": "boards/board/Micro4/micro4.png",
+        "mapping_dir": "board/Micro4",
+        "driver_models": [
+          "tmc2209"
+        ],
+        "axes": [
+          "X",
+          "Y",
+          "Z",
+          "E"
+        ]
       },
       "fly-pro-x10": {
         "name": "FLY-Pro X10",
@@ -313,6 +343,27 @@
         ],
         "image": "boards/board/Pro-X10/Pro-X10.png",
         "mapping_dir": "board/Pro-X10"
+      },
+      "fly-rpfmex": {
+        "name": "FLY-RPFMEX",
+        "board_id": "fly-rpfmex",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 4,
+        "has_bed": false,
+        "heat_count": 0,
+        "temp_count": 3,
+        "fan_count": 2,
+        "stop_count": 3,
+        "has_probe": true,
+        "has_servo": false,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/RPFMEX/RPFMEX.png",
+        "mapping_dir": "board/RPFMEX"
       },
       "fly-super5": {
         "name": "FLY-Super5",
@@ -379,6 +430,238 @@
       }
     },
     "toolboards": {
+      "sb2040-pro": {
+        "name": "FLY-SB2040 Pro",
+        "board_id": "sb2040-pro",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 2,
+        "fan_count": 2,
+        "stop_count": 3,
+        "has_probe": false,
+        "has_servo": false,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "RS232"
+        ],
+        "image": "boards/board/tool_board/SB2040PRO/SB2040PRO.png",
+        "mapping_dir": "board/tool_board/SB2040PRO"
+      },
+      "sb2040-pro-v3": {
+        "name": "FLY-SB2040 Pro V3",
+        "board_id": "sb2040-pro-v3",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 3,
+        "stop_count": 3,
+        "has_probe": false,
+        "has_servo": false,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "RS232"
+        ],
+        "image": "boards/board/tool_board/SB2040PROV3/SB2040PROV3.png",
+        "mapping_dir": "board/tool_board/SB2040PROV3"
+      },
+      "sb2040-v2": {
+        "name": "FLY-SB2040 V2",
+        "board_id": "sb2040-v2",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 2,
+        "stop_count": 3,
+        "has_probe": false,
+        "has_servo": false,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "RS232"
+        ],
+        "image": "boards/board/tool_board/SB2040V2/SB2040V2.png",
+        "mapping_dir": "board/tool_board/SB2040V2"
+      },
+      "sb2040-v3": {
+        "name": "FLY-SB2040 V3",
+        "board_id": "sb2040-v3",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 3,
+        "stop_count": 3,
+        "has_probe": false,
+        "has_servo": false,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "RS232"
+        ],
+        "image": "boards/board/tool_board/SB2040V3/SB2040V3.png",
+        "mapping_dir": "board/tool_board/SB2040V3"
+      },
+      "sht36": {
+        "name": "FLY-SHT36",
+        "board_id": "sht36",
+        "mcu": "stm32f072",
+        "platform": "STM32",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 2,
+        "fan_count": 2,
+        "stop_count": 3,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/SHT36/SHT36.png",
+        "mapping_dir": "board/tool_board/SHT36"
+      },
+      "sht36_lis3dh": {
+        "name": "FLY-SHT36 LIS3DH",
+        "board_id": "sht36_lis3dh",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 2,
+        "stop_count": 1,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/SHT36LIS3DH/SHT36LIS3DH.png",
+        "mapping_dir": "board/tool_board/SHT36LIS3DH"
+      },
+      "sht36_pro": {
+        "name": "FLY-SHT36 PRO",
+        "board_id": "sht36_pro",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 2,
+        "stop_count": 2,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/SHT36PRO/SHT36PRO.png",
+        "mapping_dir": "board/tool_board/SHT36PRO"
+      },
+      "sht36_v2": {
+        "name": "FLY-SHT36 V2",
+        "board_id": "sht36_v2",
+        "mcu": "stm32f072",
+        "platform": "STM32",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 2,
+        "stop_count": 2,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/SHT36V2/SHT36V2.png",
+        "mapping_dir": "board/tool_board/SHT36V2"
+      },
+      "sht36_v3": {
+        "name": "FLY-SHT36 V3",
+        "board_id": "sht36_v3",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 2,
+        "temp_count": 1,
+        "fan_count": 2,
+        "stop_count": 2,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "RS232"
+        ],
+        "image": "boards/board/tool_board/SHT36V3/SHT36V3.png",
+        "mapping_dir": "board/tool_board/SHT36V3"
+      },
+      "sht42": {
+        "name": "FLY-SHT42",
+        "board_id": "sht42",
+        "mcu": "stm32f072",
+        "platform": "STM32",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 2,
+        "stop_count": 3,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "P",
+        "connections": [
+          "CANBUS",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/SHT42/SHT42.png",
+        "mapping_dir": "board/tool_board/SHT42"
+      },
+      "tool-lite": {
+        "name": "FLY-Tool-Lite",
+        "board_id": "tool-lite",
+        "mcu": "rp2040",
+        "platform": "RP2040",
+        "drive_count": 1,
+        "has_bed": false,
+        "heat_count": 1,
+        "temp_count": 1,
+        "fan_count": 2,
+        "stop_count": 4,
+        "has_probe": true,
+        "has_servo": true,
+        "pin_style": "gpio",
+        "connections": [
+          "CANBUS",
+          "RS232",
+          "USB"
+        ],
+        "image": "boards/board/tool_board/TOOL-LITE/TOOL-LITE.png",
+        "mapping_dir": "board/tool_board/TOOL-LITE"
+      },
       "ercf": {
         "name": "FLY-ERCF",
         "board_id": "ercf",
@@ -443,69 +726,6 @@
         ],
         "image": "boards/board/tool_board/MMU/MMU.png",
         "mapping_dir": "board/tool_board/MMU"
-      },
-      "sb2040-pro-v3": {
-        "name": "FLY-SB2040 Pro V3",
-        "board_id": "sb2040-pro-v3",
-        "mcu": "rp2040",
-        "platform": "RP2040",
-        "drive_count": 1,
-        "has_bed": false,
-        "heat_count": 1,
-        "temp_count": 1,
-        "fan_count": 3,
-        "stop_count": 3,
-        "has_probe": false,
-        "has_servo": false,
-        "pin_style": "gpio",
-        "connections": [
-          "CANBUS",
-          "RS232"
-        ],
-        "image": "boards/board/tool_board/SB2040PROV3/SB2040PROV3.png",
-        "mapping_dir": "board/tool_board/SB2040PROV3"
-      },
-      "sb2040-v3": {
-        "name": "FLY-SB2040 V3",
-        "board_id": "sb2040-v3",
-        "mcu": "rp2040",
-        "platform": "RP2040",
-        "drive_count": 1,
-        "has_bed": false,
-        "heat_count": 1,
-        "temp_count": 1,
-        "fan_count": 3,
-        "stop_count": 3,
-        "has_probe": false,
-        "has_servo": true,
-        "pin_style": "gpio",
-        "connections": [
-          "CANBUS",
-          "RS232"
-        ],
-        "image": "boards/board/tool_board/SB2040V3/SB2040V3.png",
-        "mapping_dir": "board/tool_board/SB2040V3"
-      },
-      "sht36_v3": {
-        "name": "FLY-SHT36 V3",
-        "board_id": "sht36_v3",
-        "mcu": "rp2040",
-        "platform": "RP2040",
-        "drive_count": 1,
-        "has_bed": false,
-        "heat_count": 1,
-        "temp_count": 1,
-        "fan_count": 3,
-        "stop_count": 3,
-        "has_probe": false,
-        "has_servo": true,
-        "pin_style": "gpio",
-        "connections": [
-          "CANBUS",
-          "RS232"
-        ],
-        "image": "boards/board/tool_board/SHT36V3/SHT36V3.png",
-        "mapping_dir": "board/tool_board/SHT36V3"
       }
     }
   }

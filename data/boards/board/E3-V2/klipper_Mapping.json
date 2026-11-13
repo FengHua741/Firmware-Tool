@@ -41,7 +41,6 @@
     },
     "heat0": "PC6",
     "heat1": "PC7",
-    "bed-heat": "PB0",
     "temp0": "PC4",
     "temp1": "PB1",
     "fan0": "PA0",
@@ -54,5 +53,6 @@
     "probe": "PC2",
     "servo": "PE6",
     "uart-tx": "PA9",
-    "uart-rx": "PA10"
+    "uart-rx": "PA10",
+    "BED_OUT": "PB0"
 }

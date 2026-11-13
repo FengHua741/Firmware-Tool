@@ -1,6 +1,9 @@
 // ==================== 固件编译与烧录页面 - 重构版 ====================
 
 let compileMcuDatabase = {};  // MCU 数据库
+let _compileMcuDbError = '';         // 最近一次加载错误
+let _compileMcuDbRetryCount = 0;     // 自动重试次数
+let _compileMcuDbRetryTimer = null;  // 重试定时器
 let currentCompileMcu = null; // 当前选中的 MCU
 let _usbSerialOptions = null; // 后端提供的 USB 序列号配置（USB_SERIAL_NUMBER_CHIPID / USB_SERIAL_NUMBER）
 let compiledFirmwarePath = null; // 编译成功的固件路径
@@ -133,18 +136,29 @@ async function refreshFlashCanIfaces() {
     }
 }
 
-// 加载 MCU 数据库
+// 加载 MCU 数据库（带超时；失败记录原因，供下拉框给出可恢复提示）
 async function loadCompileMcuDatabase() {
+    const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 20000) : null;
     try {
-        const response = await fetch('/api/klipper/mcu-database');
+        const response = await fetch('/api/klipper/mcu-database', controller ? { signal: controller.signal } : undefined);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-
-        if (data.success) {
-            compileMcuDatabase = data.database;
+        // 兼容两种返回体：{success, database} 与 {database}
+        const db = (data && data.database) ? data.database : null;
+        if (!db || Object.keys(db).length === 0) {
+            throw new Error('MCU 数据库为空');
         }
+        compileMcuDatabase = db;
+        _compileMcuDbError = '';
+        _compileMcuDbRetryCount = 0;
     } catch (error) {
+        _compileMcuDbError = (error && error.name === 'AbortError')
+            ? 'MCU 数据库加载超时'
+            : ((error && error.message) || String(error));
         console.error('加载 MCU 数据库失败:', error);
+    } finally {
+        if (timer) clearTimeout(timer);
     }
 }
 
@@ -379,6 +393,11 @@ async function onCompileModeChange() {
         document.getElementById('compileMcuDetails').style.display = 'none';
         // 平台列表加载完成后会自动选中默认平台，onCompileMcuPlatformChange
         // 内部已完成首个型号的联动与详细参数展开。
+        // 注意：初始化时若 mcu-database 因后端卡顿失败，库会是空的；
+        // 这里补一次加载，避免自定义模式下平台/型号下拉永远空白。
+        if (!compileMcuDatabase || Object.keys(compileMcuDatabase).length === 0) {
+            await loadCompileMcuDatabase();
+        }
         await loadCompileMcuPlatforms();
         return;
     }
@@ -393,7 +412,31 @@ async function onCompileModeChange() {
 // 加载 MCU 平台列表
 function loadCompileMcuPlatforms(autoDefault = true) {
     const select = document.getElementById('compileMcuPlatform');
-    const opts = Object.keys(compileMcuDatabase).map(platform => `<option value="${escapeHtml(platform)}">${escapeHtml(platform)}</option>`).join('');
+    const platforms = Object.keys(compileMcuDatabase || {});
+    if (platforms.length === 0) {
+        // 库没加载成功：给出明确提示并有限次自动重试，避免出现"空白下拉"假死。
+        select.innerHTML = '<option value="">-- MCU 数据库加载失败，正在重试… --</option>';
+        select.disabled = false;
+        if (!_compileMcuDbRetryTimer && _compileMcuDbRetryCount < 3) {
+            _compileMcuDbRetryCount++;
+            _compileMcuDbRetryTimer = setTimeout(async () => {
+                _compileMcuDbRetryTimer = null;
+                await loadCompileMcuDatabase();
+                loadCompileMcuPlatforms(autoDefault);
+            }, 1500);
+        } else if (_compileMcuDbRetryCount >= 3) {
+            select.innerHTML = `<option value="">-- MCU 数据库加载失败：${escapeHtml(_compileMcuDbError || '未知错误')}（点此重试）--</option>`;
+            select.onchange = async () => {
+                _compileMcuDbRetryCount = 0;
+                select.disabled = true;
+                await loadCompileMcuDatabase();
+                select.disabled = false;
+                loadCompileMcuPlatforms(autoDefault);
+            };
+        }
+        return Promise.resolve();
+    }
+    const opts = platforms.map(platform => `<option value="${escapeHtml(platform)}">${escapeHtml(platform)}</option>`).join('');
     select.innerHTML = '<option value="">-- 选择平台 --</option>' + opts;
     // 默认选中 STM32
     if (autoDefault && compileMcuDatabase['STM32']) {
@@ -2388,13 +2431,15 @@ async function refreshDeviceIds() {
 }
 
 async function onFlashCanIfaceChange() {
-    _deviceScanRequestId++;
-    const deviceSelect = document.getElementById('flashDeviceId');
-    if (deviceSelect) deviceSelect.innerHTML = '<option value="">-- 正在扫描 --</option>';
-    _lastDetectedCanDevicesByUuid = {};
-    _renderFlashDeviceCompare(null);
-    await refreshDeviceIds();
-    await refreshFlashPlan(false);
+    // 切换 CAN 接口不再自动重扫：保留当前设备列表与已选设备，
+    // 由用户点击 🔄 手动触发扫描，避免每次切换都清空列表并等待数秒。
+    const canErrDiv = document.getElementById('flashCanSearchError');
+    if (canErrDiv) {
+        canErrDiv.style.display = 'block';
+        canErrDiv.innerHTML = '<div style="margin-top:6px;font-size:12px;color:var(--warning-color);background:rgba(255,193,7,.12);padding:6px 10px;border-radius:4px;">CAN 接口已切换为 '
+            + escapeHtml(document.getElementById('flashCanIface')?.value || '') 
+            + '，点击 🔄 重新扫描设备</div>';
+    }
 }
 
 // 烧录模式变化处理

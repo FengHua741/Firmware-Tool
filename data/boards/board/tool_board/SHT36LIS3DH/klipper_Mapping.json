@@ -1,0 +1,16 @@
+{
+    "Drives0": {
+        "step_pin": "gpio24",
+        "dir_pin": "gpio23",
+        "enable_pin": "gpio25",
+        "uart_pin": "gpio1"
+    },
+    "heat0": "gpio8",
+    "temp0": "gpio26",
+    "fan0": "gpio14",
+    "fan1": "gpio15",
+    "stop0": "gpio21",
+    "probe": "gpio3",
+    "servo0": "gpio7",
+    "rgb0": "gpio6"
+}
